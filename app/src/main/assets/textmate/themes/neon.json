@@ -1,0 +1,77 @@
+{
+	"name": "Neon",
+	"settings": [
+		{
+			"settings": {
+				"foreground": "#E0E0E0",
+				"background": "#0D0D0D"
+			}
+		},
+		{
+			"scope": "comment",
+			"settings": {
+				"foreground": "#505050"
+			}
+		},
+		{
+			"scope": "string",
+			"settings": {
+				"foreground": "#39FF14"
+			}
+		},
+		{
+			"scope": "constant.numeric",
+			"settings": {
+				"foreground": "#FF10F0"
+			}
+		},
+		{
+			"scope": "constant.language",
+			"settings": {
+				"foreground": "#FF10F0"
+			}
+		},
+		{
+			"scope": "keyword",
+			"settings": {
+				"foreground": "#00F0FF"
+			}
+		},
+		{
+			"scope": "storage",
+			"settings": {
+				"foreground": "#00F0FF"
+			}
+		},
+		{
+			"scope": "entity.name.tag",
+			"settings": {
+				"foreground": "#00F0FF"
+			}
+		},
+		{
+			"scope": "entity.name.function",
+			"settings": {
+				"foreground": "#FFFF00"
+			}
+		},
+		{
+			"scope": "support.function",
+			"settings": {
+				"foreground": "#BC13FE"
+			}
+		},
+		{
+			"scope": "variable",
+			"settings": {
+				"foreground": "#E0E0E0"
+			}
+		},
+		{
+			"scope": "support.type",
+			"settings": {
+				"foreground": "#FF5F1F"
+			}
+		}
+	]
+}

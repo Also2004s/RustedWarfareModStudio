@@ -1,0 +1,45 @@
+{
+  "name": "autoTriggerOnEvent",
+  "functions": [
+    {
+      "key": "queueItemAdded",
+      "params": [
+        {
+          "key": "withActionTag",
+          "zh": "withActionTag",
+          "type": "actionTag"
+        }
+      ]
+    },
+    {
+      "key": "queueItemCancelled",
+      "params": [
+        {
+          "key": "withActionTag",
+          "zh": "withActionTag",
+          "type": "actionTag"
+        }
+      ]
+    },
+    {
+      "key": "tookDamage",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "newMessage",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "messageTag"
+        }
+      ]
+    }
+  ]
+}

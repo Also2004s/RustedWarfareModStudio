@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration file (sdk path, signing passwords, etc.)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Build outputs
+app/build/
+*.apk
+*.aab
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+build*.log
+*.log
+hs_err_pid*
+replay_pid*
+
+# Local JDK (build-only, too large for GitHub)
+tools/jdk/
+
+# IDE / tool caches
+.kotlin/
+.trae/
+.idea/
+*.iml
+
+# Temp files
+.tmp_*

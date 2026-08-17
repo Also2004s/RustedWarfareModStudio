@@ -1,0 +1,21 @@
+{
+  "data.sections.animation.onActions": "动画条件",
+  "data.sections.animation.onActionsQueuedUnitPlayAt": "触发动作队列单位播放位置",
+  "data.sections.animation.blendIn": "混合进入",
+  "data.sections.animation.blendOut": "混合退出",
+  "data.sections.animation.pingPong": "动画帧重放",
+  "data.sections.animation.KeyframeTimeScale": "关键帧时间缩放",
+  "data.sections.animation.arm#_[time]": "手臂关键帧",
+  "data.sections.animation.leg#_[time]": "腿部关键帧",
+  "data.sections.animation.body_[time]": "主体关键帧",
+  "data.sections.animation.effect_[time]": "效果关键帧",
+  "data.sections.animation.direction_units": "方向单位",
+  "data.sections.animation.direction_strideX": "方向步幅X",
+  "data.sections.animation.direction_strideY": "方向步幅Y",
+  "data.sections.animation.direction_starting": "方向起始",
+  "data.sections.animation.start": "起始",
+  "data.sections.animation.end": "结束",
+  "data.sections.animation.scale_start": "起始缩放",
+  "data.sections.animation.scale_end": "结束缩放",
+  "data.sections.animation.speed": "速度"
+}

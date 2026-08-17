@@ -1,0 +1,21 @@
+{
+  "data.sections.ai.useAsBuilder": "用作建造者",
+  "data.sections.ai.useAsTransport": "用作运输",
+  "data.sections.ai.useAsHarvester": "用作采集器",
+  "data.sections.ai.disableUse": "禁用使用",
+  "data.sections.ai.ai_upgradePriority": "AI升级优先级",
+  "data.sections.ai.maxGlobal": "全局最大数量",
+  "data.sections.ai.maxEachBase": "每个基地最大数量",
+  "data.sections.ai.buildPriority": "建造优先级",
+  "data.sections.ai.noneInBaseExtraPriority": "基地中不存在额外优先级",
+  "data.sections.ai.noneGlobalExtraPriority": "全局不存在额外优先级",
+  "data.sections.ai.recommendedInEachBaseNum": "每个基地推荐数量",
+  "data.sections.ai.recommendedInEachBasePriorityIfUnmet": "未满足时每个基地推荐优先级",
+  "data.sections.ai.upgradedFrom": "升级自",
+  "data.sections.ai.notPassivelyTargetedByOtherUnits": "不被其他单位被动瞄准",
+  "data.sections.ai.lowPriorityTargetForOtherUnits": "对其他单位来说是低优先级目标",
+  "data.sections.ai.whenUsingAsHarvester_recommendedInEachBase": "用作采集器时每个基地推荐数量",
+  "data.sections.ai.whenUsingAsHarvester_recommendedGlobal": "用作采集器时全局推荐数量",
+  "data.sections.ai.whenUsingAsHarvester_includeOtherHarvesterCounts": "用作采集器时包含其他采集器计数",
+  "data.sections.ai.onlyUseAsHarvester_ifBaseHasUnitTagged": "仅在基地有带标签单位时用作采集器"
+}

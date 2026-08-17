@@ -1,0 +1,21 @@
+{
+  "data.sections.movement.movementType": "移动类型",
+  "data.sections.movement.slowDeathFall": "缓慢死亡坠落",
+  "data.sections.movement.moveSpeed": "移动速度",
+  "data.sections.movement.moveAccelerationSpeed": "移动加速度",
+  "data.sections.movement.moveDecelerationSpeed": "移动减速度",
+  "data.sections.movement.reverseSpeedPercentage": "倒车速度百分比",
+  "data.sections.movement.landOnGround": "在地面降落",
+  "data.sections.movement.targetHeight": "目标高度",
+  "data.sections.movement.targetHeightDrift": "目标高度漂移",
+  "data.sections.movement.startingHeightOffset": "起始高度偏移",
+  "data.sections.movement.heightChangeRate": "高度变化率",
+  "data.sections.movement.fallingAcceleration": "坠落加速度",
+  "data.sections.movement.fallingAccelerationDead": "死亡坠落加速度",
+  "data.sections.movement.maxTurnSpeed": "最大转向速度",
+  "data.sections.movement.turnAcceleration": "转向加速度",
+  "data.sections.movement.moveSlidingMode": "移动滑行模式",
+  "data.sections.movement.moveIgnoringBody": "移动时忽略主体",
+  "data.sections.movement.moveSlidingDir": "移动滑行方向",
+  "data.sections.movement.joinsGroupFormations": "加入编队"
+}

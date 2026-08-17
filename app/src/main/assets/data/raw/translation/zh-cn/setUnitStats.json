@@ -1,0 +1,20 @@
+{
+  "data.value.setunitstats.maxhp": "最大生命值",
+  "data.value.setunitstats.hp": "生命值",
+  "data.value.setunitstats.maxshield": "最大护盾",
+  "data.value.setunitstats.shield": "护盾",
+  "data.value.setunitstats.shieldregen": "护盾再生",
+  "data.value.setunitstats.maxenergy": "最大能量",
+  "data.value.setunitstats.energy": "能量",
+  "data.value.setunitstats.armour": "护甲",
+  "data.value.setunitstats.mass": "质量",
+  "data.value.setunitstats.shootdelaymultiplier": "射击延迟倍数",
+  "data.value.setunitstats.shootdamagemultiplier": "射击伤害倍数",
+  "data.value.setunitstats.movespeed": "移动速度",
+  "data.value.setunitstats.maxturnspeed": "最大转向速度",
+  "data.value.setunitstats.maxattackrange": "最大攻击范围",
+  "data.value.setunitstats.selfregenrate": "自我再生率",
+  "data.value.setunitstats.heighttarget": "高度目标",
+  "data.value.setunitstats.nanofactoryspeed": "纳米工厂速度",
+  "data.value.setunitstats.fogofwarsightrange": "战争迷雾视野范围"
+}

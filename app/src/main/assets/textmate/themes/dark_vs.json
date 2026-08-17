@@ -1,0 +1,269 @@
+{
+	"name": "Dark",
+	"settings": [
+		{
+			"settings": {
+				"foreground": "#D4D4D4",
+				"background": "#1E1E1E"
+			}
+		},
+		{
+			"scope": "comment.line.ini, comment.block.ini, punctuation.definition.comment.ini",
+			"settings": {
+				"foreground": "#6A737D"
+			}
+		},
+		{
+			"scope": "entity.name.section.ini, entity.name.section.prefix.ini",
+			"settings": {
+				"foreground": "#fd80ff"
+			}
+		},
+		{
+			"scope": "entity.name.section.suffix.ini",
+			"settings": {
+				"foreground": "#ff5551"
+			}
+		},
+		{
+			"scope": "punctuation.definition.section.begin.ini, punctuation.definition.section.end.ini",
+			"settings": {
+				"foreground": "#871095"
+			}
+		},
+		{
+			"scope": "keyword.key.ini",
+			"settings": {
+				"foreground": "#6cd161"
+			}
+		},
+		{
+			"scope": "keyword.control.shortcut.ini, keyword.control.shortcut.key.ini",
+			"settings": {
+				"foreground": "#f2d38d"
+			}
+		},
+		{
+			"scope": "variable.other.shortcut.ini",
+			"settings": {
+				"foreground": "#99bbd1"
+			}
+		},
+		{
+			"scope": "punctuation.separator.shortcut.ini",
+			"settings": {
+				"foreground": "#99bbd1"
+			}
+		},
+		{
+			"scope": "storage.type.shortcut.ini",
+			"settings": {
+				"foreground": "#b4919b"
+			}
+		},
+		{
+			"scope": "string.unquoted.value.ini",
+			"settings": {
+				"foreground": "#b7939d"
+			}
+		},
+		{
+			"scope": "punctuation.separator.ini",
+			"settings": {
+				"foreground": "#b7939d"
+			}
+		},
+		{
+			"scope": "constant.language.boolean.ini",
+			"settings": {
+				"foreground": "#FFC83F"
+			}
+		},
+		{
+			"scope": "constant.language.team.ini, constant.language.waypoint.ini, constant.language.event.ini",
+			"settings": {
+				"foreground": "#FFC83F"
+			}
+		},
+		{
+			"scope": "constant.language.movement.ini, constant.language.uppercase.ini, constant.language.layer.ini, constant.language.animation.ini",
+			"settings": {
+				"foreground": "#B9DEF7"
+			}
+		},
+		{
+			"scope": "constant.other.color.ini",
+			"settings": {
+				"foreground": "#FDA6C0"
+			}
+		},
+		{
+			"scope": "constant.numeric.ini",
+			"settings": {
+				"foreground": "#7ac3fa"
+			}
+		},
+		{
+			"scope": "punctuation.bracket.square.ini",
+			"settings": {
+				"foreground": "#F1D7FF"
+			}
+		},
+		{
+			"scope": "punctuation.bracket.round.ini",
+			"settings": {
+				"foreground": "#AD99B7"
+			}
+		},
+		{
+			"scope": "punctuation.bracket.curly.ini",
+			"settings": {
+				"foreground": "#F1D7FF"
+			}
+		},
+		{
+			"scope": "punctuation.separator.comma.ini",
+			"settings": {
+				"foreground": "#CDEEE3"
+			}
+		},
+		{
+			"scope": "keyword.operator.logical.ini",
+			"settings": {
+				"foreground": "#fff236"
+			}
+		},
+		{
+			"scope": "keyword.operator.comparison.ini, keyword.operator.assignment.ini, keyword.operator.arithmetic.ini",
+			"settings": {
+				"foreground": "#deae12"
+			}
+		},
+		{
+			"scope": "punctuation.accessor.ini",
+			"settings": {
+				"foreground": "#deae12"
+			}
+		},
+		{
+			"scope": "punctuation.separator.forward-slash.ini",
+			"settings": {
+				"foreground": "#b7939d"
+			}
+		},
+		{
+			"scope": "string.quoted.single.ini, string.quoted.double.ini",
+			"settings": {
+				"foreground": "#e5d76e"
+			}
+		},
+		{
+			"scope": "string.multiline.ini",
+			"settings": {
+				"foreground": "#e5d76e"
+			}
+		},
+		{
+			"scope": "meta.interpolation.expression.ini",
+			"settings": {
+				"foreground": "#4EC9B0"
+			}
+		},
+		{
+			"scope": "punctuation.definition.string.begin.ini, punctuation.definition.string.end.ini",
+			"settings": {
+				"foreground": "#e5d76e"
+			}
+		},
+		{
+			"scope": "variable.other.reference.ini, variable.other.reference.target.ini",
+			"settings": {
+				"foreground": "#f2d38d"
+			}
+		},
+		{
+			"scope": "support.variable.property.ini",
+			"settings": {
+				"foreground": "#b7939d"
+			}
+		},
+		{
+			"scope": "support.constant.sound.ini, support.constant.effect.ini, support.constant.spawn.ini",
+			"settings": {
+				"foreground": "#b7939d"
+			}
+		},
+		{
+			"scope": "support.function.ini",
+			"settings": {
+				"foreground": "#DCDCAA"
+			}
+		},
+		{
+			"scope": "variable.parameter.ini",
+			"settings": {
+				"foreground": "#58908a"
+			}
+		},
+		{
+			"scope": "keyword.control.memory.ini, keyword.control.shortcut.ini",
+			"settings": {
+				"foreground": "#f2d38d"
+			}
+		},
+		{
+			"scope": "variable.other.declaration.ini",
+			"settings": {
+				"foreground": "#99bbd1"
+			}
+		},
+		{
+			"scope": "storage.type.ini",
+			"settings": {
+				"foreground": "#b4919b"
+			}
+		},
+		{
+			"scope": "constant.language.path.ini",
+			"settings": {
+				"foreground": "#B9DEF7"
+			}
+		},
+		{
+			"scope": "keyword.control.ini",
+			"settings": {
+				"foreground": "#C586C0"
+			}
+		},
+		{
+			"scope": "storage.modifier.ini",
+			"settings": {
+				"foreground": "#569CD6"
+			}
+		},
+		{
+			"scope": "keyword.other.ini",
+			"settings": {
+				"foreground": "#b4919b"
+			}
+		},
+		{
+			"scope": "constant.language.ini",
+			"settings": {
+				"foreground": "#FFC83F"
+			}
+		},
+		{
+			"scope": "variable.other.ini",
+			"settings": {
+				"foreground": "#9CDCFE"
+			}
+		},
+		{
+			"scope": "support.type.property-value.ini",
+			"settings": {
+				"foreground": "#4EC9B0"
+			}
+		}
+	]
+}

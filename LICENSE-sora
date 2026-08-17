@@ -1,0 +1,10 @@
+sora-editor
+Copyright (C) 2020-2024 Rosemoe (2073412493@qq.com)
+Project home: https://github.com/Rosemoe/sora-editor
+License: GNU Lesser General Public License v2.1 (LGPL-2.1)
+Full license text: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+本仓库内的 SmartWordwrapLayout.java 派生自 sora-editor 的
+io.github.rosemoe.sora.widget.layout.WordwrapLayout.java（LGPL-2.1），
+保留了原版权头并在源码中注明修改（智能逻辑断点，仅影响显示）。
+SmartWrapCodeEditor.java 声明于库包内，仅用于安装上述自定义布局，未修改库源码。

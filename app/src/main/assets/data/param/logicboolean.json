@@ -1,0 +1,1093 @@
+{
+  "name": "logicboolean",
+  "functions": [
+    {
+      "key": "numberOfUnitsInTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInEnemyTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInAllyTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInAllyNotOwnTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInNeutralTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInAggressiveTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfUnitsInAllTeams",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "hasUnitInTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "noUnitInTeam",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "incompleteBuildings",
+          "zh": "包含未完成的",
+          "type": "bool"
+        },
+        {
+          "key": "factoryQueue",
+          "zh": "包含队列中的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "ammoIncludingQueued",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "energy",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "energyIncludingQueued",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "hp",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "height",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "ammo",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "shield",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "kills",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "queueSize",
+      "params": [
+        {
+          "key": "withActionTag",
+          "zh": "withActionTag",
+          "type": "actionTag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "transportingCount",
+      "params": [
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "numberOfAttachedUnits",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "hasParent",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "numberOfQueuedWaypoints",
+      "params": [
+        {
+          "key": "type",
+          "zh": "type",
+          "type": "enum",
+          "values": [
+            "move",
+            "attackMove",
+            "guard",
+            "loadInto",
+            "loadUp",
+            "attack",
+            "reclaim",
+            "repair",
+            "touchTarget",
+            "build",
+            "follow",
+            "setPassiveTarget"
+          ]
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
+        },
+        {
+          "key": "empty",
+          "zh": "空的",
+          "type": "bool"
+        },
+        {
+          "key": "full",
+          "zh": "满",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "key": "hasTakenDamage",
+      "params": [
+        {
+          "key": "withinSeconds",
+          "zh": "几秒内",
+          "type": "number"
+        },
+        {
+          "key": "laterThanSeconds",
+          "zh": "几秒后",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "timeAlive",
+      "params": [
+        {
+          "key": "withinSeconds",
+          "zh": "几秒内",
+          "type": "number"
+        },
+        {
+          "key": "laterThanSeconds",
+          "zh": "几秒后",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "lastConverted",
+      "params": [
+        {
+          "key": "withinSeconds",
+          "zh": "几秒内",
+          "type": "number"
+        },
+        {
+          "key": "laterThanSeconds",
+          "zh": "几秒后",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "customTimer",
+      "params": [
+        {
+          "key": "withinSeconds",
+          "zh": "几秒内",
+          "type": "number"
+        },
+        {
+          "key": "laterThanSeconds",
+          "zh": "几秒后",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "hasFlag",
+      "params": [
+        {
+          "key": "id",
+          "zh": "id",
+          "type": "number",
+          "expression": true
+        }
+      ]
+    },
+    {
+      "key": "tags",
+      "params": [
+        {
+          "key": "includes",
+          "zh": "有标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "globalTeamTags",
+      "params": [
+        {
+          "key": "includes",
+          "zh": "有标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "transportingUnitWithTags",
+      "params": [
+        {
+          "key": "includes",
+          "zh": "有标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "isOverPassableTile",
+      "params": [
+        {
+          "key": "type",
+          "zh": "type",
+          "type": "enum",
+          "values": [
+            "NONE",
+            "LAND",
+            "BUILDING",
+            "AIR",
+            "WATER",
+            "HOVER",
+            "OVER_CLIFF",
+            "OVER_CLIFF_WATER"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "hasActiveWaypoint",
+      "params": [
+        {
+          "key": "type",
+          "zh": "type",
+          "type": "enum",
+          "values": [
+            "move",
+            "attackMove",
+            "guard",
+            "loadInto",
+            "loadUp",
+            "attack",
+            "reclaim",
+            "repair",
+            "touchTarget",
+            "build",
+            "follow",
+            "setPassiveTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "attachment",
+      "params": [
+        {
+          "key": "slot",
+          "zh": "slot",
+          "type": "attachmentSlot"
+        },
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        }
+      ]
+    },
+    {
+      "key": "transporting",
+      "params": [
+        {
+          "key": "slot",
+          "zh": "slot",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "nearestUnit",
+      "params": [
+        {
+          "key": "withinRange",
+          "zh": "范围内",
+          "type": "number"
+        },
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "relation",
+          "zh": "关系",
+          "type": "relation",
+          "values": [
+            "own",
+            "notOwn",
+            "neutral",
+            "allyNotOwn",
+            "ally",
+            "enemy",
+            "any"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "globalSearchForFirstUnit",
+      "params": [
+        {
+          "key": "withTag",
+          "zh": "需标签",
+          "type": "tag"
+        },
+        {
+          "key": "relation",
+          "zh": "关系",
+          "type": "relation",
+          "values": [
+            "own",
+            "notOwn",
+            "neutral",
+            "allyNotOwn",
+            "ally",
+            "enemy",
+            "any"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "getOffsetRelative",
+      "params": [
+        {
+          "key": "x",
+          "zh": "x",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "y",
+          "zh": "y",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "height",
+          "zh": "height",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "dirOffset",
+          "zh": "角度偏移",
+          "type": "number",
+          "expression": true
+        }
+      ]
+    },
+    {
+      "key": "getOffsetAbsolute",
+      "params": [
+        {
+          "key": "x",
+          "zh": "x",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "y",
+          "zh": "y",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "height",
+          "zh": "height",
+          "type": "number",
+          "expression": true
+        }
+      ]
+    },
+    {
+      "key": "createMarker",
+      "params": [
+        {
+          "key": "x",
+          "zh": "x",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "y",
+          "zh": "y",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "height",
+          "zh": "height",
+          "type": "number",
+          "expression": true
+        },
+        {
+          "key": "teamId",
+          "zh": "teamId",
+          "type": "number"
+        },
+        {
+          "key": "dir",
+          "zh": "dir",
+          "type": "number",
+          "expression": true
+        }
+      ]
+    },
+    {
+      "key": "readUnitMemory",
+      "params": [
+        {
+          "key": "name",
+          "zh": "name",
+          "type": "memoryName"
+        },
+        {
+          "key": "type",
+          "zh": "type",
+          "type": "type",
+          "values": [
+            "int",
+            "float",
+            "string",
+            "bool",
+            "boolean",
+            "number",
+            "text",
+            "logic",
+            "unit",
+            "boolean[]",
+            "float[]",
+            "number[]",
+            "unit[]"
+          ]
+        },
+        {
+          "key": "index",
+          "zh": "index",
+          "type": "number"
+        },
+        {
+          "key": "default",
+          "zh": "default",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "key": "eventData",
+      "params": [
+        {
+          "key": "name",
+          "zh": "name",
+          "type": "memoryName"
+        },
+        {
+          "key": "type",
+          "zh": "type",
+          "type": "type",
+          "values": [
+            "int",
+            "float",
+            "string",
+            "bool",
+            "boolean",
+            "number",
+            "text",
+            "logic",
+            "unit",
+            "boolean[]",
+            "float[]",
+            "number[]",
+            "unit[]"
+          ]
+        },
+        {
+          "key": "default",
+          "zh": "default",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "key": "isResourceLargerThan",
+      "params": [
+        {
+          "key": "source",
+          "zh": "source",
+          "type": "resource"
+        },
+        {
+          "key": "compareTarget",
+          "zh": "compareTarget",
+          "type": "resource"
+        },
+        {
+          "key": "byMoreThan",
+          "zh": "byMoreThan",
+          "type": "number"
+        },
+        {
+          "key": "multiplyTargetBy",
+          "zh": "multiplyTargetBy",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "key": "contains",
+      "params": [
+        {
+          "key": "query",
+          "zh": "query",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}

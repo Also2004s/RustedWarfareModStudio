@@ -1,0 +1,7 @@
+{
+  "data.value.onnewmapspawn.emptyresourcepools_asneutral": "空资源池（中立）",
+  "data.value.onnewmapspawn.emptyoroccupiedresourcepools_asneutral": "空或占用资源池（中立）",
+  "data.value.onnewmapspawn.mapcenter_asneutral": "地图中心（中立）",
+  "data.value.onnewmapspawn.mapcenter_eachactiveteam": "地图中心（每个活跃队伍）",
+  "data.value.onnewmapspawn.spawnpoint_eachactiveteam": "生成点（每个活跃队伍）"
+}

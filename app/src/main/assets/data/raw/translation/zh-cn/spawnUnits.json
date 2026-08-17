@@ -1,0 +1,23 @@
+{
+  "data.value.spawnUnits.neutralTeam": "中立队伍",
+  "data.value.spawnUnits.setToTeamOfLastAttacker": "设置为最后攻击者的队伍",
+  "data.value.spawnUnits.spawnChance": "生成几率",
+  "data.value.spawnUnits.spawnSource": "生成源",
+  "data.value.spawnUnits.maxSpawnLimit": "最大生成限制",
+  "data.value.spawnUnits.gridAlign": "网格对齐",
+  "data.value.spawnUnits.skipIfOverlapping": "跳过重叠",
+  "data.value.spawnUnits.offsetX": "X偏移",
+  "data.value.spawnUnits.offsetY": "Y偏移",
+  "data.value.spawnUnits.offsetDir": "方向偏移",
+  "data.value.spawnUnits.offsetHeight": "高度偏移",
+  "data.value.spawnUnits.offsetRandomX": "随机X偏移",
+  "data.value.spawnUnits.offsetRandomY": "随机Y偏移",
+  "data.value.spawnUnits.offsetRandomDir": "随机方向偏移",
+  "data.value.spawnUnits.addResources": "添加资源",
+  "data.value.spawnUnits.transportedUnitsToTransfer": "转移的运输单位",
+  "data.value.spawnUnits.copyWaypointsFrom": "从复制路径点",
+  "data.value.spawnUnits.alwayStartDirAtZero": "始终从零方向开始",
+  "data.value.spawnUnits.damagingBorder": "伤害边界",
+  "data.value.spawnUnits.zoneMarker": "区域标记",
+  "data.value.spawnUnits.techLevel": "科技等级"
+}

@@ -1,0 +1,440 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "scopeName": "source.ini",
+  "patterns": [
+    {
+      "comment": "Line comments - # or ;",
+      "match": "(#|;).*$",
+      "name": "comment.line.ini"
+    },
+    {
+      "comment": "Section headers with underscore - [section_name]",
+      "match": "(\\[)(.+?)(_+.+?)(\\])",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.section.begin.ini"
+        },
+        "2": {
+          "name": "entity.name.section.prefix.ini"
+        },
+        "3": {
+          "name": "entity.name.section.suffix.ini"
+        },
+        "4": {
+          "name": "punctuation.definition.section.end.ini"
+        }
+      }
+    },
+    {
+      "comment": "Section headers - [section]",
+      "match": "(\\[)(.+?)(\\])",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.section.begin.ini"
+        },
+        "2": {
+          "name": "entity.name.section.ini"
+        },
+        "3": {
+          "name": "punctuation.definition.section.end.ini"
+        }
+      }
+    },
+    {
+      "comment": "@memory declarations with optional array brackets - matching mtsx style",
+      "match": "^\\s*(@memory)\\s+([^\\s:]+)\\s*(:)\\s*([^\\s\\[]+)(\\[\\]?)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.shortcut.ini"
+        },
+        "2": {
+          "name": "variable.other.shortcut.ini"
+        },
+        "3": {
+          "name": "punctuation.separator.shortcut.ini"
+        },
+        "4": {
+          "name": "storage.type.shortcut.ini"
+        },
+        "5": {
+          "name": "punctuation.bracket.square.ini"
+        }
+      }
+    },
+    {
+      "comment": "@memory shorthand (@xxx var)",
+      "match": "^\\s*(@\\w+)\\s+([^\\s]+)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.shortcut.ini"
+        },
+        "2": {
+          "name": "variable.other.shortcut.ini"
+        }
+      }
+    },
+    {
+      "comment": "Key-value pairs - 键、冒号和值",
+      "begin": "^[ \\t]*([^:=#\\[\\n]+)[ \\t]*(:)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.key.ini"
+        },
+        "2": {
+          "name": "punctuation.separator.ini"
+        }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "comment": "Parentheses (symbol color) - 小括号 - 最高优先级",
+          "match": "[\\(\\)]",
+          "name": "punctuation.bracket.round.ini"
+        },
+        {
+          "comment": "Braces (symbol2 color) - 大括号",
+          "match": "[{\\}]",
+          "name": "punctuation.bracket.curly.ini"
+        },
+        {
+          "comment": "Brackets (symbol2 color) - 中括号",
+          "match": "[\\[\\]]",
+          "name": "punctuation.bracket.square.ini"
+        },
+        {
+          "comment": "Hex colors (hex_color color) - 优先匹配，避免#被当作运算符",
+          "match": "#([A-Fa-f0-9]{8}|[A-Fa-f0-9]{6})",
+          "name": "constant.other.color.ini"
+        },
+        {
+          "comment": "Two consecutive double quotes - 匹配相连的两个双引号并忽略（不作为字符串处理）",
+          "match": "\"\"",
+          "name": "punctuation.ignored.ini"
+        },
+        {
+          "comment": "Consecutive single quotes - 匹配相连的单引号并忽略（不作为字符串处理）",
+          "match": "'{2,}",
+          "name": "punctuation.ignored.ini"
+        },
+        {
+          "comment": "Double quoted strings (quote color) - 只匹配单行内的双引号字符串",
+          "match": "\"[^\"\\n]*\"",
+          "name": "string.quoted.double.ini"
+        },
+        {
+          "comment": "Single quoted strings (quote color) - 只匹配单行内的单引号字符串",
+          "match": "'[^'\\n]*'",
+          "name": "string.quoted.single.ini"
+        },
+        {
+          "comment": "Comma (symbol3 color) - 逗号",
+          "match": "[,]",
+          "name": "punctuation.separator.comma.ini"
+        },
+        {
+          "comment": "Comparison operators (logical_keywords2 color) - 比较运算符",
+          "match": "(<|>|<=|>=|==|!=)",
+          "name": "keyword.operator.comparison.ini"
+        },
+        {
+          "comment": "Assignment operator (logical_keywords2 color) - 赋值运算符",
+          "match": "(?<![<>=!])=(?!=)",
+          "name": "keyword.operator.assignment.ini"
+        },
+        {
+          "comment": "Arithmetic operators (logical_keywords2 color) - 算术运算符",
+          "match": "([+\\-*/%$]|\\*\\*)",
+          "name": "keyword.operator.arithmetic.ini"
+        },
+        {
+          "comment": "Reference prefixes (reference color) - 引用前缀，包含self.resource和自身资源",
+          "match": "\\b(eventSource|attachment|transporting|attacking|lastDamagedBy|parent|customTarget1|customTarget2|nearestUnit|globalSearchForFirstUnit|activeWaypointTarget|事件来源|附件|运输|攻击中|最后伤害源|父单位|自定义目标1|自定义目标2|接近单位|活动路径点目标|内存|memory|core|decal|graphics|attack|movement|ai|self|section|teamId|isInMap|thisActionTarget|currentActionTarget|float|number|boolean|Boolean|unit|string|game|speed|customTimer|isMoving|lastConverted|timeAlive|resource|self.resource|资源|自身资源)\\.",
+          "name": "variable.other.reference.ini"
+        },
+        {
+          "comment": "Boolean values (boolean color)",
+          "match": "\\b(true|false|真|假)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Special values (boolean color)",
+          "match": "\\b(无|满|空的)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Team values (boolean color)",
+          "match": "\\b(own|notOwn|neutral|allyNotOwn|ally|enemy|any|己方|敌方|盟友|中立|所有|除自己外盟友)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Waypoint types (boolean color)",
+          "match": "\\b(move|attackMove|attack|touchTarget|build|follow|建立|移动|攻击|移动攻击|靠近目标|跟随|创建)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Movement types (uppercase_keywords color)",
+          "match": "\\b(AIR|HOVER|LAND|WATER|OVER_CLIFF|OVER_CLIFF_WATER|空中|两栖|陆地|水面|跨悬崖|跨悬崖和水面)\\b",
+          "name": "constant.language.uppercase.ini"
+        },
+        {
+          "comment": "Frame rate (boolean color)",
+          "match": "\\b(every8Frames|every4Frames|everyFrames|每8帧|每4帧|每帧)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Numbers with optional units (numbers color)",
+          "match": "\\b(\\d+\\.?\\d*)(s|ms)?\\b",
+          "name": "constant.numeric.ini"
+        },
+        {
+          "comment": "Built-in properties (boolean color) - 翻译库中的内置属性",
+          "match": "\\b(maxHp|hp|selfRegenRate|maxShield|shield|shieldRegen|energy|armor|armour|mass|nanoRange|fogOfWarSightRange|shootDelayMultiplier|shootDamageMultiplier|moveSpeed|maxTurnSpeed|maxAttackRange|nanoFactorySpeed|生命值|生命恢复速度|护盾值|护盾|护盾恢复速度|能量|装甲|质量|维修或建造范围|视野|开火间隔乘数|开火伤害乘数|移动速度|最大转弯速度)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Function calls (boolean color)",
+          "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移)\\b",
+          "name": "constant.language.boolean.ini"
+        },
+        {
+          "comment": "Reference targets (reference color)",
+          "match": "\\b(thisActionTarget|eventSource|attachment|transporting|attacking|lastDamagedBy|parent|activeWaypointTarget|customTarget1|customTarget2|nearestUnit|nullUnit|self|当前动作目标|事件来源|附件|运输|攻击中|最后伤害源|父单位|活动路径点目标|自定义目标1|自定义目标2|接近单位|空单位)\\b",
+          "name": "variable.other.reference.target.ini"
+        },
+        {
+          "comment": "Type keywords (type color) - 类型关键字",
+          "match": "\\b(float|number|boolean|Boolean|string|unit)\\b",
+          "name": "storage.type.ini"
+        },
+        {
+          "comment": "Logical keywords (logical_keywords color)",
+          "match": "\\b(if|and|not|or)\\b",
+          "name": "keyword.operator.logical.ini"
+        },
+        {
+          "comment": "Parameter keywords with equals (args color)",
+          "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|指定时间内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
+          "name": "variable.parameter.ini"
+        },
+        {
+          "comment": "Chinese functions - 自身检测",
+          "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|有全局标签)\\b",
+          "name": "string.unquoted.value.ini"
+        },
+        {
+          "comment": "Chinese functions - 单位数量",
+          "match": "\\b(队伍中此单位数量|敌人有此单位数量|全图中此单位数量)\\b",
+          "name": "string.unquoted.value.ini"
+        },
+        {
+          "comment": "Chinese variables - 自身资源 (reference color)",
+          "match": "\\b(自身资源)\\b",
+          "name": "variable.other.reference.ini"
+        },
+        {
+          "comment": "Chinese variables - 自身属性 (不包括自身资源/存活时间/自身自定义计时器)",
+          "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数)\\b",
+          "name": "string.unquoted.value.ini"
+        },
+        {
+          "comment": "Chinese time functions - 存活时间, 自身自定义计时器 (reference color)",
+          "match": "\\b(存活时间|自身自定义计时器)(\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "variable.other.reference.ini"
+            },
+            "2": {
+              "name": "punctuation.bracket.round.ini"
+            }
+          }
+        },
+        {
+          "comment": "Chinese parameters",
+          "match": "\\b(有标签|需标签|范围内|超过|少于)\\b",
+          "name": "string.unquoted.value.ini"
+        },
+        {
+          "comment": "Chained method calls like .获取相对偏移",
+          "match": "\\.(获取相对偏移|获取绝对偏移|获取为标记|之间方向|距离|距离方差|间距)(\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "constant.language.boolean.ini"
+            },
+            "2": {
+              "name": "punctuation.bracket.round.ini"
+            }
+          }
+        },
+        {
+          "comment": "Special reference keywords - 空单位 (nullUnit)",
+          "match": "\\b(空单位|nullUnit)\\b",
+          "name": "variable.other.reference.target.ini"
+        },
+        {
+          "comment": "Dot accessor - 点访问符",
+          "match": "\\.",
+          "name": "punctuation.accessor.ini"
+        },
+        {
+          "comment": "Default value - 其他未匹配的值（只匹配单词字符）",
+          "match": "\\w+",
+          "name": "string.unquoted.value.ini"
+        }
+      ]
+    },
+    {
+      "comment": "Boolean values (boolean color) - 翻译库: true=真, false=假",
+      "match": "\\b(true|false|真|假)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Special values (boolean color) - 翻译库: NONE=无, full=满, empty=空的",
+      "match": "\\b(无|满|空的)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Team values (boolean color) - 翻译库: own=己方, neutral=中立, ally=盟友, enemy=敌方, any=所有, allyNotOwn=除自己外盟友",
+      "match": "\\b(own|notOwn|neutral|allyNotOwn|ally|enemy|any|己方|敌方|盟友|中立|所有|除自己外盟友)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Waypoint types (boolean color) - 翻译库: move=移动, build=建立, attack=攻击, attackMove=移动攻击, touchTarget=靠近目标, follow=跟随, created=创建, guard=保护",
+      "match": "\\b(move|attackMove|attack|touchTarget|build|follow|guard|建立|移动|攻击|移动攻击|靠近目标|跟随|创建|保护)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Movement types (uppercase_keywords color) - 翻译库: AIR=空中, HOVER=两栖, LAND=陆地, WATER=水面, OVER_CLIFF=跨悬崖, OVER_CLIFF_WATER=跨悬崖和水面",
+      "match": "\\b(AIR|HOVER|LAND|WATER|OVER_CLIFF|OVER_CLIFF_WATER|空中|两栖|陆地|水面|跨悬崖|跨悬崖和水面)\\b",
+      "name": "constant.language.uppercase.ini"
+    },
+    {
+      "comment": "Frame rate (boolean color) - 翻译库: every8Frames=每8帧, every4Frames=每4帧, everyFrames=每帧",
+      "match": "\\b(every8Frames|every4Frames|everyFrames|每8帧|每4帧|每帧)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Hex colors (hex_color color)",
+      "match": "#([A-Fa-f0-9]{8}|[A-Fa-f0-9]{6})",
+      "name": "constant.other.color.ini"
+    },
+    {
+      "comment": "Numbers with optional units (numbers color)",
+      "match": "\\b(\\d+\\.?\\d*)(s|ms)?\\b",
+      "name": "constant.numeric.ini"
+    },
+    {
+      "comment": "Type keywords (type color) - 类型关键字",
+      "match": "\\b(float|number|boolean|Boolean|string|unit)\\b",
+      "name": "storage.type.ini"
+    },
+    {
+      "comment": "Logical keywords (logical_keywords color)",
+      "match": "\\b(if|and|not|or)\\b",
+      "name": "keyword.operator.logical.ini"
+    },
+    {
+      "comment": "Comparison operators (logical_keywords2 color)",
+      "match": "(<|>|<=|>=|==|!=|=)",
+      "name": "keyword.operator.comparison.ini"
+    },
+    {
+      "comment": "Arithmetic operators (logical_keywords2 color) - include $ for variable interpolation",
+      "match": "([+\\-*/%$]|\\*\\*)",
+      "name": "keyword.operator.arithmetic.ini"
+    },
+    {
+      "comment": "Special reference keywords - 空单位 (nullUnit)",
+      "match": "\\b(空单位|nullUnit)\\b",
+      "name": "variable.other.reference.target.ini"
+    },
+    {
+      "comment": "Brackets (symbol2 color)",
+      "match": "([\\[\\]])",
+      "name": "punctuation.bracket.square.ini"
+    },
+    {
+      "comment": "Parentheses (symbol color)",
+      "match": "([\\(\\)])",
+      "name": "punctuation.bracket.round.ini"
+    },
+    {
+      "comment": "Braces (symbol2 color)",
+      "match": "([{\\}])",
+      "name": "punctuation.bracket.curly.ini"
+    },
+    {
+      "comment": "Two consecutive double quotes - 匹配相连的两个双引号并忽略",
+      "match": "\"\"",
+      "name": "punctuation.ignored.ini"
+    },
+    {
+      "comment": "Consecutive single quotes - 匹配相连的单引号并忽略",
+      "match": "'{2,}",
+      "name": "punctuation.ignored.ini"
+    },
+    {
+      "comment": "Single quoted strings (quote color) - 只匹配引号及其内部内容",
+      "match": "'[^']*'",
+      "name": "string.quoted.single.ini"
+    },
+    {
+      "comment": "Double quoted strings (quote color) - 只匹配引号及其内部内容",
+      "match": "\"[^\"]*\"",
+      "name": "string.quoted.double.ini"
+    },
+    {
+      "comment": "Reference prefixes (reference color) - 翻译库中的引用前缀，包含扩展列表",
+      "match": "\\b(eventSource|attachment|transporting|attacking|lastDamagedBy|parent|customTarget1|customTarget2|nearestUnit|globalSearchForFirstUnit|activeWaypointTarget|事件来源|附件|运输|攻击中|最后伤害源|父单位|自定义目标1|自定义目标2|接近单位|活动路径点目标|内存|memory|core|decal|graphics|attack|movement|ai|self|section|teamId|isInMap|thisActionTarget|currentActionTarget|float|number|boolean|Boolean|unit|string|game|speed|customTimer|isMoving|lastConverted|timeAlive|resource|资源|自身资源)\\.",
+      "name": "variable.other.reference.ini"
+    },
+    {
+      "comment": "Built-in properties (boolean color) - 翻译库中的内置属性",
+      "match": "\\b(maxHp|hp|selfRegenRate|maxShield|shield|shieldRegen|energy|armor|armour|mass|nanoRange|fogOfWarSightRange|shootDelayMultiplier|shootDamageMultiplier|moveSpeed|maxTurnSpeed|maxAttackRange|nanoFactorySpeed|生命值|生命恢复速度|护盾值|护盾|护盾恢复速度|能量|装甲|质量|维修或建造范围|视野|开火间隔乘数|开火伤害乘数|移动速度|最大转弯速度)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Function calls (boolean color) - 翻译库中的函数",
+      "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移)\\b",
+      "name": "constant.language.boolean.ini"
+    },
+    {
+      "comment": "Reference targets (reference color) - 翻译库中的引用目标，使用reference颜色而非boolean",
+      "match": "\\b(thisActionTarget|eventSource|attachment|transporting|attacking|lastDamagedBy|parent|activeWaypointTarget|customTarget1|customTarget2|nearestUnit|nullUnit|self|当前动作目标|事件来源|附件|运输|攻击中|最后伤害源|父单位|活动路径点目标|自定义目标1|自定义目标2|接近单位|空单位)\\b",
+      "name": "variable.other.reference.target.ini"
+    },
+    {
+      "comment": "Parameter keywords with equals (args color) - 翻译库中的参数关键词",
+      "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|指定时间内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
+      "name": "variable.parameter.ini"
+    },
+    {
+      "comment": "ROOT/CUSTOM/SHARED paths",
+      "match": "(ROOT|CUSTOM|SHARED|CORE|SHADOW):",
+      "name": "constant.language.path.ini"
+    },
+    {
+      "comment": "Chinese functions - 自身检测 (翻译库)",
+      "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|有全局标签)\\b",
+      "name": "string.unquoted.value.ini"
+    },
+    {
+      "comment": "Chinese functions - 单位数量 (翻译库)",
+      "match": "\\b(队伍中此单位数量|敌人有此单位数量|全图中此单位数量)\\b",
+      "name": "string.unquoted.value.ini"
+    },
+    {
+      "comment": "Chinese variables - 自身属性 (翻译库) - excluding 自身资源/存活时间/自身自定义计时器",
+      "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数)\\b",
+      "name": "string.unquoted.value.ini"
+    },
+    {
+      "comment": "Chinese parameters (翻译库)",
+      "match": "\\b(有标签|需标签|范围内|超过|少于)\\b",
+      "name": "string.unquoted.value.ini"
+    }
+  ],
+  "name": "ini",
+  "fileTypes": [
+    "ini"
+  ]
+}

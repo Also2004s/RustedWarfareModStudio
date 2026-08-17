@@ -1,0 +1,16 @@
+{
+  "data.value.spawnProjectiles.note": "如果您需要使用offsetDir将抛射体旋转到不同方向（如弹片），还必须将这些抛射体速度设置得足够低以强制其轨迹",
+  "data.value.spawnProjectiles.spawnChance": "生成几率",
+  "data.value.spawnProjectiles.maxSpawnLimit": "最大生成限制",
+  "data.value.spawnProjectiles.recursionLimit": "递归限制",
+  "data.value.spawnProjectiles.offsetX": "X偏移",
+  "data.value.spawnProjectiles.offsetY": "Y偏移",
+  "data.value.spawnProjectiles.xOffsetRelative": "相对X偏移",
+  "data.value.spawnProjectiles.yOffsetRelative": "相对Y偏移",
+  "data.value.spawnProjectiles.offsetRandomX": "随机X偏移",
+  "data.value.spawnProjectiles.offsetRandomY": "随机Y偏移",
+  "data.value.spawnProjectiles.offsetRandomXY": "随机XY偏移",
+  "data.value.spawnProjectiles.offsetHeight": "高度偏移",
+  "data.value.spawnProjectiles.offsetDir": "方向偏移",
+  "data.value.spawnProjectiles.offsetRandomDir": "随机方向偏移"
+}

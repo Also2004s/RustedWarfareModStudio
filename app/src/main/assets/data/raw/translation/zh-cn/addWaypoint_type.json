@@ -1,0 +1,14 @@
+{
+  "data.value.addwaypoint_type.move": "移动",
+  "data.value.addwaypoint_type.attackmove": "攻击移动",
+  "data.value.addwaypoint_type.guard": "守卫",
+  "data.value.addwaypoint_type.loadinto": "装载到",
+  "data.value.addwaypoint_type.loadup": "装载",
+  "data.value.addwaypoint_type.attack": "攻击",
+  "data.value.addwaypoint_type.reclaim": "回收",
+  "data.value.addwaypoint_type.repair": "修理",
+  "data.value.addwaypoint_type.touchtarget": "接触目标",
+  "data.value.addwaypoint_type.build": "建造",
+  "data.value.addwaypoint_type.follow": "跟随",
+  "data.value.addwaypoint_type.setpassivetarget": "设置被动目标"
+}

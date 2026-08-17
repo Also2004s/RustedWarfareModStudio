@@ -1,0 +1,15 @@
+{
+  "data.sections.placementRule.anyRuleInGroup": "组内任意规则",
+  "data.sections.placementRule.searchTags": "搜索标签",
+  "data.sections.placementRule.searchTeam": "搜索队伍",
+  "data.sections.placementRule.searchOffsetX": "搜索偏移X",
+  "data.sections.placementRule.searchOffsetY": "搜索偏移Y",
+  "data.sections.placementRule.searchDistance": "搜索距离",
+  "data.sections.placementRule.excludeIncompleteBuildings": "排除未完成建筑",
+  "data.sections.placementRule.excludeNonBuildings": "排除非建筑",
+  "data.sections.placementRule.minCount": "最小数量",
+  "data.sections.placementRule.maxCount": "最大数量",
+  "data.sections.placementRule.blocksPlacement": "阻止放置",
+  "data.sections.placementRule.cannotPlaceMessage": "无法放置消息",
+  "data.sections.placementRule.checkEachTile": "检查每个格子"
+}

@@ -1,0 +1,9 @@
+{
+  "data.value.fireturretxatground_onlyoverpassabletileof.none": "无",
+  "data.value.fireturretxatground_onlyoverpassabletileof.building": "建筑",
+  "data.value.fireturretxatground_onlyoverpassabletileof.land": "陆地",
+  "data.value.fireturretxatground_onlyoverpassabletileof.hover": "悬停",
+  "data.value.fireturretxatground_onlyoverpassabletileof.air": "空中",
+  "data.value.fireturretxatground_onlyoverpassabletileof.over_cliff": "越过悬崖",
+  "data.value.fireturretxatground_onlyoverpassabletileof.over_water_cliff": "越过水崖"
+}

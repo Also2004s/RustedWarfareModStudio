@@ -1,0 +1,77 @@
+{
+	"name": "GitHub",
+	"settings": [
+		{
+			"settings": {
+				"foreground": "#24292F",
+				"background": "#FFFFFF"
+			}
+		},
+		{
+			"scope": "comment",
+			"settings": {
+				"foreground": "#6E7781"
+			}
+		},
+		{
+			"scope": "string",
+			"settings": {
+				"foreground": "#0A3069"
+			}
+		},
+		{
+			"scope": "constant.numeric",
+			"settings": {
+				"foreground": "#0550AE"
+			}
+		},
+		{
+			"scope": "constant.language",
+			"settings": {
+				"foreground": "#0550AE"
+			}
+		},
+		{
+			"scope": "keyword",
+			"settings": {
+				"foreground": "#CF222E"
+			}
+		},
+		{
+			"scope": "storage",
+			"settings": {
+				"foreground": "#CF222E"
+			}
+		},
+		{
+			"scope": "entity.name.tag",
+			"settings": {
+				"foreground": "#116329"
+			}
+		},
+		{
+			"scope": "entity.name.function",
+			"settings": {
+				"foreground": "#8250DF"
+			}
+		},
+		{
+			"scope": "support.function",
+			"settings": {
+				"foreground": "#0550AE"
+			}
+		},
+		{
+			"scope": "variable",
+			"settings": {
+				"foreground": "#24292F"
+			}
+		},
+		{
+			"scope": "support.type",
+			"settings": {
+				"foreground": "#0550AE"
+			}
+		}
+	]
+}

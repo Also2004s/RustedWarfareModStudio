@@ -1,0 +1,12 @@
+{
+  "data.value.Prices_Resources.credits": "信用点",
+  "data.value.Prices_Resources.energy": "能量",
+  "data.value.Prices_Resources.hp": "生命值",
+  "data.value.Prices_Resources.shield": "护盾",
+  "data.value.Prices_Resources.ammo": "弹药",
+  "data.value.Prices_Resources.setFlag": "设置标志",
+  "data.value.Prices_Resources.unsetFlag": "取消设置标志",
+  "data.value.Prices_Resources.hasFlag": "有标志",
+  "data.value.Prices_Resources.hasMissingFlag": "缺少标志",
+  "data.value.Prices_Resources.X": "自定义资源"
+}

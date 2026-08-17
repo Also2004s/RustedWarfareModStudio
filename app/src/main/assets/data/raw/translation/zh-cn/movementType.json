@@ -1,0 +1,10 @@
+{
+  "data.value.movementType.NONE": "无",
+  "data.value.movementType.LAND": "陆地",
+  "data.value.movementType.AIR": "空中",
+  "data.value.movementType.WATER": "水上",
+  "data.value.movementType.HOVER": "悬停",
+  "data.value.movementType.BUILDING": "建筑",
+  "data.value.movementType.OVER_CLIFF": "越过悬崖",
+  "data.value.movementType.OVER_CLIFF_WATER": "越过悬崖（水）"
+}

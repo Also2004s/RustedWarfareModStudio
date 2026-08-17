@@ -1,0 +1,17 @@
+{
+  "data.sections.canBuild.name": "名称",
+  "data.sections.canBuild.pos": "位置",
+  "data.sections.canBuild.tech": "技术等级",
+  "data.sections.canBuild.forceNano": "强制纳米",
+  "data.sections.canBuild.isVisible": "可见",
+  "data.sections.canBuild.isLocked": "已锁定",
+  "data.sections.canBuild.isLockedMessage": "锁定消息",
+  "data.sections.canBuild.isLockedMessage_es": "锁定消息(西班牙语)",
+  "data.sections.canBuild.isLockedAlt": "替代锁定",
+  "data.sections.canBuild.isLockedAltMessage": "替代锁定消息",
+  "data.sections.canBuild.isLockedAlt2": "替代锁定2",
+  "data.sections.canBuild.isLockedAlt2Message": "替代锁定2消息",
+  "data.sections.canBuild.addResources": "添加资源",
+  "data.sections.canBuild.price": "价格",
+  "data.sections.canBuild.isGuiBlinking": "GUI闪烁"
+}

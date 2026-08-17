@@ -1,0 +1,1046 @@
+[
+  {
+    "name": "能量初始为0",
+    "nameZh": "能量初始为0",
+    "value": "",
+    "detail": "bool",
+    "desc": "如果为true，则单位能量值从0开始增加。",
+    "example": "startEnergyAtZero: true",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "startEnergyAtZero",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "startEnergyAtZero: true"
+  },
+  {
+    "name": "能量显示名称",
+    "nameZh": "能量显示名称",
+    "value": "",
+    "detail": "string",
+    "desc": "能量显示名称,目前似乎无效.1.15",
+    "example": "energyDisplayName:chemms",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "energyDisplayName",
+    "valueEn": "",
+    "detailEn": "string",
+    "descEn": "",
+    "exampleEn": "energyDisplayName:chemms"
+  },
+  {
+    "name": "界面显示文本多语言",
+    "nameZh": "界面显示文本多语言",
+    "value": "",
+    "detail": "string",
+    "desc": "为单位名称添加多语言支持。此方法并不方便，不如设置游戏内部语言文件，建议催luke改。zh(中文通用) zh-cn(简体) zh-tw(台湾) zh-hk中文(香港) en(英语通用) ru(俄语) 其它自查(此列表并不全)，不过您应该不会闲着支持这么多语言。西班牙语（西班牙）es-ES、葡萄牙语（葡萄牙）pt-PT、日语ja、阿姆哈拉语am、爱沙尼亚语et、保加利亚语bg、冰岛语is、波兰语pl、丹麦语da、德语de、法语（法国）fr-FR、法语（加拿大）fr-CA、菲律宾语fil、芬兰语fi、韩语ko、荷兰语nl、加泰罗尼亚语ca、捷克语cs、克罗地亚语hr、拉脱维亚语lv、立陶宛语lt、罗马尼亚语ro、马来语ms、南非荷兰语af、挪威语no、葡萄牙语（巴西）pt-BR、瑞典语sv、塞尔维亚语sr、斯洛伐克语sk、斯洛文尼亚语sl、斯瓦希里语sw、泰语th、土耳其语tr、乌克兰语uk、西班牙语（拉丁美洲）es-419、希伯来语he、希腊语el、匈牙利语hu、意大利语it、印地语hi、印度尼西亚语id in、英语（美国）en-US、英语（英国）en-GB、越南语vi、祖鲁语zu",
+    "example": "displayText_es: Tanque Personalizado\ndisplayText_zh:中文名",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "displayText_[Language]",
+    "valueEn": "",
+    "detailEn": "string",
+    "descEn": "",
+    "exampleEn": "displayText_es: Tanque Personalizado\ndisplayText_zh:中文名"
+  },
+  {
+    "name": "覆盖资源加载路径",
+    "nameZh": "覆盖资源加载路径",
+    "value": "",
+    "detail": "bool",
+    "desc": "覆盖掉该单位的资源加载路径",
+    "example": "overrideResourceLoadPath:false",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "overrideResourceLoadPath",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "overrideResourceLoadPath:false"
+  },
+  {
+    "name": "记录是否使用资源",
+    "nameZh": "记录是否使用资源",
+    "value": "",
+    "detail": "bool",
+    "desc": "记录该单位是否使用了资源",
+    "example": "logIfCreditResourceUsed:false",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "logIfCreditResourceUsed",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "logIfCreditResourceUsed:false"
+  },
+  {
+    "name": "在演示版中可用",
+    "nameZh": "在演示版中可用",
+    "value": "",
+    "detail": "bool",
+    "desc": "是否能在演示中使用",
+    "example": "availableInDemo:true",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "availableInDemo",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "availableInDemo:true"
+  },
+  {
+    "name": "载员保持路径点",
+    "nameZh": "载员保持路径点",
+    "value": "",
+    "detail": "bool",
+    "desc": "目前无效",
+    "example": "transportUnitsKeepWaypoints:true",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "transportUnitsKeepWaypoints",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "transportUnitsKeepWaypoints:true"
+  },
+  {
+    "name": "死亡发射武器",
+    "nameZh": "死亡发射武器",
+    "value": "",
+    "detail": "integer",
+    "desc": "填整数，应该是炮塔的ID",
+    "example": "fireOnDeath:1",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "fireOnDeath",
+    "valueEn": "",
+    "detailEn": "integer",
+    "descEn": "",
+    "exampleEn": "fireOnDeath:1"
+  },
+  {
+    "name": "死亡未撞击地面效果",
+    "nameZh": "死亡未撞击地面效果",
+    "value": "",
+    "detail": "effect(s) ref",
+    "desc": "类似于effectOnDeath，但当未单位接触地面时。对飞行单位有用。",
+    "example": "effectOnDeathGroundCollision: CUSTOM:bigExplosion",
+    "category": [
+      "核心"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "explodeOnDeathGroundCollosion",
+    "valueEn": "",
+    "detailEn": "effect(s) ref",
+    "descEn": "",
+    "exampleEn": "effectOnDeathGroundCollision: CUSTOM:bigExplosion"
+  },
+  {
+    "name": "消除ui额外延迟",
+    "nameZh": "消除ui额外延迟",
+    "value": "",
+    "detail": "bool",
+    "desc": "用于联机，在UI中立即更新而不需要从服务器确认的等待时间。",
+    "example": "extraLagHidingInUI:true",
+    "category": [
+      "可建造"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "extraLagHidingInUI",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "extraLagHidingInUI:true"
+  },
+  {
+    "name": "图像背景总是使用完整的图像",
+    "nameZh": "图像背景总是使用完整的图像",
+    "value": "",
+    "detail": "bool",
+    "desc": "默认会裁剪或拉伸或平铺到和主体图像一致.",
+    "example": "image_back_always_use_full_image:true",
+    "category": [
+      "图像"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "image_back_always_use_full_image",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "image_back_always_use_full_image:true"
+  },
+  {
+    "name": "多向动画使用主炮塔",
+    "nameZh": "多向动画使用主炮塔",
+    "value": "",
+    "detail": "bool",
+    "desc": "多向动画的执行将以单位主炮塔的角度为基准",
+    "example": "animation_direction_useMainTurret:true",
+    "category": [
+      "图像"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "animation_direction_useMainTurret",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "animation_direction_useMainTurret:true"
+  },
+  {
+    "name": "显示生命条变动",
+    "nameZh": "显示生命条变动",
+    "value": "",
+    "detail": "bool",
+    "desc": "填true时显示生命条的生命变动条（黄条）",
+    "example": "showHealthBarChanges:false",
+    "category": [
+      "图像"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "showHealthBarChanges",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "showHealthBarChanges:false"
+  },
+  {
+    "name": "设置主炮塔",
+    "nameZh": "设置主炮塔",
+    "value": "",
+    "detail": "turret ref",
+    "desc": "设置主炮塔，有些代码要锁定主炮塔，对其有用。",
+    "example": "setMainTurretAs:1",
+    "category": [
+      "攻击"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "setMainTurretAs",
+    "valueEn": "",
+    "detailEn": "turret ref",
+    "descEn": "",
+    "exampleEn": "setMainTurretAs:1"
+  },
+  {
+    "name": "移除攻击",
+    "nameZh": "移除攻击",
+    "value": "",
+    "detail": "bool",
+    "desc": "攻击时移除自身.",
+    "example": "removeOnAttack:true",
+    "category": [
+      "攻击"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "removeOnAttack",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "removeOnAttack:true"
+  },
+  {
+    "name": "初始非相对制导速度X",
+    "nameZh": "初始非相对制导速度X",
+    "value": "",
+    "detail": "float",
+    "desc": "让抛射体以弧线形式移动,负数向左，正数向右。",
+    "example": "initialUnguidedSpeedX:3",
+    "category": [
+      "抛射体"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "initialUnguidedSpeedX",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "initialUnguidedSpeedX:3"
+  },
+  {
+    "name": "初始非相对制导速度Y",
+    "nameZh": "初始非相对制导速度Y",
+    "value": "",
+    "detail": "float",
+    "desc": "修改抛射体的高度，正数向下，负数向上。",
+    "example": "initialUnguidedSpeedY:3",
+    "category": [
+      "抛射体"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "initialUnguidedSpeedY",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "initialUnguidedSpeedY:3"
+  },
+  {
+    "name": "绝对向重力",
+    "nameZh": "绝对向重力",
+    "value": "",
+    "detail": "float",
+    "desc": "抛射体在靠近单位时因为有该key会低空飞行一段距离，但注意不要填的太大，否则会直接往屏幕下方飞走。",
+    "example": "trueGravity:0.5",
+    "category": [
+      "抛射体"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "trueGravity",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "trueGravity:0.5"
+  },
+  {
+    "name": "靠近时转弯速度",
+    "nameZh": "靠近时转弯速度",
+    "value": "",
+    "detail": "bool",
+    "desc": "用于当射抛射体非常接近目标时，默认禁用转弯速度以使其能够命中。",
+    "example": "turnSpeedWhenNear:true",
+    "category": [
+      "抛射体"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "turnSpeedWhenNear",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "turnSpeedWhenNear:true"
+  },
+  {
+    "name": "忽略移动指令",
+    "nameZh": "忽略移动指令",
+    "value": "",
+    "detail": "bool",
+    "desc": "忽略移动指令,此代码强制要求移动速度为0，适用例子：红警中单位部署忽略移动指令。",
+    "example": "ignoreMoveOrders:true",
+    "category": [
+      "运动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "ignoreMoveOrders",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "ignoreMoveOrders:true"
+  },
+  {
+    "name": "Y轴速度比例",
+    "nameZh": "Y轴速度比例",
+    "value": "",
+    "detail": "float",
+    "desc": "垂直方向单位移动速度乘数，适用于2.5D，也就是用铁锈模拟3D。典型如红警。",
+    "example": "moveYAxisScaling:15.1",
+    "category": [
+      "运动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "moveYAxisScaling",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "moveYAxisScaling:15.1"
+  },
+  {
+    "name": "用作攻击者",
+    "nameZh": "用作攻击者",
+    "value": "",
+    "detail": "bool",
+    "desc": "是否作为攻击者。",
+    "example": "useAsAttacker:true",
+    "category": [
+      "AI"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "useAsAttacker",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "useAsAttacker:true"
+  },
+  {
+    "name": "基地内没有时的优先级",
+    "nameZh": "基地内没有时的优先级",
+    "value": "",
+    "detail": "float",
+    "desc": "基地内没有时的优先级",
+    "example": "noneInBaseExtraPriority:0.2",
+    "category": [
+      "AI"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "nonInBaseExtraPriority",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "noneInBaseExtraPriority:0.2"
+  },
+  {
+    "name": "全图没有时的优先级",
+    "nameZh": "全图没有时的优先级",
+    "value": "",
+    "detail": "float",
+    "desc": "如果此单位在地图上的任何位置都不存在，则增加其优先级。",
+    "example": "noneGlobalExtraPriority:0.4",
+    "category": [
+      "AI"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "nonGlobalExtraPriority",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "noneGlobalExtraPriority:0.4"
+  },
+  {
+    "name": "腿图像阵营色",
+    "nameZh": "腿图像阵营色",
+    "value": "",
+    "detail": "bool",
+    "desc": "给腿也用上队伍色",
+    "example": "image_middle_teamColors:false",
+    "category": [
+      "AI"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "image_middle_teamColors",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "image_middle_teamColors:false"
+  },
+  {
+    "name": "锁定角度",
+    "nameZh": "锁定角度",
+    "value": "",
+    "detail": "bool",
+    "desc": "是否锁定角度",
+    "example": "lockDir:true",
+    "category": [
+      "附属"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "lockDir",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "lockDir:true"
+  },
+  {
+    "name": "冻结腿脚运动",
+    "nameZh": "冻结腿脚运动",
+    "value": "",
+    "detail": "bool",
+    "desc": "冻结腿脚防止乱动。",
+    "example": "freezeLegMovement:true",
+    "category": [
+      "附属"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "freezeLegMovement",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "freezeLegMovement:true"
+  },
+  {
+    "name": "显示迷你血条",
+    "nameZh": "显示迷你血条",
+    "value": "",
+    "detail": "bool",
+    "desc": "指附属单位下面那个又小又细的血条栏",
+    "example": "showMiniHp:false",
+    "category": [
+      "附属"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "showMiniHp",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "showMiniHp:false"
+  },
+  {
+    "name": "隐藏血量",
+    "nameZh": "隐藏血量",
+    "value": "",
+    "detail": "bool",
+    "desc": "隐藏单位的血量并不显示",
+    "example": "hideHp:true",
+    "category": [
+      "附属"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "hideHp",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "hideHp:true"
+  },
+  {
+    "name": "只攻击父单位的主要目标",
+    "nameZh": "只攻击父单位的主要目标",
+    "value": "",
+    "detail": "bool",
+    "desc": "子单位只会攻击父单位的攻击目标。",
+    "example": "onlyAttackParentsMainTarget:true",
+    "category": [
+      "附属"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "onlyAttackParentsMainTarget",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "onlyAttackParentsMainTarget:true"
+  },
+  {
+    "name": "延迟创建随机时间",
+    "nameZh": "延迟创建随机时间",
+    "value": "",
+    "detail": "float",
+    "desc": "等待时间随机变化",
+    "example": "delayedStartTimerRandom:10",
+    "category": [
+      "效果"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "delayedStartTimerRandom",
+    "valueEn": "",
+    "detailEn": "float",
+    "descEn": "",
+    "exampleEn": "delayedStartTimerRandom:10"
+  },
+  {
+    "name": "重复播放频率",
+    "nameZh": "重复播放频率",
+    "value": "",
+    "detail": "integer",
+    "desc": "重复播放该动画的频率",
+    "example": "playbackRate:1",
+    "category": [
+      "动画"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "playbackRate",
+    "valueEn": "",
+    "detailEn": "integer",
+    "descEn": "",
+    "exampleEn": "playbackRate:1"
+  },
+  {
+    "name": "AI的标签",
+    "nameZh": "AI的标签",
+    "value": "",
+    "detail": "string(s)",
+    "desc": "随便填一个得了(专门给AI用的)",
+    "example": "aiTags:doge",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "aiTags",
+    "valueEn": "",
+    "detailEn": "string(s)",
+    "descEn": "",
+    "exampleEn": "aiTags:doge"
+  },
+  {
+    "name": "消除ui额外延迟",
+    "nameZh": "消除ui额外延迟",
+    "value": "",
+    "detail": "bool",
+    "desc": "用于联机，在UI中立即更新而不需要从服务器确认的等待时间。",
+    "example": "extraLagHidingInUI:true",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "extraLagHidingInUI",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "extraLagHidingInUI:true"
+  },
+  {
+    "name": "AI对该行动的使用方式",
+    "nameZh": "AI对该行动的使用方式",
+    "value": "",
+    "detail": "use type",
+    "desc": "可填：auto(自动)，launch（发射），launchAmmo（发射弹药），disabled（残缺），upGrade(升级)，movementChange(运动改变)，sameAsBuilding（与建筑物相同）",
+    "example": "aiUse:launch",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "aiUse",
+    "valueEn": "",
+    "detailEn": "use type",
+    "descEn": "",
+    "exampleEn": "aiUse:launch"
+  },
+  {
+    "name": "简化数组",
+    "nameZh": "简化数组",
+    "value": "",
+    "detail": "array memory name",
+    "desc": "去掉null项或死亡单位项还有为零的项，然后向前压缩",
+    "example": "shrinkArrays:<array memory:name>",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "shrinkArrays",
+    "valueEn": "",
+    "detailEn": "array memory name",
+    "descEn": "",
+    "exampleEn": "shrinkArrays:<array memory:name>"
+  },
+  {
+    "name": "对于所有动作而言增加冷却时间",
+    "nameZh": "对于所有动作而言增加冷却时间",
+    "value": "",
+    "detail": "time",
+    "desc": "增加所有action的冷却时间。",
+    "example": "addAllActionCooldownsFor:10s",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "addAllActionCooldownsFor",
+    "valueEn": "",
+    "detailEn": "time",
+    "descEn": "",
+    "exampleEn": "addAllActionCooldownsFor:10s"
+  },
+  {
+    "name": "对于动作而言增加冷却时间",
+    "nameZh": "对于动作而言增加冷却时间",
+    "value": "",
+    "detail": "time",
+    "desc": "增加动作冷却时间，制作先充能再使用的action更加容易了。",
+    "example": "addActionCooldownsFor:10s",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "addActionCooldownsFor",
+    "valueEn": "",
+    "detailEn": "time",
+    "descEn": "",
+    "exampleEn": "addActionCooldownsFor:10s"
+  },
+  {
+    "name": "提取资源保存第一个单元自定义目标1",
+    "nameZh": "提取资源保存第一个单元自定义目标1",
+    "value": "",
+    "detail": "bool",
+    "desc": "提取资源保存第一个单元一定是自定义目标1",
+    "example": "takeResources_saveFirstUnitToCustomTarget1:trur",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "takeResources_saveFirstUnitToCustomTarget1",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "takeResources_saveFirstUnitToCustomTarget1:trur"
+  },
+  {
+    "name": "提取资源保存第一个单元自定义目标2",
+    "nameZh": "提取资源保存第一个单元自定义目标2",
+    "value": "",
+    "detail": "bool",
+    "desc": "提取资源保存第一个单元一定是自定义目标2",
+    "example": "takeResources_saveFirstUnitToCustomTarget2:true",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "takeResources_saveFirstUnitToCustomTarget2",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "takeResources_saveFirstUnitToCustomTarget2:true"
+  },
+  {
+    "name": "交换自定义目标1和2",
+    "nameZh": "交换自定义目标1和2",
+    "value": "",
+    "detail": "bool",
+    "desc": "填布尔值",
+    "example": "swapCustomTarget1And2:true",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "swapCustomTarget1And2",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "swapCustomTarget1And2:true"
+  },
+  {
+    "name": "敌对队伍",
+    "nameZh": "敌对队伍",
+    "value": "",
+    "detail": "bool",
+    "desc": "生成这个单位归属于敌对中立队伍而不是所属玩家。",
+    "example": "spawnUnits:cat(aggressiveTeam=true)",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "aggressiveTeam",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "spawnUnits:cat(aggressiveTeam=true)"
+  },
+  {
+    "name": "自身在地上",
+    "nameZh": "自身在地上",
+    "value": "",
+    "detail": "",
+    "desc": "单位在陆地上",
+    "example": "",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "self.gound()",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": ""
+  },
+  {
+    "name": "自身在卸载单位",
+    "nameZh": "自身在卸载单位",
+    "value": "",
+    "detail": "bool",
+    "desc": "卸载单位时",
+    "example": "if self.isTransportUnloading()",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "self.isTransportUnloading()",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if self.isTransportUnloading()"
+  },
+  {
+    "name": "事件数据",
+    "nameZh": "事件数据",
+    "value": "",
+    "detail": "bool",
+    "desc": "与sendMessageWithData连用，从严格意义上来讲，这个key并不属于内存(name:string, type:string{boolean,unit,float,string}, [default])",
+    "example": "if parent.eventData('boostTarget', type='unit') == self",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "eventData()",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if parent.eventData('boostTarget', type='unit') == self"
+  },
+  {
+    "name": "自身最大速度",
+    "nameZh": "自身最大速度",
+    "value": "",
+    "detail": "bool",
+    "desc": "单位最大能达到的速度",
+    "example": "if self.maxspeed() >= 10",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "self.maxspeed()",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if self.maxspeed() >= 10"
+  },
+  {
+    "name": "自身连接数",
+    "nameZh": "自身连接数",
+    "value": "",
+    "detail": "bool",
+    "desc": "括号里填写行动名称",
+    "example": "if self.numberOfConnections(name=\"XXX\") >= 10",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "self.numberOfConnections",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if self.numberOfConnections(name=\"XXX\") >= 10"
+  },
+  {
+    "name": "调试通行",
+    "nameZh": "调试通行",
+    "value": "",
+    "detail": "bool",
+    "desc": "显示这个逻辑在该单位上的值，并在调试模式中发送单位本身关于这个逻辑的调试消息，请打开调试模式选中单位后查看",
+    "example": "if str(debugPassthrough(self.hp)) == \"2400\"",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "debugPassthrough(LogicBoolean)",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if str(debugPassthrough(self.hp)) == \"2400\""
+  },
+  {
+    "name": "行动索引/索引",
+    "nameZh": "行动索引/索引",
+    "value": "",
+    "detail": "bool",
+    "desc": "由alsoTriggerActionRepeat和alsoTriggerAction连用来改变该logic的值（通俗点来讲，就是在一轮代码执行中，这个行动被触发的次数）",
+    "example": "if index/thisActionIndex == 1",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "thisActionIndex/index",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "if index/thisActionIndex == 1"
+  },
+  {
+    "name": "仅限ai建议",
+    "nameZh": "仅限ai建议",
+    "value": "",
+    "detail": "bool",
+    "desc": "不能与blocksPlacement一起使用，仅仅只是建议AI这么做",
+    "example": "aiSuggestionOnly:true",
+    "category": [
+      "放置规则"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "aiSuggestionOnly",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "aiSuggestionOnly:true"
+  },
+  {
+    "name": "帧清单",
+    "nameZh": "帧清单",
+    "value": "",
+    "detail": "bool",
+    "desc": "是否列出帧清单",
+    "example": "frame_verticalOrdering:true",
+    "category": [
+      "资源"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "frame_verticalOrdering",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "frame_verticalOrdering:true"
+  },
+  {
+    "name": "总是固定高度为零",
+    "nameZh": "总是固定高度为零",
+    "value": "",
+    "detail": "bool",
+    "desc": "Useful for UI on air and hover units（对空中和两栖单位的UI有用）",
+    "example": "alwaysStartHeightAtZero:false",
+    "category": [
+      "资源"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "alwaysStartHeightAtZero",
+    "valueEn": "",
+    "detailEn": "bool",
+    "descEn": "",
+    "exampleEn": "alwaysStartHeightAtZero:false"
+  },
+  {
+    "name": "以脚为中心位置",
+    "nameZh": "以脚为中心位置",
+    "value": "",
+    "detail": "leg ref",
+    "desc": "Use a leg/arm position instead of unit body as base（使用 腿/脚 位置而不是单位身体作为基础）",
+    "example": "basePositionFromLeg:1",
+    "category": [
+      "资源"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "basePositionFromLeg",
+    "valueEn": "",
+    "detailEn": "leg ref",
+    "descEn": "",
+    "exampleEn": "basePositionFromLeg:1"
+  },
+  {
+    "name": "复制节",
+    "nameZh": "复制节",
+    "value": "",
+    "detail": "",
+    "desc": "在任何节中使用，以引用节或模板的代码。如@copyFromSection template_name/action_name/projectile_name",
+    "example": "@copyFromSection:projectile_1",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "@copyFromSection",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": "@copyFromSection:projectile_1"
+  },
+  {
+    "name": "复制但跳过节",
+    "nameZh": "复制但跳过节",
+    "value": "",
+    "detail": "",
+    "desc": "在任何节中使用，例如，在引用时候不复制某个action.",
+    "example": "[action_test]\n@copyFrom_skipThisSection:true",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "@copyFrom_skipThisSection",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": "[action_test]\n@copyFrom_skipThisSection:true"
+  },
+  {
+    "name": "${X}",
+    "nameZh": "${X}",
+    "value": "",
+    "detail": "",
+    "desc": "${X}可以用来引用变量(也可以在模板外部完成)",
+    "example": "spawnEffects:effect_${targetEffect}",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "${X}",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": "spawnEffects:effect_${targetEffect}"
+  },
+  {
+    "name": "${section.key}",
+    "nameZh": "${section.key}",
+    "value": "",
+    "detail": "",
+    "desc": "${section.key}可以用来引用键（也可以在模板外部完成）。如果值为小数，可用int取整，例如${int(core.price*0.25)}",
+    "example": "addResources:credits=${core.price * 2 + 10}",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "${section.key}",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": "addResources:credits=${core.price * 2 + 10}"
+  },
+  {
+    "name": "%{X}",
+    "nameZh": "%{X}",
+    "value": "",
+    "detail": "",
+    "desc": "可用于将动态逻辑添加到某些字符串中（此方式只能用于字符串(mod-info.txt的除外)）。 该值将每一帧更新。\n [action]text: Missing hp %{self.maxHp - self.hp}",
+    "example": "",
+    "category": [
+      "行动"
+    ],
+    "formatCategory": "空值属性",
+    "isOverridden": false,
+    "nameEn": "%{X}",
+    "valueEn": "",
+    "detailEn": "",
+    "descEn": "",
+    "exampleEn": ""
+  }
+]

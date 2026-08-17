@@ -1,0 +1,9 @@
+{
+  "data.value.onactions.move": "移动",
+  "data.value.onactions.attack": "攻击",
+  "data.value.onactions.idle": "空闲",
+  "data.value.onactions.underconstruction": "建造中",
+  "data.value.onactions.underconstructionwithlinkedbuilttime": "建造中（链接建造时间）",
+  "data.value.onactions.queuedunits": "队列单位",
+  "data.value.onactions.repair": "修理"
+}

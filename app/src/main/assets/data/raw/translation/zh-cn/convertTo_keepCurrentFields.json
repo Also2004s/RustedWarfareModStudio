@@ -1,0 +1,20 @@
+{
+  "data.value.convertto_keepcurrentfields.maxhp": "最大生命值",
+  "data.value.convertto_keepcurrentfields.hp": "生命值",
+  "data.value.convertto_keepcurrentfields.maxshield": "最大护盾",
+  "data.value.convertto_keepcurrentfields.shield": "护盾",
+  "data.value.convertto_keepcurrentfields.shieldregen": "护盾再生",
+  "data.value.convertto_keepcurrentfields.maxenergy": "最大能量",
+  "data.value.convertto_keepcurrentfields.energy": "能量",
+  "data.value.convertto_keepcurrentfields.armour": "护甲",
+  "data.value.convertto_keepcurrentfields.mass": "质量",
+  "data.value.convertto_keepcurrentfields.shootdelaymultiplier": "射击延迟倍数",
+  "data.value.convertto_keepcurrentfields.shootdamagemultiplier": "射击伤害倍数",
+  "data.value.convertto_keepcurrentfields.movespeed": "移动速度",
+  "data.value.convertto_keepcurrentfields.maxturnspeed": "最大转向速度",
+  "data.value.convertto_keepcurrentfields.maxattackrange": "最大攻击范围",
+  "data.value.convertto_keepcurrentfields.selfregenrate": "自我再生率",
+  "data.value.convertto_keepcurrentfields.heighttarget": "高度目标",
+  "data.value.convertto_keepcurrentfields.nanofactoryspeed": "纳米工厂速度",
+  "data.value.convertto_keepcurrentfields.fogofwarsightrange": "战争迷雾视野范围"
+}
