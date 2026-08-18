@@ -24,6 +24,7 @@ import com.rwmodstudio.core.LocalConfigManager
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.TaskProgressManager
+import com.rwmodstudio.core.UpdateDownloader
 import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.screens.MainApp
@@ -62,6 +63,8 @@ class MainActivity : ComponentActivity() {
         SettingsManager.init(applicationContext)
         TranslationEngine.getInstance().loadBlocklist(applicationContext)
         ArrayReader.init(applicationContext)
+        // 启动时清理遗留的更新安装包（升级后新版本冷启动时执行，实现"安装完自动清理"）
+        UpdateDownloader.cleanupStale(applicationContext)
 
         setContent {
             RustedWarfareModStudioTheme {

@@ -1,4 +1,4 @@
-package com.rwmodstudio.ui.screens
+﻿package com.rwmodstudio.ui.screens
 
 import android.content.Intent
 import android.net.Uri
@@ -42,6 +42,8 @@ import com.rwmodstudio.core.translation.TranslationBlocklist
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.components.ColorWheelPicker
 import com.rwmodstudio.ui.components.DarkTokenColorDialog
+import com.rwmodstudio.ui.components.UpdateDialogHost
+import com.rwmodstudio.ui.components.UpdateDialogState
 import com.rwmodstudio.ui.theme.fontFamilyDisplayName
 import com.rwmodstudio.ui.theme.*
 import com.rwmodstudio.util.uriToAbsolutePath
@@ -53,14 +55,6 @@ import kotlin.math.roundToInt
 
 /** 把字体大小规整到 0.5 的倍数 */
 private fun roundFontSize(size: Float): Float = (size * 2f).roundToInt() / 2f
-
-/** 检查更新弹窗状态 */
-private sealed interface UpdateDialogState {
-    data object Checking : UpdateDialogState
-    data object NoUpdate : UpdateDialogState
-    data class Available(val info: UpdateChecker.UpdateInfo) : UpdateDialogState
-    data class Error(val message: String) : UpdateDialogState
-}
 
 @Composable
 fun SettingsScreen(
@@ -1001,89 +995,10 @@ fun SettingsScreen(
         )
     }
 
-    when (val state = updateDialog) {
-        is UpdateDialogState.Checking -> AlertDialog(
-            onDismissRequest = {},
-            title = { Text("检查更新") },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(color = RustedPrimary, modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("正在检查最新版本...", fontSize = 14.sp, color = RustedOnBackground)
-                }
-            },
-            confirmButton = {},
-            dismissButton = {}
-        )
-        is UpdateDialogState.NoUpdate -> AlertDialog(
-            onDismissRequest = { updateDialog = null },
-            title = { Text("检查更新") },
-            text = {
-                Text(
-                    "当前已是最新版本（${BuildConfig.VERSION_NAME}）",
-                    fontSize = 14.sp,
-                    color = RustedOnBackground
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { updateDialog = null }) { Text("确定") }
-            }
-        )
-        is UpdateDialogState.Available -> AlertDialog(
-            onDismissRequest = { updateDialog = null },
-            title = { Text("发现新版本 ${state.info.versionName}") },
-            text = {
-                Column {
-                    Text("当前版本：${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                    if (state.info.publishedAt != null) {
-                        Text("发布时间：${state.info.publishedAt.substringBefore('T')}", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    if (state.info.body.isNotBlank()) {
-                        Text(
-                            text = state.info.body,
-                            fontSize = 12.sp,
-                            color = RustedOnBackground,
-                            lineHeight = 16.sp,
-                            maxLines = 14,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else {
-                        Text("点击下载更新以查看更新内容。", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val url = state.info.apkUrl ?: state.info.htmlUrl
-                    try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    } catch (e: Exception) {
-                        android.widget.Toast.makeText(context, "无法打开下载页面", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                    updateDialog = null
-                }) { Text("下载更新") }
-            },
-            dismissButton = {
-                TextButton(onClick = { updateDialog = null }) { Text("以后再说") }
-            }
-        )
-        is UpdateDialogState.Error -> AlertDialog(
-            onDismissRequest = { updateDialog = null },
-            title = { Text("检查更新失败") },
-            text = {
-                Column {
-                    Text("无法获取最新版本信息，请检查网络后重试。", fontSize = 14.sp, color = RustedOnBackground)
-                    Spacer(Modifier.height(6.dp))
-                    Text(state.message, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { updateDialog = null }) { Text("确定") }
-            }
-        )
-        null -> Unit
-    }
+    UpdateDialogHost(
+        state = updateDialog,
+        onStateChange = { updateDialog = it }
+    )
 }
 
 @Composable

@@ -278,6 +278,16 @@ object SettingsManager {
         get() = settings.getString("default_path", "") ?: ""
         set(value) = settings.edit().putString("default_path", value).apply()
 
+    /** 上次自动弹出更新提示的日期（yyyy-MM-dd），用于"一天最多提示一次" */
+    var lastUpdatePromptDate: String
+        get() = settings.getString("last_update_prompt_date", "") ?: ""
+        set(value) = settings.edit().putString("last_update_prompt_date", value).apply()
+
+    /** 用户已关闭（以后再说）的更新版本号，该版本不再自动提示 */
+    var dismissedUpdateVersion: String
+        get() = settings.getString("dismissed_update_version", "") ?: ""
+        set(value) = settings.edit().putString("dismissed_update_version", value).apply()
+
     /**
      * 返回首页/设置页使用的默认模组目录。
      * 若用户已设置 defaultPath 则直接返回；否则优先返回 rustedWarfare/units，

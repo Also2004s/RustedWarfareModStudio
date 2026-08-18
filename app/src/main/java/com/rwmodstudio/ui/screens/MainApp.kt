@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.rwmodstudio.BuildConfig
 import com.rwmodstudio.MainActivity
 import com.rwmodstudio.core.DiffOp
 import com.rwmodstudio.core.ProjectTagScanner
@@ -42,6 +43,7 @@ import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.TaskProgressManager
 import com.rwmodstudio.core.ThemeState
+import com.rwmodstudio.core.UpdateChecker
 import com.rwmodstudio.core.computeLineDiff
 import com.rwmodstudio.core.translation.ProjectRegistry
 import com.rwmodstudio.core.translation.TranslationDedupChecker
@@ -52,6 +54,8 @@ import com.rwmodstudio.ui.components.ColorPickerDialog
 import com.rwmodstudio.ui.components.DarkTokenColorDialog
 import com.rwmodstudio.ui.components.DedupResultDialog
 import com.rwmodstudio.ui.components.RainbowBracketSettingsPanel
+import com.rwmodstudio.ui.components.UpdateDialogHost
+import com.rwmodstudio.ui.components.UpdateDialogState
 import com.rwmodstudio.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -99,6 +103,34 @@ fun MainApp() {
 
     val scope = rememberCoroutineScope()
     var currentScreen by rememberSaveable(stateSaver = screenSaver) { mutableStateOf(Screen.HOME) }
+
+    // ===== 自动检查更新（一天最多提示一次；用户关闭后该版本不再提示） =====
+    var autoUpdateDialog by remember { mutableStateOf<UpdateDialogState?>(null) }
+    LaunchedEffect(Unit) {
+        // 当天已提示过则不重复弹
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        if (SettingsManager.lastUpdatePromptDate == today) return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) {
+            try {
+                val info = UpdateChecker.fetchLatest()
+                if (UpdateChecker.isNewerThan(info.versionName, BuildConfig.VERSION_NAME) &&
+                    info.versionName != SettingsManager.dismissedUpdateVersion
+                ) {
+                    UpdateDialogState.Available(info)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null // 网络失败静默，不打扰用户
+            }
+        }
+        if (result != null) {
+            // 弹出即记录当天已提示，保证"一天最多一次"
+            SettingsManager.lastUpdatePromptDate = today
+            autoUpdateDialog = result
+        }
+    }
+
     // 返回栈：记录嵌套导航路径，支持“从哪进入，返回哪去”
     val backStack = remember { mutableStateListOf<Screen>() }
     var drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -405,6 +437,13 @@ fun MainApp() {
             }
         }
     }
+
+    // 自动更新提示弹窗（全局宿主，任何页面都显示；关闭时记忆该版本不再提示）
+    UpdateDialogHost(
+        state = autoUpdateDialog,
+        onStateChange = { autoUpdateDialog = it },
+        onVersionDismissed = { version -> SettingsManager.dismissedUpdateVersion = version }
+    )
 
     ModalNavigationDrawer(
         drawerState = drawerState,

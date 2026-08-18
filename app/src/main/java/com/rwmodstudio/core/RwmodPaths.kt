@@ -41,6 +41,11 @@ object RwmodPaths {
     val exportsDir: File
         get() = File(rwmodDir, "exports").also { it.mkdirs() }
 
+    // ==================== 更新下载 ====================
+
+    val updateDir: File
+        get() = File(cacheDir, "update").also { it.mkdirs() }
+
     // ==================== 翻译库 ====================
 
     val userTranslationFile: File get() = File(translationDir, "user_translation.json")
