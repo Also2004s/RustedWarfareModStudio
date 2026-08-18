@@ -37,7 +37,7 @@ sealed interface UpdateDialogState {
     data class Available(val info: UpdateChecker.UpdateInfo) : UpdateDialogState
     data class Downloading(val info: UpdateChecker.UpdateInfo, val bytes: Long, val total: Long) : UpdateDialogState
     data class ReadyToInstall(val info: UpdateChecker.UpdateInfo) : UpdateDialogState
-    data class Error(val message: String) : UpdateDialogState
+    data class Error(val message: String, val title: String = "检查更新失败") : UpdateDialogState
 }
 
 private fun formatSize(bytes: Long): String = when {
@@ -278,10 +278,14 @@ fun UpdateDialogHost(
         )
         is UpdateDialogState.Error -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
-            title = { Text("检查更新失败") },
+            title = { Text(s.title) },
             text = {
                 Column {
-                    Text("无法获取最新版本信息，请检查网络后重试。", fontSize = 14.sp, color = RustedOnBackground)
+                    Text(
+                        if (s.title == "下载失败") "下载遇到问题，请检查网络后重试。" else "无法获取最新版本信息，请检查网络后重试。",
+                        fontSize = 14.sp,
+                        color = RustedOnBackground
+                    )
                     Spacer(Modifier.height(6.dp))
                     Text(s.message, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                 }

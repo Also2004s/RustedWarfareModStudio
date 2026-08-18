@@ -20,6 +20,15 @@ object UpdateChecker {
     private const val RELEASES_PAGE_URL =
         "https://github.com/Also2004s/RustedWarfareModStudio/releases"
 
+    /**
+     * GitHub 代理加速前缀：国内网络直连 github.com 常被墙，用 gh-proxy 中转。
+     * 用法：代理URL = GH_PROXY_PREFIX + 原始直链（如 github.com / api.github.com）。
+     */
+    const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
+
+    /** 给原始直链加上代理前缀 */
+    fun proxiedUrl(url: String): String = GH_PROXY_PREFIX + url
+
     private const val TIMEOUT_MS = 10_000
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,10 +66,23 @@ object UpdateChecker {
 
     /**
      * 拉取最新版本信息（阻塞，需在 IO 线程调用），失败抛出异常。
+     * 直连 GitHub API 失败（如国内网络被墙）时自动走 gh-proxy 镜像重试。
      * 注意：仓库还没有 Release 时 GitHub API 返回 404，此时视为无新版本。
      */
     fun fetchLatest(): UpdateInfo {
-        val conn = URL(RELEASES_LATEST_URL).openConnection() as HttpURLConnection
+        var lastError: Exception? = null
+        for (url in listOf(RELEASES_LATEST_URL, proxiedUrl(RELEASES_LATEST_URL))) {
+            try {
+                return requestLatest(url)
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IOException("检查更新失败")
+    }
+
+    private fun requestLatest(url: String): UpdateInfo {
+        val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         conn.setRequestProperty("User-Agent", "RustedWarfareModStudio")

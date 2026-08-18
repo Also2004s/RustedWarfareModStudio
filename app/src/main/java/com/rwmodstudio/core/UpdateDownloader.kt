@@ -35,16 +35,30 @@ object UpdateDownloader {
 
     /**
      * 下载 APK（阻塞，需在 IO 线程调用）。
+     * 直连失败（如国内网络被墙）时自动走 gh-proxy 镜像重试。
      * @param url APK 直链
      * @param targetFile 目标文件
      * @param onProgress 进度回调
      * @return 下载完成后的文件
      */
     fun downloadApk(url: String, targetFile: File, onProgress: ProgressListener): File {
+        var lastError: Exception? = null
+        for (candidate in listOf(url, UpdateChecker.proxiedUrl(url))) {
+            try {
+                return tryDownload(candidate, targetFile, onProgress)
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IOException("下载失败")
+    }
+
+    private fun tryDownload(url: String, targetFile: File, onProgress: ProgressListener): File {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS
+        val tmp = File(targetFile.parentFile, targetFile.name + ".tmp")
         try {
             conn.connect()
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
@@ -56,7 +70,6 @@ object UpdateDownloader {
                 onProgress.onProgress(total, total)
                 return targetFile
             }
-            val tmp = File(targetFile.parentFile, targetFile.name + ".tmp")
             conn.inputStream.use { input ->
                 tmp.outputStream().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -75,6 +88,10 @@ object UpdateDownloader {
                 tmp.delete()
             }
             return targetFile
+        } catch (e: Exception) {
+            // 失败时清理残留的临时文件，避免下次误判
+            try { if (tmp.exists()) tmp.delete() } catch (ignored: Exception) {}
+            throw e
         } finally {
             conn.disconnect()
         }
