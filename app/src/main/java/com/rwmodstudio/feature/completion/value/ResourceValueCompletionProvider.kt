@@ -37,15 +37,17 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
         // 2) 属性型：光标位于值内未闭合的 '(' 之后（如 价格:(）时不再触发
         if (request.isInsideParentheses()) return false
 
-        // 3) 属性型判定：type 关键字
+        // 3) 属性型判定：type 关键字（findProperty 命中时以 type 为准，不再中文兜底，
+        //    避免「提取资源标签」(type=tags) 这类名字含"资源"但实为标签的属性误触发资源补全）
         val prop = request.findProperty()
         if (prop != null) {
             val typeLower = prop.type.lowercase()
             for (kw in TYPE_KEYWORDS) {
                 if (typeLower.contains(kw)) return true
             }
+            return false
         }
-        // 中文兜底：属性名含"资源"或"价格"
+        // 中文兜底（仅在找不到属性定义时）：属性名含"资源"或"价格"
         val pn = request.propertyName
         if (pn.contains("资源") || pn.contains("价格")) return true
         return false
@@ -87,14 +89,15 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
                     .thenComparator { a, b -> resourceComparator.compare(a.first, b.first) }
             )
             .map { it.first }
-        // 动态资源（用逻辑设置资源/用逻辑添加资源）的资源名 LHS（顶层 `=` 之前）：补全后紧跟 `=`
+        // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）的资源名 LHS
+        // （顶层 `=` 之前）：补全后紧跟 `=`
         val prop = request.findProperty()
-        val isDynamicResourceName =
-            prop != null && isDynamicResourcesValueType(prop.type) &&
+        val isResourceNameLhs =
+            prop != null && isResourceNameValueType(prop.type) &&
                 currentSegmentRhs(request.textBeforeCursor) == null
         return matching.map { name ->
             val translated = translateValueName(request.translationDict, name)
-            val insert = if (isDynamicResourceName) "$translated=" else translated
+            val insert = if (isResourceNameLhs) "$translated=" else translated
             createValueItem(
                 label = insert,
                 detail = "资源名",

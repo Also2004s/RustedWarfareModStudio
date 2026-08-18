@@ -679,13 +679,20 @@ internal fun translateAllToEnglish(text: String, dict: TranslationDict): String 
 }
 
 /**
+ * 剥离补全项名称尾部的一层参数括号组（如 debugPassthrough(LogicBoolean) → debugPassthrough）。
+ * 与编辑翻译不同，代码表/补全表名称带参数签名时，getTranslation 无法直接命中，
+ * 先在此剥括号取基名，保证函数名类条目的中文显示。
+ */
+private val TRAILING_PARENS_REGEX = Regex("""\([^()]*\)$""")
+
+/**
  * 将英文补全表整体翻译成中文（用于翻译库更新后刷新）。
  */
 fun translateCompletionsToChinese(items: List<CustomCompletion>, engine: TranslationEngine): List<CustomCompletion> {
     val dict = engine.getTranslationDict()
     return items.map { item ->
         item.copy(
-            name = dict.getTranslation(item.nameEn),
+            name = dict.getTranslation(item.nameEn.replace(TRAILING_PARENS_REGEX, "")),
             value = translateAllToChinese(item.valueEn, dict),
             detail = dict.getTranslation(item.detailEn),
             desc = translateAllToChinese(item.descEn, dict),
@@ -726,7 +733,7 @@ fun translateCompletionLabelsToChinese(items: List<CustomCompletion>, engine: Tr
     val dict = engine.getTranslationDict()
     return items.map { item ->
         item.copy(
-            name = dict.getTranslation(item.name),
+            name = dict.getTranslation(item.name.replace(TRAILING_PARENS_REGEX, "")),
             detail = dict.getTranslation(item.detail),
             desc = dict.translateInText(item.desc, isEnToZh = true)
         )

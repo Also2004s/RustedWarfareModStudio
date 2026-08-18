@@ -76,7 +76,9 @@ object ProjectTagScanner {
         val memoryTypes: MutableMap<String, String> = linkedMapOf(),
         val memoryTypePairs: MutableList<Pair<String, String>> = mutableListOf(),
         val globalVariables: MutableSet<String> = linkedSetOf(),
-        val sectionDefines: MutableMap<String, MutableSet<String>> = linkedMapOf()
+        val sectionDefines: MutableMap<String, MutableSet<String>> = linkedMapOf(),
+        /** 行动标签：行动/隐藏行动 节内的 tags: 取值（与单位标签 info.tags 分离，不污染单位标签补全） */
+        val actionTags: MutableSet<String> = linkedSetOf()
     )
 
     /**
@@ -112,9 +114,10 @@ object ProjectTagScanner {
             memoryTypes = info.memoryTypes.toMap(),
             memoryTypePairs = info.memoryTypePairs.sortedBy { it.first },
             globalVariables = info.globalVariables.sorted().toSet(),
-            sectionDefines = info.sectionDefines.mapValues { it.value.sorted().toSet() }
+            sectionDefines = info.sectionDefines.mapValues { it.value.sorted().toSet() },
+            actionTags = info.actionTags.sorted().toSet()
         )
-        Log.d(TAG, "Scanned $scannedFiles files: tags=${result.tags.size}, globalTags=${result.globalTags.size}, messageTags=${result.messageTags.size}, resources=${result.resources.size}, globalResources=${result.globalResources.size}, memories=${result.memories.size}, unitNames=${result.unitNames.size}, globalVariables=${result.globalVariables.size}")
+        Log.d(TAG, "Scanned $scannedFiles files: tags=${result.tags.size}, globalTags=${result.globalTags.size}, messageTags=${result.messageTags.size}, actionTags=${result.actionTags.size}, resources=${result.resources.size}, globalResources=${result.globalResources.size}, memories=${result.memories.size}, unitNames=${result.unitNames.size}, globalVariables=${result.globalVariables.size}")
         cachedInfo = result
         scannedRoot = root.absolutePath
         return result
@@ -229,6 +232,7 @@ object ProjectTagScanner {
         val defines = collectDefines(lines)
 
         var inCoreSection = false
+        var inActionSection = false
         var currentSection = ""
 
         lines.forEachIndexed { index, rawLine ->
@@ -242,6 +246,9 @@ object ProjectTagScanner {
                 val sectionName = sectionHeader.groupValues[1].trim().lowercase()
                 currentSection = sectionName
                 inCoreSection = sectionName == "core"
+                // 行动标签范围：仅 行动/隐藏行动 节内的 tags 值（与编辑端 extractCurrentFileSymbols 一致）
+                inActionSection = parseNamedSection(line)
+                    ?.first?.let { it == "action" || it == "hiddenaction" } ?: false
                 // 资源 / 全局资源节名解析（同时兼容英文 resource / globalResource）
                 parseSection(line)?.let { (type, name) ->
                     when (type) {
@@ -274,10 +281,18 @@ object ProjectTagScanner {
             parseKeyValue(line)?.let { (key, rawValue) ->
                 val values = expandValue(rawValue, defines)
                 when (key) {
-                    TagKey.TAGS, TagKey.TEMP_TAG_ADD -> {
-                        values.forEach { v ->
-                            addLimited(info.tags, v, info.references, file, lineNo, rawLine)
+                    TagKey.TAGS -> {
+                        // 纯 tags: 按节归属：核心节→单位标签、行动/隐藏行动→行动标签、其他节丢弃。
+                        // 与编辑端 extractCurrentFileSymbols 一致，避免行动节 tags 污染项目级单位标签补全。
+                        if (inCoreSection) {
+                            values.forEach { addLimited(info.tags, it, info.references, file, lineNo, rawLine) }
+                        } else if (inActionSection) {
+                            values.forEach { addLimited(info.actionTags, it, info.references, file, lineNo, rawLine) }
                         }
+                    }
+                    TagKey.TEMP_TAG_ADD -> {
+                        // 临时标签添加：任意节都算单位标签（未限定范围，与编辑端一致）
+                        values.forEach { addLimited(info.tags, it, info.references, file, lineNo, rawLine) }
                     }
                     TagKey.ADD_GLOBAL_TAG -> {
                         values.forEach { v ->

@@ -224,7 +224,6 @@ fun SoraCodeEditor(
     // 活跃探测代理函数：光标前一字符是触发符号且补全窗口未打开时，强制重请求一次。
     // 用于弥补 tap 移动光标时 sora 先 hide() 掉 SelectionChangeEvent 重触发的缺口。
     fun activeProbeTrigger(editorIn: CodeEditor?) {
-        if (!SettingsManager.devValueCompletion) return
         val editor = editorIn ?: editorRef.value ?: return
         if (editor.hasComposingText()) return // 组合输入中不打扰
         val completion = editor.getComponent(EditorAutoCompletion::class.java)
@@ -233,11 +232,37 @@ fun SoraCodeEditor(
             val cur = editor.cursor
             val col = cur.leftColumn
             val line = cur.leftLine
-            if (col <= 0) return
-            val prev = editor.text.charAt(line, col - 1)
-            if (":=()+-*/%<>,".indexOf(prev) < 0) return
-            val lineText = editor.text.getLineString(line)
-            if (lineText.indexOf(':') <= 0) return
+            // 节补全兜底：与 devValueCompletion 无关，仅受节补全开关控制。
+            // 光标在节内空行（光标前全空白、不以 [ 开头、行内无冒号）时强制请求补全，
+            // 节识别交由 CompletionProvider 的 fallback 现场定位，不依赖 currentSectionName 注入状态。
+            if (col > 0 && sectionCompletionEnabled) {
+                val lineText = editor.text.getLineString(line)
+                if (lineText.indexOf(':') < 0) {
+                    var blankBefore = true
+                    for (i in 0 until col) {
+                        val c = lineText[i]
+                        if (c != ' ' && c != '\t') { blankBefore = false; break }
+                    }
+                    val startsWithBracket = lineText.trimStart().startsWith("[")
+                    if (blankBefore && !startsWithBracket) {
+                        Log.d("RW_SECTION_COMPL", "activeProbe trigger line=$line col=$col")
+                        (completion as? NoEnterCommitAutoCompletion)?.requireCompletionNow()
+                            ?: completion.requireCompletion()
+                        return
+                    }
+                }
+            }
+
+            if (!SettingsManager.devValueCompletion) return
+            if (editor.hasComposingText()) return
+            val cur2 = editor.cursor
+            val col2 = cur2.leftColumn
+            val line2 = cur2.leftLine
+            if (col2 <= 0) return
+            val prev = editor.text.charAt(line2, col2 - 1)
+            if (":=()+-*/%<>{,".indexOf(prev) < 0) return
+            val lineText2 = editor.text.getLineString(line2)
+            if (lineText2.indexOf(':') <= 0) return
             // 窗口已隐藏（如 tap 选择/非标识符输入后），重置 requestTime 立即强弹
             (completion as? NoEnterCommitAutoCompletion)?.requireCompletionNow()
                 ?: completion.requireCompletion()
@@ -574,13 +599,13 @@ fun SoraCodeEditor(
                         // 在提交补全期间 cancelShowUp=true，会吞掉同步触发的 requireCompletion()，
                         // 延迟到提交完成后执行才能可靠弹出值补全。
                         if (SettingsManager.devValueCompletion) {
-                            val valueTriggerChar = ":=()+-*/%<>,".indexOf(if (column > 0) editor.text.charAt(line, column - 1) else '\u0000') >= 0
+                            val valueTriggerChar = ":=()+-*/%<>{,".indexOf(if (column > 0) editor.text.charAt(line, column - 1) else '\u0000') >= 0
                             if (column > 0 && valueTriggerChar) {
                                 val completion = editor.getComponent(EditorAutoCompletion::class.java)
                                 editor.postDelayedInLifecycle({
                                     val cur = editor.cursor
                                     val col = cur.leftColumn
-                                    if (col > 0 && ":=(+-*/%<>,".indexOf(editor.text.charAt(cur.leftLine, col - 1)) >= 0) {
+                                    if (col > 0 && ":=(+-*/%<>{,".indexOf(editor.text.charAt(cur.leftLine, col - 1)) >= 0) {
                                         val currentLineText = editor.text.getLineString(cur.leftLine)
                                         // sora 已自动弹出时不重复触发；否则重置 requestTime 绕过
                                         // 70ms 节流立即弹出（提交后窗口已 hide，无需延迟等待）。
@@ -598,8 +623,10 @@ fun SoraCodeEditor(
                                 }, 0L)
                             }
                         }
-                        // 节补全：光标在节内空行时主动触发补全
-                        if (sectionCompletionEnabled && currentSectionName != null) {
+                        // 节补全：光标在节内空行时主动触发补全。
+                        // 不再依赖 currentSectionName（Sora 侧可能注入滞后/为 null），空行即触发，
+                        // 节识别交由 CompletionProvider 的 fallback 现场定位当前节。
+                        if (sectionCompletionEnabled) {
                             var allBlankBefore = true
                             for (i in 0 until column) {
                                 val c = lineText[i]
@@ -607,6 +634,7 @@ fun SoraCodeEditor(
                             }
                             val startsWithBracket = lineText.isNotEmpty() && lineText.trimStart().startsWith("[")
                             if (allBlankBefore && !startsWithBracket) {
+                                Log.d("RW_SECTION_COMPL", "selectionChange trigger line=$line col=$column section=$currentSectionName")
                                 val completion = editor.getComponent(EditorAutoCompletion::class.java)
                                 if (!completion.isCompletionInProgress) {
                                     completion.requireCompletion()
@@ -629,12 +657,12 @@ fun SoraCodeEditor(
                     try {
                         if (!SettingsManager.devValueCompletion) return@subscribeEvent
                         val col = editor.cursor.leftColumn
-                        if (col > 0 && ":=(+-*/%<>,".contains(editor.text.charAt(editor.cursor.leftLine, col - 1))) {
+                        if (col > 0 && ":=(+-*/%<>{,".contains(editor.text.charAt(editor.cursor.leftLine, col - 1))) {
                             val completion = editor.getComponent(EditorAutoCompletion::class.java)
                             editor.postDelayedInLifecycle({
                                 val c = editor.cursor
                                 val cl = c.leftColumn
-                                if (cl > 0 && ":=(+-*/%<>,".contains(editor.text.charAt(c.leftLine, cl - 1))) {
+                                if (cl > 0 && ":=(+-*/%<>{,".contains(editor.text.charAt(c.leftLine, cl - 1))) {
                                     // 行内含冒号即触发：窗口未显示则立即弹出，已显示（如 @memory 名字:
                                     // 的变量名候选）则强制重求值，确保 : 能切到类型/值补全。
                                     if (editor.text.getLineString(c.leftLine).indexOf(':') > 0) {

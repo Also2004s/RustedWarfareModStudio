@@ -51,6 +51,17 @@ internal fun isLogicNumberValueType(type: String): Boolean =
 internal fun isDynamicResourcesValueType(type: String): Boolean =
     type.replace(" ", "").lowercase() in setOf("dynamicresources")
 
+/**
+ * 属性 type 是否为「资源名=值」形态（资源名 LHS 补全后需紧跟 `=`）。
+ * 覆盖 resources（价格/增加资源/根据AI难度添加资源）、price（流式造价/资源获取/资源需求）、
+ * customPrice（提取资源）、resource（修正直接添加资源）与 dynamic resources（用逻辑设置/添加资源）。
+ * 不含 resource ref / ResourceRef（`<resources:name>`）与 customResource（转换资源来源: 裸名）。
+ */
+internal fun isResourceNameValueType(type: String): Boolean =
+    type.replace(" ", "").lowercase() in setOf(
+        "resources", "price", "customprice", "resource", "dynamicresources"
+    )
+
 /** 属性 type 是否为 key value pairs（设置单位内存/更新单位内存 的 变量名=逻辑表达式 形态） */
 internal fun isKeyValuePairsType(type: String): Boolean =
     type.replace(" ", "").equals("keyvaluepairs", ignoreCase = true)
@@ -269,6 +280,9 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
             else LogicTarget.UNKNOWN
         } else null
         val propertyTarget = when {
+            // %{...} 插值内：无条件按「布尔值表达式」弹补全（布尔/数值/文本/任意/单位标记全集），
+            // 不依赖外层属性类型或上下文推断——插值本质是逻辑表达式，无需额外条件。
+            interpFragment != null -> LogicTarget.BOOLEAN
             prop != null && isDynamicResourcesValueType(prop.type) && rhsFragment != null -> LogicTarget.NUMERIC
             prop != null && isFieldsValuesValueType(prop.type) && rhsFragment != null -> LogicTarget.NUMERIC
             isKvp -> kvpMemTarget
@@ -330,7 +344,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         // filterPrefix 会把空格当分隔，输入 `自动触发:if `（if 后空格）时被切空而误判为空入口；
         // 用 exprText（光标前到 `:` 的整段）判断，`if ` 非空白 → 进入表达式状态机。
         val isBooleanEntry = expectedTarget == LogicTarget.BOOLEAN && !request.isInsideParentheses() &&
-            exprText.isBlank()
+            exprText.isBlank() && interpFragment == null
         // 括号内布尔表达式起点（选择( 第1参 / 函数布尔参数 空前缀）：此为表达式起点，
         // and/or（中缀二元运算符）与 if 无左操作数不可用，真/假 是字面量也不应作为表达式"起点"直接给出，
         // 只保留 not（逻辑非）与布尔函数（self.isXxx 等）；用户需真/假时在表达式中自行输入。
@@ -459,6 +473,9 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                         typingOperand -> operands
                         // 子式/参数起点：完整布尔操作数集、不弹连接符
                         (lastChar == '(' || lastChar == ',') -> operands
+                        // 空插值起点（%{ 内刚打开、未输入）：本质是表达式起点，弹完整布尔操作数集，
+                        // 而非只给 and/or（exprText 空白被 when 尾部 else 误判为「操作数已完成」）
+                        (interpFragment != null && exprText.isBlank()) -> operands
                         // 片段起点（if/and/or）：操作数全集 + not（not 在此片段首次可用）
                         lastWord in setOf("if", "and", "or") -> listOf(notItem) + operands
                         // not 已用一次：只给操作数，不再给 not/and/or

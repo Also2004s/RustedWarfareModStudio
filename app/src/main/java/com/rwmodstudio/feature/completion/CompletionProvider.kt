@@ -1,6 +1,7 @@
 package com.rwmodstudio.feature.completion
 
 import android.content.Context
+import android.util.Log
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
@@ -377,12 +378,18 @@ class CompletionProvider(
         // 节补全：光标在节内且当前行无内容时自动弹出当前节允许的分类属性
         val currentLineBefore = textBeforeCursor.substringAfterLast('\n')
         val currentLineFull = currentLineBefore + textAfterCursor.takeWhile { it != '\n' }
-        val isInSectionBody = currentSectionName != null &&
+        // 节名优先用 EditorScreen 解析出的 currentSectionName；若为空（个别文件节解析未就绪/失败），
+        // 回退用光标前文本现场定位当前节，保证空行节补全不再依赖外部节状态。
+        val sectionForBody = currentSectionName?.takeIf { it.isNotBlank() }
+            ?: fallbackSectionName(textBeforeCursor)
+        val isInSectionBody = sectionForBody != null &&
                 currentLineBefore.trim().isEmpty() &&
                 !currentLineFull.trim().startsWith("[") &&
                 sectionCompletionEnabled
         if (isInSectionBody) {
-            return getSectionBodyCompletions(currentSectionName, sectionFilters).withDetail()
+            val body = getSectionBodyCompletions(sectionForBody!!, sectionFilters)
+            Log.d("RW_SECTION_COMPL", "sectionBody call section=$sectionForBody mapped=${mapSectionName(sectionForBody)} filters=${sectionFilters.keys} result=${body.size}")
+            return body.withDetail()
         }
 
         if (rawPrefix.isEmpty() && valueResults.isEmpty() && !isAutoCompleteTriggered) return emptyList()
@@ -515,6 +522,24 @@ class CompletionProvider(
         }
 
         return sortCompletions(results)
+    }
+
+    /**
+     * 兜底定位当前节：从光标前文本反向找最后一个 [节] 行。
+     * 用于 currentSectionName 未解析/迟滞（如节解析失败或未就绪）时仍能触发空行节补全。
+     * 只扫描光标前最近若干行，避免大文件每次都全量遍历。
+     */
+    private fun fallbackSectionName(textBeforeCursor: String): String? {
+        val beforeLines = textBeforeCursor.lines()
+        val start = (beforeLines.size - 512).coerceAtLeast(0)
+        for (i in beforeLines.lastIndex downTo start) {
+            val t = beforeLines[i].trim()
+            if (t.length >= 2 && t.startsWith("[") && t.endsWith("]")) {
+                val n = t.substring(1, t.length - 1).trim()
+                if (n.isNotEmpty()) return n
+            }
+        }
+        return null
     }
 
     private fun extractDefaultValue(example: String, propName: String): String {
