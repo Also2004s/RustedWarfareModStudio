@@ -5,18 +5,24 @@ import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.rwmodstudio.BuildConfig
 import com.rwmodstudio.core.UpdateChecker
 import com.rwmodstudio.core.UpdateDownloader
+import com.rwmodstudio.ui.theme.RustedBackground
 import com.rwmodstudio.ui.theme.RustedOnBackground
 import com.rwmodstudio.ui.theme.RustedPrimary
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +44,67 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / 1024f / 1024f)
     bytes >= 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024f)
     else -> "$bytes B"
+}
+
+/** 下载进度悬浮卡片：右上角小卡，不阻挡任何操作；可点 × 隐藏（下载继续，完成后照常弹安装提示） */
+@Composable
+private fun DownloadProgressCard(
+    versionName: String,
+    bytes: Long,
+    total: Long,
+    onDismiss: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = RustedBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = Modifier.width(230.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = RustedPrimary,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "正在下载 v$versionName",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = RustedOnBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        "隐藏进度",
+                        Modifier.size(14.dp),
+                        tint = RustedOnBackground.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else 0f,
+                color = RustedPrimary,
+                trackColor = RustedPrimary.copy(alpha = 0.15f),
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                text = if (total > 0) {
+                    "${formatSize(bytes)} / ${formatSize(total)}（${(bytes * 100 / total).toInt()}%）"
+                } else {
+                    "${formatSize(bytes)}"
+                },
+                fontSize = 10.sp,
+                color = RustedOnBackground.copy(alpha = 0.6f)
+            )
+        }
+    }
 }
 
 /**
@@ -155,38 +222,24 @@ fun UpdateDialogHost(
                 }) { Text("以后再说") }
             }
         )
-        is UpdateDialogState.Downloading -> AlertDialog(
-            onDismissRequest = {},
-            title = { Text("正在下载 v${s.info.versionName}") },
-            text = {
-                Column {
-                    Text(
-                        "正在下载新版本安装包，请勿关闭应用...",
-                        fontSize = 13.sp,
-                        color = RustedOnBackground
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    LinearProgressIndicator(
-                        progress = if (s.total > 0) (s.bytes.toFloat() / s.total).coerceIn(0f, 1f) else 0f,
-                        color = RustedPrimary,
-                        trackColor = RustedPrimary.copy(alpha = 0.15f),
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = if (s.total > 0) {
-                            "${formatSize(s.bytes)} / ${formatSize(s.total)}（${(s.bytes * 100 / s.total).toInt()}%）"
-                        } else {
-                            "${formatSize(s.bytes)}"
-                        },
-                        fontSize = 11.sp,
-                        color = RustedOnBackground.copy(alpha = 0.6f)
-                    )
-                }
-            },
-            confirmButton = {},
-            dismissButton = {}
-        )
+        is UpdateDialogState.Downloading -> Popup(
+            // 非模态悬浮进度卡：不阻挡任何操作，可在下载过程中继续使用应用（类似 Debug 任务浮窗）
+            alignment = Alignment.TopEnd,
+            offset = IntOffset(-12, 56),
+            onDismissRequest = null,
+            properties = PopupProperties(
+                focusable = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+            DownloadProgressCard(
+                versionName = s.info.versionName,
+                bytes = s.bytes,
+                total = s.total,
+                onDismiss = { onStateChange(null) }
+            )
+        }
         is UpdateDialogState.ReadyToInstall -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
             title = { Text("准备安装") },
