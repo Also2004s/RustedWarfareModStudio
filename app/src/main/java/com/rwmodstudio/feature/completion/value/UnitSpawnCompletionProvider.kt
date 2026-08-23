@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -10,33 +11,22 @@ import com.rwmodstudio.feature.completion.completionMatchLevel
  * 中文属性名通过翻译库反向查找判别。
  */
 class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
-
-    private val unitSpawnProperties = setOf(
-        "spawnUnits", "spawnUnit", "produceUnits",
-        "addUnitsIntoTransport", "attachments_addNewUnits"
-    )
-
-    private val projectileSpawnProperties = setOf(
-        "spawnProjectiles", "spawnProjectile",
-        "spawnProjectilesOnCreate", "spawnProjectilesOnEndOfLife", "spawnProjectilesOnExplode"
-    )
-
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         val prop = request.findProperty() ?: return false
         val names = setOfNotNull(prop.name, prop.name_en)
-        if (names.any { it in unitSpawnProperties || it in projectileSpawnProperties }) return true
+        if (names.any { CompletionShared.isUnitSpawnProperty(it) }) return true
         // 中文属性名通过翻译库反向查找
         if (request.isChineseName()) {
             val enName = request.toEnglishName()
-            if (enName in unitSpawnProperties || enName in projectileSpawnProperties) return true
+            if (CompletionShared.isUnitSpawnProperty(enName)) return true
         }
         return false
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         val prop = request.findProperty() ?: return emptyList()
-        val isProjectile = prop.name in projectileSpawnProperties ||
-            prop.name_en in projectileSpawnProperties ||
+        val isProjectile = CompletionShared.isProjectileSpawnProperty(prop.name) ||
+            (prop.name_en != null && CompletionShared.isProjectileSpawnProperty(prop.name_en)) ||
             prop.type.lowercase().contains("projectile")
         val fileName = if (isProjectile) "spawnProjectiles" else "spawnUnits"
         val data = ValueDataLoader.load(request.context, fileName, request.translationDict)
@@ -55,7 +45,8 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
                     val insert = "${it.name}="
                     createValueItem(
                         label = insert,
-                        detail = "${it.type} - 参数",
+                        detail = ValueDescriptionRepository.lookup(request.context, it.description)
+                            ?: "${it.type} - 参数",
                         insertText = insert,
                         prefixLength = request.rawValuePrefixLength,
                         valueType = it.type
@@ -63,11 +54,16 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
                 }
         } else {
             val items = mutableListOf<CompletionProvider.CompletionItem>()
-            // 单位名位置（括号外）：先列项目单位名候选（按已输入前缀过滤），再保留示例格式。
-            // 抛射体生成属性（spawnUnit/spawnProjectiles 等）只给示例格式，不列单位名。
-            if (!isProjectile && request.unitNames.isNotEmpty()) {
+            // 括号外：列真实候选名（按已输入前缀过滤），不做示例格式兜底。
+            // 单位生成列单位名（项目单位 + 原版单位，项目优先去重）；抛射体生成列项目抛射体节名。
+            // 抛射体(生成为例)不补内置抛射体名——抛射体需配合项目定义节，不强行给原版清单。
+            val names = if (isProjectile) request.projectileNames
+            else (request.unitNames + request.vanillaUnitNames).distinct()
+            val nameDetail = if (isProjectile) "项目抛射体" else "单位名"
+            val nameType = if (isProjectile) "projectileref" else "unitref"
+            if (names.isNotEmpty()) {
                 val prefix = request.valuePrefix
-                request.unitNames
+                names
                     .map { it to completionMatchLevel(prefix, it) }
                     .filter { it.second > 0 }
                     .sortedWith(compareByDescending<Pair<String, Int>> { it.second })
@@ -76,26 +72,22 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
                         items.add(
                             createValueItem(
                                 label = name,
-                                detail = "单位名",
+                                // 生成单位的原版单位名查中文说明（heavyTank→重型坦克）；项目单位名用户自定义回退「单位名」
+                                detail = if (!isProjectile && name in request.vanillaUnitNames && name !in request.unitNames) {
+                                    ValueDescriptionRepository.lookup(request.context, "data.value.vanillaunit.$name") ?: nameDetail
+                                } else {
+                                    nameDetail
+                                },
                                 insertText = name,
                                 prefixLength = request.rawValuePrefixLength,
-                                valueType = "unitref"
+                                valueType = nameType
                             )
                         )
                     }
             }
-            if (data.example.isNotBlank()) {
-                val value = data.example.substringAfter(":").trim()
-                items.add(
-                    createValueItem(
-                        label = value,
-                        detail = "示例格式",
-                        insertText = value,
-                        prefixLength = request.rawValuePrefixLength,
-                        valueType = "any"
-                    )
-                )
-            }
+            // 不做示例兜底：示例是结构化模板噪音，非真实候选名。
+            // 括号外只提供真实候选名（单位生成列单位名，抛射体生成列抛射体节名），
+            // 带参表达式由上方括号内参数补全承载。
             items
         }
     }

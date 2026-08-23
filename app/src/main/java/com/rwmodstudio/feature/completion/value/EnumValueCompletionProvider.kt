@@ -35,7 +35,10 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
         "onNewMapSpawn" to "onNewMapSpawn",
         "displayDigitGrouping" to "displayDigitGrouping",
         "setUnitStats" to "setUnitStats",
-        "autoTriggerCheckRate" to "autoTriggerCheckRate"
+        "autoTriggerCheckRate" to "autoTriggerCheckRate",
+        // 内置预设选项类：死亡爆炸类型 / 效果图像集（desc 给出明确内置名单）
+        "explodeTypeOnDeath" to "explodeTypeOnDeath",
+        "stripIndex" to "stripIndex"
     )
 
     /**
@@ -70,7 +73,7 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
             .map {
                 createValueItem(
                     label = it.name,
-                    detail = "枚举值",
+                    detail = ValueDescriptionRepository.lookup(request.context, it.description) ?: "枚举值",
                     insertText = it.name,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "string"

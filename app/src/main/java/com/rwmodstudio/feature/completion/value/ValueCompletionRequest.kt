@@ -33,6 +33,8 @@ data class ValueCompletionRequest(
     val resources: Set<String> = emptySet(),
     val globalResources: Set<String> = emptySet(),
     val unitNames: Set<String> = emptySet(),
+    /** 原版单位名（内置 assets/vanilla_units.json，rw_analysis 逆向的全部原版单位），独立于项目单位 unitNames */
+    val vanillaUnitNames: Set<String> = emptySet(),
     val turretNames: Set<String> = emptySet(),
     val projectileNames: Set<String> = emptySet(),
     val effectNames: Set<String> = emptySet(),

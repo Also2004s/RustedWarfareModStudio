@@ -41,7 +41,7 @@ class AutoTriggerOnEventValueCompletionProvider : BaseValueCompletionProvider() 
             .map {
                 createValueItem(
                     label = translateValueName(request.translationDict, it.name),
-                    detail = "事件",
+                    detail = ValueDescriptionRepository.lookup(request.context, it.description) ?: "事件",
                     insertText = translateValueName(request.translationDict, it.name),
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "any"

@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.shouldReturnValueOnlyForValueFragment
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -233,22 +234,22 @@ class ValueCompletionContextTest {
 
     @Test
     fun unitRefExpressionPropertyDetected() {
-        assertTrue(isUnitRefExpressionProperty("setCustomTarget1"), "设置自定义目标1")
-        assertTrue(isUnitRefExpressionProperty("addWaypoint_target_fromReference"), "添加路径点来自参考")
-        assertTrue(isUnitRefExpressionProperty("sendMessageTo"), "发送消息到")
-        assertTrue(isUnitRefExpressionProperty("takeResources_includeReference"), "提取资源包括引用")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("setCustomTarget1"), "设置自定义目标1")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("addWaypoint_target_fromReference"), "添加路径点来自参考")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("sendMessageTo"), "发送消息到")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("takeResources_includeReference"), "提取资源包括引用")
         // 本轮新增：表达式语义的 unit ref 属性
-        assertTrue(isUnitRefExpressionProperty("teleportTo"), "传送到")
-        assertTrue(isUnitRefExpressionProperty("fireTurretXAtGround_withTarget"), "指定攻击目标")
-        assertTrue(isUnitRefExpressionProperty("alsoTriggerOrQueueActionWithTarget"), "也触发带目标行动")
-        assertTrue(isUnitRefExpressionProperty("transportTargetNow"), "主动装运目标")
-        assertFalse(isUnitRefExpressionProperty("convertTo"), "转换成 保持单位名")
-        assertFalse(isUnitRefExpressionProperty("whenBuilding_temporarilyConvertTo"), "建造时临时转换为 保持单位名")
-        assertFalse(isUnitRefExpressionProperty("onCreateSpawnUnitOf"), "创建时生成单位 保持单位名")
-        assertFalse(isUnitRefExpressionProperty("unitShownInUI"), "UI中显示的单位 为混合型，保留单位名")
-        assertFalse(isUnitRefExpressionProperty("basePosition"), "中心位置 为标记型（UnitName 本就不触发）")
-        assertFalse(isUnitRefExpressionProperty("name"))
-        assertFalse(isUnitRefExpressionProperty(""))
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("teleportTo"), "传送到")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("fireTurretXAtGround_withTarget"), "指定攻击目标")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("alsoTriggerOrQueueActionWithTarget"), "也触发带目标行动")
+        assertTrue(CompletionShared.isUnitRefExpressionProperty("transportTargetNow"), "主动装运目标")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("convertTo"), "转换成 保持单位名")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("whenBuilding_temporarilyConvertTo"), "建造时临时转换为 保持单位名")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("onCreateSpawnUnitOf"), "创建时生成单位 保持单位名")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("unitShownInUI"), "UI中显示的单位 为混合型，保留单位名")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("basePosition"), "中心位置 为标记型（UnitName 本就不触发）")
+        assertFalse(CompletionShared.isUnitRefExpressionProperty("name"))
+        assertFalse(CompletionShared.isUnitRefExpressionProperty(""))
     }
 
 }

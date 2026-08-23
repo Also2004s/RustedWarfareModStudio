@@ -27,6 +27,9 @@ object VerifyManager {
     const val SETTINGS = "settings"
     const val NATIVE_TRANSLATION = "nativeTranslation"
     const val EXTRA_TRANSLATION = "extraTranslation"
+    const val RESOURCE_NAME_KEYS = "resourceNameKeys"
+    const val COMPLETION_TYPES = "completionTypes"
+    const val MOCK_INI = "mockIni"
 
     /** 各功能当前验证码（修改即触发对应配置重置） */
     const val BLOCKLIST_CODE = "384757"
@@ -40,6 +43,9 @@ object VerifyManager {
     const val SETTINGS_CODE = "100003"
     const val NATIVE_TRANSLATION_CODE = "100004"
     const val EXTRA_TRANSLATION_CODE = "100005"
+    const val RESOURCE_NAME_KEYS_CODE = "620411"
+    const val COMPLETION_TYPES_CODE = "731826"
+    const val MOCK_INI_CODE = "481215"
 
     private val defaults = mapOf(
         BLOCKLIST to BLOCKLIST_CODE,
@@ -52,7 +58,10 @@ object VerifyManager {
         COMPLETIONS to COMPLETIONS_CODE,
         SETTINGS to SETTINGS_CODE,
         NATIVE_TRANSLATION to NATIVE_TRANSLATION_CODE,
-        EXTRA_TRANSLATION to EXTRA_TRANSLATION_CODE
+        EXTRA_TRANSLATION to EXTRA_TRANSLATION_CODE,
+        RESOURCE_NAME_KEYS to RESOURCE_NAME_KEYS_CODE,
+        COMPLETION_TYPES to COMPLETION_TYPES_CODE,
+        MOCK_INI to MOCK_INI_CODE
     )
 
     private var migrated = false

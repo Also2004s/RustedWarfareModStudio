@@ -33,6 +33,7 @@ import com.rwmodstudio.ui.screens.loadNativeItemsVerified
 import com.rwmodstudio.ui.screens.refreshCompletionsFromEnglish
 import com.rwmodstudio.ui.theme.RustedWarfareModStudioTheme
 import com.rwmodstudio.util.FileImportHelper
+import com.rwmodstudio.util.NoMediaHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.jcodings.util.ArrayReader
@@ -148,7 +149,27 @@ class MainActivity : ComponentActivity() {
         }
 
         requestStoragePermissions()
+        ensureGameDataNoMedia()
         processIntent(intent)
+    }
+
+    /**
+     * 在铁锈战争数据根目录（首页所在目录的上级，即 rustedWarfare 文件夹）
+     * 放置 .nomedia，屏蔽系统相册扫描整个目录树内的项目图片。
+     */
+    private fun ensureGameDataNoMedia() {
+        try {
+            val modDir = File(SettingsManager.defaultModPath())
+            val dataRoot = modDir.parentFile
+            // 防御：避免把 .nomedia 写到外部存储根（会屏蔽整机相册）
+            if (dataRoot != null && dataRoot.exists() &&
+                dataRoot.absolutePath != Environment.getExternalStorageDirectory().absolutePath
+            ) {
+                NoMediaHelper.excludeFromMediaStore(this, dataRoot)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureGameDataNoMedia failed", e)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

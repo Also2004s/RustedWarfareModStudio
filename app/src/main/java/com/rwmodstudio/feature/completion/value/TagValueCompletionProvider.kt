@@ -26,8 +26,8 @@ class TagValueCompletionProvider : BaseValueCompletionProvider() {
             val typeLower = prop.type.lowercase().trim()
             if (typeLower == messageTagType) return true
             if (typeLower in tagTypes) return true
-            // type 为 string(s) 且属性名含 Tag/标签
-            if (typeLower == "string(s)") {
+            // type 为 string(s)/strings(s)（数据两种拼写都有，如 仅许带此标签单位攻击 是 strings(s)）且属性名含 Tag/标签
+            if (typeLower == "string(s)" || typeLower == "strings(s)") {
                 val name = listOfNotNull(prop.name, prop.name_en).joinToString(" ").lowercase()
                 if (name.contains("tag")) return true
             }

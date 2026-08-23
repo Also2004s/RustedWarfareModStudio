@@ -52,6 +52,7 @@ import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.theme.*
 import com.rwmodstudio.util.IniImageReader
+import com.rwmodstudio.util.NoMediaHelper
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
@@ -271,6 +272,8 @@ fun HomeScreen(
                                 e = z.nextEntry
                             }
                         }
+                        // 屏蔽系统相册扫描解压出的项目图片
+                        NoMediaHelper.excludeFromMediaStore(context, t)
                     } catch (e: Exception) {
                         success = false
                         errorMsg = e.message

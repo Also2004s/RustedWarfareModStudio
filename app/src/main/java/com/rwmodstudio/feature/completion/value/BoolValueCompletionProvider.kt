@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -25,7 +26,7 @@ class BoolValueCompletionProvider : BaseValueCompletionProvider() {
         if (request.isInsideParentheses()) return false
         // 复制但跳过节（@copyFrom_skipThisSection）是布尔指令，detail 为空，按名称启发触发
         val prop = request.findProperty()
-        if (isCopyFromSkipSectionProperty(request.propertyName, prop?.name_en)) return true
+        if (CompletionShared.isCopyFromSkipSectionProperty(request.propertyName, prop?.name_en)) return true
         return prop != null && isBoolValueType(prop.type)
     }
 
@@ -50,7 +51,7 @@ class BoolValueCompletionProvider : BaseValueCompletionProvider() {
             val zh = translateValueName(request.translationDict, it.name)
             createValueItem(
                 label = zh,
-                detail = it.description.ifEmpty { "布尔值" },
+                detail = ValueDescriptionRepository.lookup(request.context, it.description) ?: "布尔值",
                 insertText = zh,
                 prefixLength = request.rawValuePrefixLength,
                 valueType = "bool"

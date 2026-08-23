@@ -53,7 +53,9 @@ class CodeReferenceDefaultTest {
                 if (p.default.isBlank()) missing++
             }
         }
-        assertTrue(valuesItems >= 200, "values 带 type 条目应 >= 200, actual=$valuesItems")
+        // 带 type 分类实际共 199 条（自动触发事件18/bool2/logicboolean135/Prices_Resources10/spawnProjectiles13/产生单位21），
+        // 阈值设为 199：任何一条被误删都会触发失败，完整数据不受影响
+        assertTrue(valuesItems >= 199, "values 带 type 条目应 >= 199, actual=$valuesItems")
         assertEquals(0, missing, "values 条目的 default 不应为空")
     }
 

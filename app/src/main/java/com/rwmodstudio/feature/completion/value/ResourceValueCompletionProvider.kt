@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.ResourceNameKeys
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -18,10 +19,6 @@ import com.rwmodstudio.feature.completion.completionMatchLevel
 class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
 
     companion object {
-        private val TYPE_KEYWORDS = setOf(
-            "price", "resource", "customprice", "customresource",
-            "resourceref", "resource ref", "resources", "dynamic resources"
-        )
         /** 状态属性类内置资源（单位天生具有而非可积累资源），补全时排序靠后 */
         private val STATUS_RESOURCES = setOf("hp", "shield", "energy")
     }
@@ -37,14 +34,14 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
         // 2) 属性型：光标位于值内未闭合的 '(' 之后（如 价格:(）时不再触发
         if (request.isInsideParentheses()) return false
 
-        // 3) 属性型判定：type 关键字（findProperty 命中时以 type 为准，不再中文兜底，
-        //    避免「提取资源标签」(type=tags) 这类名字含"资源"但实为标签的属性误触发资源补全）
+        // 3) 属性型判定：优先用「资源名补全属性名单」（翻译库英文），命中的属性必然弹资源名；
+        //    名单未命中时回退 type 关键字（price/resource 等），中文兜底仅在没有属性定义时生效。
+        //    —— 名单法避免 type 分类/中文关键词的漏洞（如「资源活着时借用」运行时 type 读歪也被名单兜住）。
         val prop = request.findProperty()
         if (prop != null) {
+            if (ResourceNameKeys.load().matches(request.toEnglishName())) return true
             val typeLower = prop.type.lowercase()
-            for (kw in TYPE_KEYWORDS) {
-                if (typeLower.contains(kw)) return true
-            }
+            if (isResourceTypeKeyword(typeLower)) return true
             return false
         }
         // 中文兜底（仅在找不到属性定义时）：属性名含"资源"或"价格"
@@ -157,4 +154,19 @@ internal fun isResourceReferencePrefix(prefix: String): Boolean {
 internal fun isBareResourceKeyword(prefix: String): Boolean {
     val p = prefix.lowercase()
     return p == "自身资源" || p == "资源" || p == "self.resource" || p == "resource"
+}
+
+/** 资源类 type 关键词（归一化去空格，如 "resource ref"→"resourceref"） */
+internal val resourceTypeKeywords = setOf(
+    "price", "resource", "customprice", "customresource",
+    "resourceref", "resources", "dynamicresources"
+)
+
+/**
+ * 是否为资源类 type 判定（typeLower 转小写，忽略空格，如 "resource ref"→"resourceref"）。
+ * 供 ResourceValueCompletionProvider 与补全类型分类共用，杜绝重复名单。
+ */
+internal fun isResourceTypeKeyword(typeLower: String): Boolean {
+    val norm = typeLower.lowercase().replace(" ", "")
+    return resourceTypeKeywords.any { norm.contains(it) }
 }

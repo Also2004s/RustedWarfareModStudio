@@ -187,12 +187,18 @@ fun EditorScreen(
             launch(Dispatchers.IO) { ProjectImageCache.refresh(imageCachePath) }
             launch(Dispatchers.IO) { ProjectSoundCache.refresh(imageCachePath) }
         }
+        // 翻译引擎关闭（devTranslationEngine 关或引擎未加载）时，补全 Provider 输入改用本地英文表，
+        // 让补全 label 与插入文本保持英文，避免中文键值写死；值补全索引/行尾灯泡仍用下方保留的中文表。
+        val engineEnabled = SettingsManager.devTranslationEngine && engine.isLoaded
         if (SettingsManager.devCompletionProvider) {
-            customCompletions = customCompletionsToProviderItems(userItems)
+            val pUser = if (engineEnabled) userItems else loadUserItemsEn()
+            val pNative = if (engineEnabled) nativeItems else loadNativeItemsEn()
+            val pExtra = if (engineEnabled) extraItems else loadExtraItemsEn()
+            customCompletions = customCompletionsToProviderItems(pUser)
             // 优先读取本地原生表，不存在或为空才重新生成，避免每次启动都覆盖已有 category
-            val nativeNames = nativeItems.map { it.name }.toSet()
+            val nativeNames = pNative.map { it.name }.toSet()
             nativeCompletions = customCompletionsToProviderItems(
-                nativeItems + extraItems.filter { it.name !in nativeNames }
+                pNative + pExtra.filter { it.name !in nativeNames }
             )
             if (engine.isLoaded) {
                 cp = engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
@@ -582,11 +588,16 @@ fun EditorScreen(
             rawUserCompletions = userItems
             nativeCustomCompletions = nativeItems
             extraCustomCompletions = extraItems
+            // 翻译引擎关闭时补全 Provider 输入改用英文表（同上方启动构建逻辑）
+            val engineEnabled = SettingsManager.devTranslationEngine && engine.isLoaded
             if (SettingsManager.devCompletionProvider) {
-                customCompletions = customCompletionsToProviderItems(userItems)
-                val nativeNames = nativeItems.map { it.name }.toSet()
+                val pUser = if (engineEnabled) userItems else loadUserItemsEn()
+                val pNative = if (engineEnabled) nativeItems else loadNativeItemsEn()
+                val pExtra = if (engineEnabled) extraItems else loadExtraItemsEn()
+                customCompletions = customCompletionsToProviderItems(pUser)
+                val nativeNames = pNative.map { it.name }.toSet()
                 nativeCompletions = customCompletionsToProviderItems(
-                    nativeItems + extraItems.filter { it.name !in nativeNames }
+                    pNative + pExtra.filter { it.name !in nativeNames }
                 )
             }
 
@@ -1233,7 +1244,12 @@ fun EditorScreen(
                         rawUserCompletions + item
                     }
                     scope.launch(Dispatchers.IO) { saveUserCompletions(rawUserCompletions, engine) }
-                    customCompletions = customCompletionsToProviderItems(rawUserCompletions)
+                    customCompletions = if (SettingsManager.devTranslationEngine && engine.isLoaded) {
+                        customCompletionsToProviderItems(rawUserCompletions)
+                    } else {
+                        // 翻译引擎关闭时用英文表，保持补全为英文
+                        customCompletionsToProviderItems(loadUserItemsEn())
+                    }
                     cp = if (engine.isLoaded) {
                         engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
                             valueSectionProperties = buildValueSectionProperties(mergeCompletionTables(rawUserCompletions, nativeCustomCompletions, extraCustomCompletions)))

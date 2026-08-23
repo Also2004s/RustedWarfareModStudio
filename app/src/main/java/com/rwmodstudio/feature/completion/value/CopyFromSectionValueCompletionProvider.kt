@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -14,7 +15,7 @@ class CopyFromSectionValueCompletionProvider : BaseValueCompletionProvider() {
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         if (request.isInsideParentheses()) return false
         val prop = request.findProperty()
-        return isCopyFromSectionProperty(request.propertyName, prop?.name_en)
+        return CompletionShared.isCopyFromSectionProperty(request.propertyName, prop?.name_en)
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
@@ -43,18 +44,6 @@ class CopyFromSectionValueCompletionProvider : BaseValueCompletionProvider() {
             }
     }
 }
-
-/** 是否为 @copyFromSection（复制节）属性：name_en 或 propertyName 归一化为 @copyfromsection，或中文 复制节 */
-internal fun isCopyFromSectionProperty(propertyName: String, nameEn: String?): Boolean =
-    nameEn?.lowercase() == "@copyfromsection" ||
-        propertyName.lowercase() == "@copyfromsection" ||
-        propertyName == "复制节"
-
-/** 是否为 @copyFrom_skipThisSection（复制但跳过节）属性 */
-internal fun isCopyFromSkipSectionProperty(propertyName: String, nameEn: String?): Boolean =
-    nameEn?.lowercase() == "@copyfrom_skipthissection" ||
-        propertyName.lowercase() == "@copyfrom_skipthissection" ||
-        propertyName == "复制但跳过节"
 
 /** 映射后的中文节分类 → 命名节基名；非命名节/无节返回 null */
 internal fun sectionBaseFromCategory(sectionName: String?): String? = when (sectionName) {

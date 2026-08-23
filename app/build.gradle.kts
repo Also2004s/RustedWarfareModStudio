@@ -25,9 +25,9 @@ android {
         minSdk = 26
         targetSdk = 34
         // 版本号：每次发布新版本必须 +1，且只能增加不能减少
-        versionCode = 17
+        versionCode = 19
         // 版本名称：对外展示给用户看的版本号
-        versionName = "1.2.6"
+        versionName = "1.2.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -45,6 +45,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 测试版使用独立包名后缀，可和正式版共存安装（互不影响数据、不覆盖）
+            // 注意：正式版 applicationId 不受影响，仍是 com.rwmodstudio
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

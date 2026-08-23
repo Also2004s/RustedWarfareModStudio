@@ -23,7 +23,10 @@ import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.ui.theme.*
 
 @Composable
-fun DeveloperModeScreen(onOpenCompletionViewer: () -> Unit = {}) {
+fun DeveloperModeScreen(
+    onOpenMockIni: () -> Unit = {},
+    onOpenCompletionTypes: () -> Unit = {}
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -113,11 +116,18 @@ fun DeveloperModeScreen(onOpenCompletionViewer: () -> Unit = {}) {
             )
             DevDivider()
             DevActionRow(
-                icon = Icons.Default.Visibility,
-                title = "查看补全项",
-                subtitle = "查看各属性可调用的补全值",
+                icon = Icons.Default.Description,
+                title = "模拟ini",
+                subtitle = "按补全类型归类的模拟 ini 文件",
+                onClick = onOpenMockIni
+            )
+            DevDivider()
+            DevActionRow(
+                icon = Icons.Default.Category,
+                title = "补全类型分类",
+                subtitle = "按实际补全代码归类各属性，可改分类",
                 isLast = true,
-                onClick = onOpenCompletionViewer
+                onClick = onOpenCompletionTypes
             )
         }
 

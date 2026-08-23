@@ -321,6 +321,7 @@ class CompletionProvider(
                     resources = resources,
                     globalResources = globalResources,
                     unitNames = unitNames,
+                    vanillaUnitNames = com.rwmodstudio.feature.completion.value.VanillaUnitsRepository.get(context),
                     turretNames = turretNames,
                     projectileNames = projectileNames,
                     effectNames = effectNames,
@@ -540,15 +541,6 @@ class CompletionProvider(
             }
         }
         return null
-    }
-
-    private fun extractDefaultValue(example: String, propName: String): String {
-        if (example.isEmpty()) return ""
-        val colonIdx = example.indexOf(':')
-        if (colonIdx >= 0) {
-            return example.substring(colonIdx + 1).trim().substringBefore(",").substringBefore("#").trim()
-        }
-        return ""
     }
 
     /**
@@ -984,10 +976,10 @@ internal val LOGIC_CONNECTORS = setOf("and", "or")
 internal val LOGIC_BOOLEAN_VALUES = setOf("true", "false", "真", "假")
 
 /**
- * 判断当前行值部分（第一个 : 之后）去尾空白后的最后一个 token 是否为布尔字面量（真/假/true/false）。
- * 仅布尔字面量后不再提示 and/or/not 等语法项（真/假后不弹连接符）；
- * if/and/or/not 属于「表达式关键字」，其后的展开（操作数集/not/andor）交由值 Provider 的表达式
- * 状态机按位置注入，这里不再干预，避免 provider 注入的连接符被上游一并移除。
+ * 判断当前行值部分（第一个 : 之后）去尾空白后的最后一个 token 是否为逻辑关键字
+ * （if/and/or/not 或布尔字面量 真/假/true/false）。
+ * 关键字后是操作数位置，不再提示 真/假/if/and/or/not 与运算符等语法项（由上游 filterLogicSyntaxItems 移除）；
+ * 末尾为闭合调用/资源访问/关键字后已有内容等不算关键字，保留语法项与连接符提示。
  */
 internal fun valueEndsWithLogicKeyword(lineBeforeCursor: String): Boolean {
     val colonIdx = lineBeforeCursor.indexOf(':')
@@ -995,7 +987,7 @@ internal fun valueEndsWithLogicKeyword(lineBeforeCursor: String): Boolean {
     val value = lineBeforeCursor.substring(colonIdx + 1).trimEnd()
     val lastToken = value.substringAfterLast(' ', "").trim()
     if (lastToken.isEmpty()) return false
-    return lastToken in LOGIC_BOOLEAN_VALUES
+    return lastToken.lowercase() in LOGIC_KEYWORDS || lastToken in LOGIC_BOOLEAN_VALUES
 }
 
 /**

@@ -57,6 +57,7 @@ import com.rwmodstudio.ui.components.RainbowBracketSettingsPanel
 import com.rwmodstudio.ui.components.UpdateDialogHost
 import com.rwmodstudio.ui.components.UpdateDialogState
 import com.rwmodstudio.ui.theme.*
+import com.rwmodstudio.util.NoMediaHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +68,7 @@ import java.util.Locale
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_VIEWER, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST }
+enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -297,10 +298,8 @@ fun MainApp() {
     var todoAddTrigger by remember { mutableIntStateOf(0) }
     // 待办页返回目标（不污染 previousScreen）
     var todoReturnScreen by rememberSaveable(stateSaver = nullableScreenSaver) { mutableStateOf<Screen?>(null) }
-    // 补全查看：当前选中的属性名（非空表示在演示面板详情，返回先回属性列表）
-    var completionViewerSelected by rememberSaveable { mutableStateOf<String?>(null) }
-    // 补全查看：右上角「+」选中的可调用对象分类（非空表示在分类浏览页）
-    var completionViewerCallableCat by rememberSaveable { mutableStateOf<String?>(null) }
+    // 补全类型分类：右上角「+」选中的可调用对象分类（非空表示在分类浏览页）
+    var completionTypesCallableCat by rememberSaveable { mutableStateOf<String?>(null) }
 
     // 消费 MainActivity 从外部 intent 传入的待打开文件
     LaunchedEffect(Unit) {
@@ -424,9 +423,9 @@ fun MainApp() {
                 todoReturnScreen = null
                 currentScreen = target
             }
-            Screen.COMPLETION_VIEWER -> {
-                if (completionViewerSelected != null) {
-                    completionViewerSelected = null
+            Screen.COMPLETION_TYPES -> {
+                if (completionTypesCallableCat != null) {
+                    completionTypesCallableCat = null
                 } else {
                     currentScreen = popScreen(Screen.HOME)
                 }
@@ -491,7 +490,7 @@ fun MainApp() {
                     Screen.TRANSLATION -> "翻译库"
                     Screen.CUSTOM -> "自定义补全"
                     Screen.DEVELOPER -> "开发者模式"
-                    Screen.COMPLETION_VIEWER -> "补全查看"
+                    Screen.COMPLETION_TYPES -> "补全类型分类"
                     Screen.COORD_VISUAL -> "坐标可视化"
                     Screen.VERSION_COMPARE -> "版本对比"
                     Screen.PROJECT_MANAGER -> "项目管理"
@@ -513,11 +512,9 @@ fun MainApp() {
                                 todoReturnScreen = null
                                 currentScreen = target
                             }
-                            Screen.COMPLETION_VIEWER -> {
-                                if (completionViewerCallableCat != null) {
-                                    completionViewerCallableCat = null
-                                } else if (completionViewerSelected != null) {
-                                    completionViewerSelected = null
+                            Screen.COMPLETION_TYPES -> {
+                                if (completionTypesCallableCat != null) {
+                                    completionTypesCallableCat = null
                                 } else {
                                     currentScreen = popScreen(Screen.HOME)
                                 }
@@ -688,7 +685,7 @@ fun MainApp() {
                             Icon(Icons.Default.Add, "添加待办", Modifier.size(20.dp), tint = contentColor)
                         }
                     }
-                    if (currentScreen == Screen.COMPLETION_VIEWER) {
+                    if (currentScreen == Screen.COMPLETION_TYPES) {
                         var showCallableMenu by remember { mutableStateOf(false) }
                         IconButton(
                             onClick = { showCallableMenu = true },
@@ -702,8 +699,7 @@ fun MainApp() {
                                     text = { Text(label, fontSize = 13.sp) },
                                     onClick = {
                                         showCallableMenu = false
-                                        completionViewerSelected = null
-                                        completionViewerCallableCat = label
+                                        completionTypesCallableCat = label
                                     }
                                 )
                             }
@@ -716,7 +712,11 @@ fun MainApp() {
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         defaultPath = defaultPath,
-                        onBrowseFolder = { path -> projectRoot = path; browserStartPath = path; clearBackStack(); currentScreen = Screen.BROWSER },
+                        onBrowseFolder = { path ->
+                            // 屏蔽系统相册扫描项目内图片
+                            NoMediaHelper.excludeFromMediaStore(context, File(path))
+                            projectRoot = path; browserStartPath = path; clearBackStack(); currentScreen = Screen.BROWSER
+                        },
                         onOpenFile = { n, p -> editorJumpLine = -1; selectedFile = n to p; pushScreen(Screen.EDITOR) },
                         onOpenFolder = { name, path -> checkProjectDedup(name, path) },
                         onDedupFolder = { name, path -> doDedupCheckOnly(name, path) },
@@ -847,15 +847,30 @@ fun MainApp() {
                     )
                     Screen.TRANSLATION -> TranslationEditorScreen(initialFilter = translationFilter)
                     Screen.CUSTOM -> CustomCompletionsScreen()
-                    Screen.DEVELOPER -> DeveloperModeScreen(onOpenCompletionViewer = {
-                        completionViewerSelected = null
-                        pushScreen(Screen.COMPLETION_VIEWER)
-                    })
-                    Screen.COMPLETION_VIEWER -> CompletionViewerScreen(
-                        selectedPropertyName = completionViewerSelected,
-                        onSelectProperty = { completionViewerSelected = it },
-                        callableCategory = completionViewerCallableCat,
-                        onCloseCallableCategory = { completionViewerCallableCat = null }
+                    Screen.DEVELOPER -> DeveloperModeScreen(
+                        onOpenMockIni = {
+                            scope.launch(Dispatchers.IO) {
+                                // 按持久化模式构建分类器：真实补全模式（与自动补全同源）或硬编码名单，模拟 ini 跟随当前模式生成
+                                val classifier = buildMockIniClassifier(context)
+                                val file = com.rwmodstudio.core.translation.MockIniGenerator.generate(context, classifier)
+                                if (file != null) {
+                                    val path = file.absolutePath
+                                    withContext(Dispatchers.Main) {
+                                        // 走正常打开流程（不预填 editorTextCache），让编辑器经翻译流水线打开即中文化显示
+                                        editorJumpLine = -1
+                                        selectedFile = file.name to path
+                                        pushScreen(Screen.EDITOR)
+                                    }
+                                }
+                            }
+                        },
+                        onOpenCompletionTypes = {
+                            pushScreen(Screen.COMPLETION_TYPES)
+                        }
+                    )
+                    Screen.COMPLETION_TYPES -> CompletionTypeScreen(
+                        callableCategory = completionTypesCallableCat,
+                        onCloseCallableCategory = { completionTypesCallableCat = null }
                     )
                     Screen.COORD_VISUAL -> CoordVisualScreen(
                         initialText = coordVisualText,

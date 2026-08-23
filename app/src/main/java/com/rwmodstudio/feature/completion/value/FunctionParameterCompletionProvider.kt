@@ -511,21 +511,15 @@ internal fun buildParamValueSuggestions(
 ): List<ParamValueSuggestion> {
     val quote = paramType in quoteTypes
     val matchPrefix = if (quote) typedAfterEq.trim('\'', '"') else typedAfterEq
-    // tag/messageTag/actionTag/resource/attachmentSlot/memoryName 按字母排序便于查找；relation/enum/type 保持参数表书写顺序（语义顺序）
-    val ordered = if (paramType == "tag" || paramType == "messageTag" || paramType == "actionTag" ||
-        paramType == "resource" || paramType == "attachmentSlot" || paramType == "memoryName"
-    ) {
-        values.sortedBy { it.lowercase() }
-    } else {
-        values
-    }
+    // tag/messageTag/actionTag/resource/attachmentSlot/memoryName 按字母排序便于查找；
+    // relation/enum/type 等保持参数表书写顺序（语义顺序）
+    val sortedTypes = setOf("tag", "messageTag", "actionTag", "resource", "attachmentSlot", "memoryName")
+    val ordered = if (paramType in sortedTypes) values.sortedBy { it.lowercase() } else values
     return ordered
         .map { it to completionMatchLevel(matchPrefix, it) }
         .filter { it.second > 0 }
-        .sortedWith(
-            compareByDescending<Pair<String, Int>> { it.second }
-                .thenComparator { a, b -> a.first.lowercase().compareTo(b.first.lowercase()) }
-        )
+        // 稳定排序：仅按匹配级别排序，同级别保持 ordered 顺序（sortedTypes 已字母序、其余保持书写序）
+        .sortedByDescending { it.second }
         .map { it.first }
         .map { value ->
             val insert = if (quote) "'$value'" else value

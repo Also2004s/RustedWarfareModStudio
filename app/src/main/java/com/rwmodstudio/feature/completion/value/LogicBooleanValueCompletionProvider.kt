@@ -522,7 +522,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         // 同一个特殊情况（布尔入口/表达式起点/点链/EUR）：保持 LogicBoolean 特有逻辑
         // （DATA dynamic/rhs/interp 前缀、dotCandidates 排除语法项、hasSelfPrefix 剥 self 前缀）
         // 末尾按 !isBooleanEntry 并入统一单位标记源为补充（其余情况源头已内置）。
-        val logicItems = buildLogicItems(dotCandidates, filterPrefix, filterPrefixLength, hasSelfPrefix, zhByName)
+        val logicItems = buildLogicItems(request, dotCandidates, filterPrefix, filterPrefixLength, hasSelfPrefix, zhByName)
         // 统一调用源：只要当前上下文允许单位标记（即非纯布尔入口 isBooleanEntry），就并入统一单位标记源
         // （self + unit/marker/event + 选择 + unit 型内存变量）——与 UnitRef/「+号」/演示面板同源。
         // contextFiltered 对所有上下文（数值/文本/未知/表达式起点/点链）都通过 allowed.contains(UNIT_MARKER) 保留单位标记，
@@ -578,6 +578,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     private fun buildLogicItems(
+        request: ValueCompletionRequest,
         candidates: List<ValueDataLoader.ValueItem>,
         filter: String,
         prefixLength: Int,
@@ -605,7 +606,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
             // 保存时由翻译引擎 translateToEnglish 反译为 self.hp
             createValueItem(
                 label = label,
-                detail = "LogicBoolean",
+                detail = ValueDescriptionRepository.lookup(request.context, item.description) ?: "逻辑表达式",
                 insertText = label,
                 prefixLength = prefixLength,
                 valueType = item.type,

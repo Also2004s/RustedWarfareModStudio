@@ -3,6 +3,8 @@ package com.rwmodstudio.feature.completion.value
 import android.content.Context
 import android.util.Log
 import com.rwmodstudio.core.translation.CodeReferenceRepository
+import com.rwmodstudio.core.translation.CompletionShared
+import com.rwmodstudio.core.translation.CompletionTypeRepository
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.feature.completion.CompletionProvider
 
@@ -49,7 +51,10 @@ class ValueCompletionAggregator(
         if (options.memoryEnabled) providers.add(MemoryValueCompletionProvider())
         if (options.tagEnabled) providers.add(TagValueCompletionProvider())
         if (options.resourceEnabled) providers.add(ResourceValueCompletionProvider())
-        if (options.unitNameEnabled) providers.add(UnitNameValueCompletionProvider())
+        if (options.unitNameEnabled) {
+            providers.add(UnitNameValueCompletionProvider())
+            providers.add(VanillaUnitNameValueCompletionProvider())
+        }
         if (options.unitRefEnabled) providers.add(UnitRefValueCompletionProvider())
         if (options.functionParamEnabled) providers.add(FunctionParameterCompletionProvider())
         if (options.projectRefEnabled) providers.add(ProjectRefValueCompletionProvider())
@@ -98,6 +103,7 @@ class ValueCompletionAggregator(
         resources: Set<String> = emptySet(),
         globalResources: Set<String> = emptySet(),
         unitNames: Set<String> = emptySet(),
+        vanillaUnitNames: Set<String> = emptySet(),
         turretNames: Set<String> = emptySet(),
         projectileNames: Set<String> = emptySet(),
         effectNames: Set<String> = emptySet(),
@@ -130,6 +136,7 @@ class ValueCompletionAggregator(
             resources = resources,
             globalResources = globalResources,
             unitNames = unitNames,
+            vanillaUnitNames = vanillaUnitNames,
             turretNames = turretNames,
             projectileNames = projectileNames,
             effectNames = effectNames,
@@ -168,6 +175,7 @@ class ValueCompletionAggregator(
         resources: Set<String> = emptySet(),
         globalResources: Set<String> = emptySet(),
         unitNames: Set<String> = emptySet(),
+        vanillaUnitNames: Set<String> = emptySet(),
         turretNames: Set<String> = emptySet(),
         projectileNames: Set<String> = emptySet(),
         effectNames: Set<String> = emptySet(),
@@ -202,6 +210,7 @@ class ValueCompletionAggregator(
             resources = resources,
             globalResources = globalResources,
             unitNames = unitNames,
+            vanillaUnitNames = vanillaUnitNames,
             turretNames = turretNames,
             projectileNames = projectileNames,
             effectNames = effectNames,
@@ -279,6 +288,67 @@ class ValueCompletionAggregator(
         return results
     }
 
+    /**
+     * 真实补全判定：按「生产补全实际会由哪个 Provider 服务该属性」归类。
+     *
+     * 与补全分类页硬编码名单（[CompletionTypeRepository.classify]）不同，这里用与生产补全
+     * 完全相同的 [providers]（同顺序）逐个调用 [BaseValueCompletionProvider.matches]，首个命中
+     * 的 Provider 决定归属——保证分类与真实自动补全同源、不漂移。
+     *
+     * @param name 属性名（中文或英文，与分类页展示一致）
+     * @param nameEn 属性英文名（无则传 null）
+     * @return 分类名（CompletionTypeRepository.CAT_*）；无任何 Provider 命中返回「文字/任意」兜底
+     */
+    fun realCompletionClassify(context: Context, name: String, nameEn: String?): String {
+        val request = ValueCompletionRequest(
+            context = context,
+            sectionProperties = sectionProperties,
+            propertyName = name,
+            sectionName = null,
+            valuePrefix = "",
+            rawValuePrefixLength = 0,
+            lineText = "",
+            textBeforeCursor = "",
+            textAfterCursor = "",
+            translationDict = translationDict
+        )
+        for (provider in providers) {
+            try {
+                if (provider.matches(request)) {
+                    return realCategoryOf(provider, name, nameEn)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "realCompletionClassify ${provider.javaClass.simpleName} failed", e)
+            }
+        }
+        return CompletionTypeRepository.CAT_TEXT
+    }
+
+    /** Provider → 分类名（与生产补全的 Provider 语义一致；UnitSpawn 需按抛射体/单位生成区分归属） */
+    private fun realCategoryOf(provider: BaseValueCompletionProvider, name: String, nameEn: String?): String {
+        return when (provider) {
+            is BoolValueCompletionProvider -> CompletionTypeRepository.CAT_BOOL
+            is LogicBooleanValueCompletionProvider -> CompletionTypeRepository.CAT_LOGIC
+            is EnumValueCompletionProvider -> CompletionTypeRepository.CAT_ENUM
+            is ImageValueCompletionProvider -> CompletionTypeRepository.CAT_IMAGE
+            is UnitSpawnCompletionProvider -> {
+                val en = (nameEn ?: name)
+                if (CompletionShared.isProjectileSpawnProperty(en)) CompletionTypeRepository.CAT_PROJECT_REF
+                else CompletionTypeRepository.CAT_UNIT_NAME
+            }
+            is AutoTriggerOnEventValueCompletionProvider -> CompletionTypeRepository.CAT_EVENT
+            is MemoryValueCompletionProvider -> CompletionTypeRepository.CAT_MEMORY
+            is TagValueCompletionProvider -> CompletionTypeRepository.CAT_TAG
+            is ResourceValueCompletionProvider -> CompletionTypeRepository.CAT_RESOURCE
+            is UnitNameValueCompletionProvider, is VanillaUnitNameValueCompletionProvider ->
+                CompletionTypeRepository.CAT_UNIT_NAME
+            is UnitRefValueCompletionProvider -> CompletionTypeRepository.CAT_UNIT_MARKER
+            is ProjectRefValueCompletionProvider -> CompletionTypeRepository.CAT_PROJECT_REF
+            is CopyFromSectionValueCompletionProvider -> CompletionTypeRepository.CAT_COPY_SECTION
+            else -> CompletionTypeRepository.CAT_TEXT
+        }
+    }
+
     /** Provider 简单名 → 中文标签（未命中回退为简单名），供补全查看器展示来源 */
     private fun providerLabel(provider: BaseValueCompletionProvider): String {
         return when (provider.javaClass.simpleName) {
@@ -292,6 +362,7 @@ class ValueCompletionAggregator(
             "TagValueCompletionProvider" -> "标签"
             "ResourceValueCompletionProvider" -> "资源"
             "UnitNameValueCompletionProvider" -> "单位类型"
+            "VanillaUnitNameValueCompletionProvider" -> "原版单位"
             "UnitRefValueCompletionProvider" -> "单位标记"
             "FunctionParameterCompletionProvider" -> "函数参数"
             "ProjectRefValueCompletionProvider" -> "项目引用"

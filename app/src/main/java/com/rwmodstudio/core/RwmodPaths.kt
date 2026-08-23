@@ -1,6 +1,7 @@
 package com.rwmodstudio.core
 
 import android.os.Environment
+import com.rwmodstudio.util.NoMediaHelper
 import java.io.File
 
 /**
@@ -11,9 +12,12 @@ import java.io.File
  */
 object RwmodPaths {
 
-    /** 外部存储根目录下的 RWmod 工作目录 */
+    /** 外部存储根目录下的 RWmod 工作目录（放置 .nomedia 屏蔽系统相册扫描该目录树） */
     val rwmodDir: File
-        get() = File(Environment.getExternalStorageDirectory(), "RWmod").also { if (!it.exists()) it.mkdirs() }
+        get() = File(Environment.getExternalStorageDirectory(), "RWmod").also {
+            if (!it.exists()) it.mkdirs()
+            NoMediaHelper.ensureNoMedia(it)
+        }
 
     // ==================== 分类目录 ====================
 
@@ -71,6 +75,7 @@ object RwmodPaths {
     val settingsFile: File get() = File(configDir, "settings.json")
     val verifyFile: File get() = File(configDir, "verify.json")
     val translationBlocklistFile: File get() = File(configDir, "translation_blocklist.json")
+    val resourceNameKeysFile: File get() = File(configDir, "resource_name_keys.json")
     val sectionFiltersFile: File get() = File(configDir, "section_filters.json")
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
@@ -79,6 +84,9 @@ object RwmodPaths {
     // ==================== 缓存 ====================
 
     val codeReferenceFile: File get() = File(cacheDir, "code_reference.json")
+    val completionTypesFile: File get() = File(cacheDir, "completion_types.json")
+    /** 模拟 ini 文档（开发者工具「模拟ini」，按补全类型分类的全部属性键） */
+    val mockIniFile: File get() = File(cacheDir, "mock_ini.ini")
     val importConfigTempFile: File get() = File(cacheDir, "import_config_temp.zip")
     fun importConfigTempFile(timestamp: Long = System.currentTimeMillis()): File = File(cacheDir, "import_config_${timestamp}.zip")
     val localConfigImportDir: File get() = File(cacheDir, "local_config_import").also { it.mkdirs() }

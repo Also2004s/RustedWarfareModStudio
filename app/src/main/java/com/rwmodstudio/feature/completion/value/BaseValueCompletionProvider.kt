@@ -14,6 +14,12 @@ abstract class BaseValueCompletionProvider {
     protected abstract fun canProvide(request: ValueCompletionRequest): Boolean
 
     /**
+     * 公开触发判定入口（供「真实补全判定」等复用 [canProvide]）。
+     * 与补全生产路径共用同一判定源，保证分类归属与真实补全一致。
+     */
+    fun matches(request: ValueCompletionRequest): Boolean = canProvide(request)
+
+    /**
      * 返回补全候选。
      */
     protected abstract fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem>

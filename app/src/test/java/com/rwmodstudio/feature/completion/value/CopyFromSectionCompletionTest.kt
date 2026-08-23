@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -15,34 +16,34 @@ class CopyFromSectionCompletionTest {
 
     @Test
     fun copyFromSectionPropertyDetected() {
-        assertTrue(isCopyFromSectionProperty("复制节", "@copyFromSection"), "中文键 + name_en 命中")
-        assertTrue(isCopyFromSectionProperty("@copyFromSection", null), "英文键直接命中")
-        assertTrue(isCopyFromSectionProperty("@copyfromsection", null), "大小写不敏感")
-        assertTrue(isCopyFromSectionProperty("复制节", null), "name_en 缺失时按中文键命中")
+        assertTrue(CompletionShared.isCopyFromSectionProperty("复制节", "@copyFromSection"), "中文键 + name_en 命中")
+        assertTrue(CompletionShared.isCopyFromSectionProperty("@copyFromSection", null), "英文键直接命中")
+        assertTrue(CompletionShared.isCopyFromSectionProperty("@copyfromsection", null), "大小写不敏感")
+        assertTrue(CompletionShared.isCopyFromSectionProperty("复制节", null), "name_en 缺失时按中文键命中")
     }
 
     @Test
     fun copyFromSectionPropertyRejected() {
-        assertFalse(isCopyFromSectionProperty("复制与", null), "复制与 不是 复制节")
-        assertFalse(isCopyFromSectionProperty("@copyFrom", "@copyFrom"), "前缀相似的键不命中")
-        assertFalse(isCopyFromSectionProperty("", null))
+        assertFalse(CompletionShared.isCopyFromSectionProperty("复制与", null), "复制与 不是 复制节")
+        assertFalse(CompletionShared.isCopyFromSectionProperty("@copyFrom", "@copyFrom"), "前缀相似的键不命中")
+        assertFalse(CompletionShared.isCopyFromSectionProperty("", null))
     }
 
     // ===== isCopyFromSkipSectionProperty =====
 
     @Test
     fun copyFromSkipSectionPropertyDetected() {
-        assertTrue(isCopyFromSkipSectionProperty("复制但跳过节", "@copyFrom_skipThisSection"))
-        assertTrue(isCopyFromSkipSectionProperty("@copyFrom_skipThisSection", null))
-        assertTrue(isCopyFromSkipSectionProperty("@copyfrom_skipthissection", null), "大小写不敏感")
-        assertTrue(isCopyFromSkipSectionProperty("复制但跳过节", null))
+        assertTrue(CompletionShared.isCopyFromSkipSectionProperty("复制但跳过节", "@copyFrom_skipThisSection"))
+        assertTrue(CompletionShared.isCopyFromSkipSectionProperty("@copyFrom_skipThisSection", null))
+        assertTrue(CompletionShared.isCopyFromSkipSectionProperty("@copyfrom_skipthissection", null), "大小写不敏感")
+        assertTrue(CompletionShared.isCopyFromSkipSectionProperty("复制但跳过节", null))
     }
 
     @Test
     fun copyFromSkipSectionPropertyRejected() {
-        assertFalse(isCopyFromSkipSectionProperty("复制节", null))
-        assertFalse(isCopyFromSkipSectionProperty("跳过条件", null), "跳过条件 不是 复制但跳过节")
-        assertFalse(isCopyFromSkipSectionProperty("", null))
+        assertFalse(CompletionShared.isCopyFromSkipSectionProperty("复制节", null))
+        assertFalse(CompletionShared.isCopyFromSkipSectionProperty("跳过条件", null), "跳过条件 不是 复制但跳过节")
+        assertFalse(CompletionShared.isCopyFromSkipSectionProperty("", null))
     }
 
     // ===== sectionBaseFromCategory =====

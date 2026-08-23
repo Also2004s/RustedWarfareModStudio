@@ -1,0 +1,24 @@
+{
+  "name": "stripIndex",
+  "example": "图像集: effects",
+  "data": [
+    { "name": "effects", "description": "data.value.stripindex.effects", "version": "1.13", "example": "图像集: effects" },
+    { "name": "explode_big", "description": "data.value.stripindex.explode_big", "version": "1.13", "example": "图像集: explode_big" },
+    { "name": "light_50", "description": "data.value.stripindex.light_50", "version": "1.13", "example": "图像集: light_50" },
+    { "name": "flame", "description": "data.value.stripindex.flame", "version": "1.13", "example": "图像集: flame" },
+    { "name": "dust", "description": "data.value.stripindex.dust", "version": "1.13", "example": "图像集: dust" },
+    { "name": "smoke_black", "description": "data.value.stripindex.smoke_black", "version": "1.13", "example": "图像集: smoke_black" },
+    { "name": "shockwave", "description": "data.value.stripindex.shockwave", "version": "1.13", "example": "图像集: shockwave" },
+    { "name": "fire", "description": "data.value.stripindex.fire", "version": "1.13", "example": "图像集: fire" },
+    { "name": "lava_bubble", "description": "data.value.stripindex.lava_bubble", "version": "1.13", "example": "图像集: lava_bubble" },
+    { "name": "effects2", "description": "data.value.stripindex.effects2", "version": "1.13", "example": "图像集: effects2" },
+    { "name": "plasma_shot", "description": "data.value.stripindex.plasma_shot", "version": "1.13", "example": "图像集: plasma_shot" },
+    { "name": "shockwave_large", "description": "data.value.stripindex.shockwave_large", "version": "1.13", "example": "图像集: shockwave_large" },
+    { "name": "explode_bits", "description": "data.value.stripindex.explode_bits", "version": "1.13", "example": "图像集: explode_bits" },
+    { "name": "explode_big2", "description": "data.value.stripindex.explode_big2", "version": "1.13", "example": "图像集: explode_big2" },
+    { "name": "explode_bits_bug", "description": "data.value.stripindex.explode_bits_bug", "version": "1.13", "example": "图像集: explode_bits_bug" },
+    { "name": "projectiles", "description": "data.value.stripindex.projectiles", "version": "1.13", "example": "图像集: projectiles" },
+    { "name": "projectiles2", "description": "data.value.stripindex.projectiles2", "version": "1.13", "example": "图像集: projectiles2" },
+    { "name": "effects3", "description": "data.value.stripindex.effects3", "version": "1.13", "example": "图像集: effects3" }
+  ]
+}

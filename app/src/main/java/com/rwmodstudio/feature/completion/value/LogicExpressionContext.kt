@@ -90,7 +90,7 @@ internal fun unitMarkerItems(
             CompletionProvider.CompletionItem(
                 label = translateValueName(dict, item.name),
                 type = CompletionProvider.CompletionType.VALUE,
-                detail = "单位标记",
+                detail = ValueDescriptionRepository.lookup(context, item.description) ?: "单位标记",
                 insertText = translateValueName(dict, item.name),
                 valuePrefixLength = prefixLength.coerceAtLeast(0),
                 valueType = item.type,
@@ -204,7 +204,7 @@ private fun logicExpressionItems(
             CompletionProvider.CompletionItem(
                 label = translateValueName(dict, item.name),
                 type = CompletionProvider.CompletionType.VALUE,
-                detail = detail,
+                detail = ValueDescriptionRepository.lookup(context, item.description) ?: detail,
                 insertText = translateValueName(dict, item.name),
                 valuePrefixLength = prefixLength.coerceAtLeast(0),
                 valueType = item.type,

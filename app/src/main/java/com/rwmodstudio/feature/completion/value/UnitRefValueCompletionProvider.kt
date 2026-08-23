@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -16,25 +17,15 @@ import com.rwmodstudio.feature.completion.completionMatchLevel
  */
 class UnitRefValueCompletionProvider : BaseValueCompletionProvider() {
 
-    /** 标记表达式语义但 type 非 unit ref 关键词、UnitName 本就不触发的属性（纯标记补全） */
-    private val markerExpressionProperties = setOf(
-        "baseposition", "drawlineto"
-    )
-
-    /** 混合型：既接受单位名也接受表达式（单位名由 UnitName 提供，这里并列补表达式） */
-    private val mixedExpressionProperties = setOf(
-        "unitshowninui", "textaddunitname", "descriptionaddfromunit"
-    )
-
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         // 括号内由 FunctionParameterCompletionProvider 处理
         if (request.isInsideParentheses()) return false
         // 用 toEnglishName() 归一化属性名（与 UnitNameValueCompletionProvider 排除口径一致），
         // 避免依赖 findProperty()（code_reference 中部分条目 name 为英文、无中文名，中文属性名匹配不上会漏触发）
         val en = request.toEnglishName().lowercase()
-        return isUnitRefExpressionProperty(en) ||
-            en in markerExpressionProperties ||
-            en in mixedExpressionProperties
+        return CompletionShared.isUnitRefExpressionProperty(en) ||
+            CompletionShared.isUnitMarkerPositionProperty(en) ||
+            CompletionShared.isUnitMarkerMixedProperty(en)
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
@@ -69,16 +60,3 @@ class UnitRefValueCompletionProvider : BaseValueCompletionProvider() {
         )
     }
 }
-
-/**
- * 单位引用表达式语义的 "unit ref" 属性判定（按 name_en 登记；UnitNameValueCompletionProvider 同步排除）。
- * 这类属性值位置填的是单位标记表达式（如 self.父单位、最后伤害源、获取绝对偏移(...)），而非项目单位名。
- */
-internal fun isUnitRefExpressionProperty(nameEn: String): Boolean =
-    nameEn.lowercase() in setOf(
-        "setcustomtarget1", "setcustomtarget2", "sendmessageto",
-        "transporttargetnow", "addwaypoint_target_fromreference",
-        "takeresources_includereference",
-        "teleportto", "fireturretxatground_withtarget",
-        "alsotriggerorqueueactionwithtarget"
-    )

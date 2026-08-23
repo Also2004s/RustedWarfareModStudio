@@ -229,6 +229,8 @@ object SettingsManager {
     const val VERIFY_EXTRA_COMPLETIONS = VerifyManager.EXTRA_COMPLETIONS
     const val VERIFY_CODE_REFERENCE = VerifyManager.CODE_REFERENCE
     const val VERIFY_ONBOARDING = VerifyManager.ONBOARDING
+    const val VERIFY_RESOURCE_NAME_KEYS = VerifyManager.RESOURCE_NAME_KEYS
+    const val VERIFY_COMPLETION_TYPES = VerifyManager.COMPLETION_TYPES
 
     const val BLOCKLIST_VERIFY_CODE = VerifyManager.BLOCKLIST_CODE
     const val SECTION_FILTERS_VERIFY_CODE = VerifyManager.SECTION_FILTERS_CODE
@@ -236,6 +238,8 @@ object SettingsManager {
     const val EXTRA_COMPLETIONS_VERIFY_CODE = VerifyManager.EXTRA_COMPLETIONS_CODE
     const val CODE_REFERENCE_VERIFY_CODE = VerifyManager.CODE_REFERENCE_CODE
     const val ONBOARDING_VERIFY_CODE = VerifyManager.ONBOARDING_CODE
+    const val RESOURCE_NAME_KEYS_VERIFY_CODE = VerifyManager.RESOURCE_NAME_KEYS_CODE
+    const val COMPLETION_TYPES_VERIFY_CODE = VerifyManager.COMPLETION_TYPES_CODE
 
     /** 读取指定功能的验证码（统一从 RWmod/config/verify.json） */
     fun readVerifyCode(key: String): String = VerifyManager.read(key)
@@ -710,6 +714,14 @@ object SettingsManager {
     var devValueCompletionAutoTriggerOnEvent: Boolean
         get() = settings.getBoolean("dev_value_completion_auto_trigger_on_event", true)
         set(value) = settings.edit().putBoolean("dev_value_completion_auto_trigger_on_event", value).apply()
+
+    /**
+     * 补全分类页名单模式：false=硬编码名单（CompletionTypeRepository.classify），
+     * true=真实补全判定（按 Provider 实际服务归属）。模拟 ini 打开时跟随此模式生成。
+     */
+    var completionTypesRealMode: Boolean
+        get() = settings.getBoolean("completion_types_real_mode", false)
+        set(value) = settings.edit().putBoolean("completion_types_real_mode", value).apply()
 
     // === 解析相关子开关 ===
     var devSectionParsing: Boolean
