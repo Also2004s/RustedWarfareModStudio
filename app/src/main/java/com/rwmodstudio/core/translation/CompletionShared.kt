@@ -44,7 +44,7 @@ object CompletionShared {
 
     /** 单位名列表固定成员（isUnitNameListProperty 的固定名单部分） */
     val unitNameListProperties = setOf(
-        "unitsspawnedondeath", "overrideandreplace", "upgradedfrom"
+        "unitsspawnedondeath", "overrideandreplace", "upgradedfrom", "displaylocalekey"
     )
 
     /**
@@ -82,8 +82,8 @@ object CompletionShared {
     /** 标记/位置表达式属性（marker ref / 纯位置，如 baseposition/drawLineTo） */
     val unitMarkerPositionProperties = setOf("baseposition", "drawlineto")
 
-    /** 混合型属性（既接受单位名也接受表达式，如 unitshowninui/textAddUnitName/descriptionAddFromUnit） */
-    val unitMarkerMixedProperties = setOf("unitshowninui", "textaddunitname", "descriptionaddfromunit")
+    /** 混合型属性（既接受单位名也接受表达式，如 unitshowninui/textAddUnitName/descriptionAddFromUnit/descriptionAddUnitStats） */
+    val unitMarkerMixedProperties = setOf("unitshowninui", "textaddunitname", "descriptionaddfromunit", "descriptionaddunitstats")
 
     /** 是否为单位引用表达式属性（英文名，忽略大小写） */
     fun isUnitRefExpressionProperty(nameEn: String): Boolean =
@@ -96,6 +96,18 @@ object CompletionShared {
     /** 是否为混合型单位标记属性（英文名，忽略大小写） */
     fun isUnitMarkerMixedProperty(nameEn: String): Boolean =
         nameEn.lowercase() in unitMarkerMixedProperties
+
+    // ===== 内存（MemoryValueCompletionProvider） =====
+
+    /** 内存属性精确名单（英文小写，经 code_reference 逐条核实真实用法）。
+     *  仅这些属性本身触发内存补全；含 "memory" 子串但非内存引用的
+     *  updateUnitMemoryRate(更新单位内存频率,type=int) 不在此列，杜绝误触发。 */
+    val memoryPropertyNames = setOf(
+        "setunitmemory", "updateunitmemory", "defineunitmemory", "@memory"
+    )
+
+    /** 是否为内存属性（英文名，忽略大小写） */
+    fun isMemoryProperty(nameEn: String): Boolean = nameEn.lowercase() in memoryPropertyNames
 
     // ===== 复制节（CopyFromSectionValueCompletionProvider） =====
 
@@ -110,4 +122,73 @@ object CompletionShared {
         nameEn?.lowercase() == "@copyfrom_skipthissection" ||
             propertyName.lowercase() == "@copyfrom_skipthissection" ||
             propertyName == "复制但跳过节"
+
+    // ===== 标签（TagValueCompletionProvider） =====
+
+    /** 标签属性精确名单（英文小写，经 code_reference 逐条核实真实用法、用户审核）。
+     *  覆盖全部 25 个标签属性（本地/全局/消息标签）；含 mutatorX_ 前缀通配（修正需要标签等）。
+     *  type 只作初筛参考：onlyUseAsHarvester_ifBaseHasUnitTagged 虽为 string 类型但用法是标签，
+     *  也在此名单内（type 不匹配但用法匹配 → 硬编码注入，杜绝漏触发）。
+     *  注意：mutatorX_ 名单项需经 [isTagProperty] 通配判定，勿直接用 `in` 比较实际 mutator<数字>_ 键。 */
+    val tagProperties = setOf(
+        "addglobalteamtags", "addwaypoint_target_nearestunit_tagged", "addwaypoint_target_randomunit_tagged", "canonlybeattackedbyunitswithtags",
+        "canonlyattackunitswithouttags", "canonlyattackunitswithtags", "canreclaimresourcesonlywithtags", "canreclaimunitsonlywithtags",
+        "canrepairunitsonlywithtags", "deletenumunitsfromtransport_onlywithtags", "interceptprojectiles_withtags", "mutatorx_ifunitwithouttags",
+        "mutatorx_ifunitwithtags", "onlyuseasharvester_ifbasehasunittagged", "removeglobalteamtags", "retargetinginflightsearchonlytags", "searchtags",
+        "sendmessagewithtags", "showactionswithmixedselectionifotherunitshavetag", "similarresourceshavetag", "tags",
+        "takeresources_excludeunitswithouttags", "temporarilyaddtags", "temporarilyremovetags", "transportunitsrequiretag"
+    )
+
+    /** 全局标签属性（值来自项目全局标签 request.globalTags；仅这两者，不含其它含 "global" 子串的非标签属性） */
+    val globalTagProperties = setOf("addglobalteamtags", "removeglobalteamtags")
+
+    /** 是否为标签属性（英文名，忽略大小写；支持 mutatorX_ 名单项通配实际 mutator<数字>_ 前缀） */
+    fun isTagProperty(nameEn: String): Boolean {
+        val n = nameEn.lowercase()
+        if (n in tagProperties) return true
+        return tagProperties.any { key ->
+            key.startsWith("mutatorx_") &&
+                Regex("^mutator[0-9]+_" + Regex.escape(key.substringAfter("mutatorx_"))).matches(n)
+        }
+    }
+
+    /** 是否为全局标签属性（英文名，忽略大小写） */
+    fun isGlobalTagProperty(nameEn: String): Boolean = nameEn.lowercase() in globalTagProperties
+
+    // ===== 资源（ResourceValueCompletionProvider） =====
+
+    /** 资源属性精确名单（英文小写，经 code_reference 逐条核实真实用法、用户审核）。
+     *  覆盖全部 20 个资源属性（价格/增加资源/用逻辑资源/取资源等）；含 mutatorX_ 前缀通配（修正直接添加资源等）。
+     *  注意：mutatorX_ 名单项需经 [isResourceProperty] 通配判定，勿直接用 `in` 比较实际 mutator<数字>_ 键。 */
+    val resourceProperties = setOf(
+        "addresources", "addresourcesscaledbyaihandicaps", "addresourceswithlogic", "appendresourceinhud",
+        "borrowresourceswhilealive", "borrowresourceswhilebuilt", "convertresource_from", "convertresource_to",
+        "displaytextappendresource", "generation_resources", "mutatorx_addresourcesareahit", "mutatorx_addresourcesdirecthit",
+        "price", "resourceamount", "resourceamount_addotherresource", "resourceusage",
+        "setresourceswithlogic", "streamingcost", "takeresources", "takeresources_excludeunitswiththeseresources"
+    )
+
+    /** 是否为资源属性（英文名，忽略大小写；支持 mutatorX_ 通配） */
+    fun isResourceProperty(nameEn: String): Boolean {
+        val n = nameEn.lowercase()
+        if (n in resourceProperties) return true
+        return resourceProperties.any { key ->
+            key.startsWith("mutatorx_") &&
+                Regex("^mutator[0-9]+_" + Regex.escape(key.substringAfter("mutatorx_"))).matches(n)
+        }
+    }
+
+    // ===== 单位名（UnitNameValueCompletionProvider / VanillaUnitNameValueCompletionProvider） =====
+
+    /** 单位名固定属性（英文小写，经 code_reference 逐条核实真实用法、用户审核）。
+     *  不含单位名列表（unitsSpawnedOnDeath 等）与单位生成（spawnUnits 等），那些由各自名单判定。
+     *  convertto/onCreateSpawnUnitOf 等虽 type 为 "unit ref" 但用法是单位类型名，已在此名单（type 不匹配但用法匹配）。 */
+    val unitNameProperties = setOf(
+        "addwaypoint_unittype", "convertto",
+        "guibuildunit", "name", "oncreatespawnunitof",
+        "whenbuilding_temporarilyconvertto"
+    )
+
+    /** 是否为单位名固定属性（英文名，忽略大小写） */
+    fun isUnitNameProperty(nameEn: String): Boolean = nameEn.lowercase() in unitNameProperties
 }

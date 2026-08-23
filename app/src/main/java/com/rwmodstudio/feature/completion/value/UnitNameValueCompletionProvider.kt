@@ -30,20 +30,16 @@ class UnitNameValueCompletionProvider : BaseValueCompletionProvider() {
         // 判定来源为 [CompletionShared]（与分类页共用），不按类型猜测。
         if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) return true
 
+        // 单位名固定精确名单（经 code_reference 逐条核实，与分类页共源 CompletionShared）：
+        // convertTo/onCreateSpawnUnitOf 等虽 type 为 unit ref（单位标记）但用法是单位类型名 → 精确注入，
+        // 不做属性名 contains(unit/单位) 模糊匹配。
+        if (CompletionShared.isUnitNameProperty(request.toEnglishName())) return true
+
+        // type 初筛兜底（type 不可信，仅作第一道过滤；错误数据已由上述精确名单排除）
         val prop = request.findProperty()
         if (prop != null) {
             val typeLower = prop.type.lowercase().trim()
             if (CompletionShared.isUnitNameTypeMatch(typeLower)) return true
-            // 表内属性 type 明确非 unit 关键字时不再参与（避免与 bool/tags 等类型冲突）
-            return false
-        }
-        // 兜底：英文含 unit，或中文反向查找
-        val nameLower = request.propertyName.lowercase()
-        if (nameLower.contains("unit")) return true
-        if (request.isChineseName()) {
-            val enName = request.toEnglishName().lowercase()
-            if (enName.contains("unit")) return true
-            if (request.propertyName.contains("单位")) return true
         }
         return false
     }

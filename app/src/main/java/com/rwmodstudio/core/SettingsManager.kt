@@ -702,9 +702,9 @@ object SettingsManager {
     var devValueCompletionEnum: Boolean
         get() = settings.getBoolean("dev_value_completion_enum", true)
         set(value) = settings.edit().putBoolean("dev_value_completion_enum", value).apply()
-    /** 图片路径补全 */
+    /** 图片路径补全（默认开启：项目图 + SHARED:/CORE: 内置共享图） */
     var devValueCompletionImage: Boolean
-        get() = settings.getBoolean("dev_value_completion_image", false)
+        get() = settings.getBoolean("dev_value_completion_image", true)
         set(value) = settings.edit().putBoolean("dev_value_completion_image", value).apply()
     /** 单位/抛射体生成补全 */
     var devValueCompletionUnitSpawn: Boolean
@@ -714,14 +714,6 @@ object SettingsManager {
     var devValueCompletionAutoTriggerOnEvent: Boolean
         get() = settings.getBoolean("dev_value_completion_auto_trigger_on_event", true)
         set(value) = settings.edit().putBoolean("dev_value_completion_auto_trigger_on_event", value).apply()
-
-    /**
-     * 补全分类页名单模式：false=硬编码名单（CompletionTypeRepository.classify），
-     * true=真实补全判定（按 Provider 实际服务归属）。模拟 ini 打开时跟随此模式生成。
-     */
-    var completionTypesRealMode: Boolean
-        get() = settings.getBoolean("completion_types_real_mode", false)
-        set(value) = settings.edit().putBoolean("completion_types_real_mode", value).apply()
 
     // === 解析相关子开关 ===
     var devSectionParsing: Boolean

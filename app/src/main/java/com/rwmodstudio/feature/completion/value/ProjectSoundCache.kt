@@ -21,9 +21,10 @@ object ProjectSoundCache {
     private var cachedPaths: List<String> = emptyList()
 
     /**
-     * 后台扫描 [projectPath] 下的音频文件并缓存相对路径。
+     * 后台扫描 [projectPath] 下全部子目录的音频文件并缓存相对路径。
+     * 不做深度限制，保证项目根下任意子目录的音效都能补全到。
      */
-    suspend fun refresh(projectPath: String, maxDepth: Int = 4) {
+    suspend fun refresh(projectPath: String, maxDepth: Int = Int.MAX_VALUE) {
         if (projectPath.isBlank()) return
         val root = File(projectPath)
         if (!root.exists() || !root.isDirectory) return

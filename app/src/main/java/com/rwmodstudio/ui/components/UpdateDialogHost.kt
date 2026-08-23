@@ -1,7 +1,5 @@
 package com.rwmodstudio.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,9 +23,6 @@ import com.rwmodstudio.core.UpdateDownloader
 import com.rwmodstudio.ui.theme.RustedBackground
 import com.rwmodstudio.ui.theme.RustedOnBackground
 import com.rwmodstudio.ui.theme.RustedPrimary
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /** 检查更新弹窗状态 */
@@ -108,19 +103,15 @@ private fun DownloadProgressCard(
 }
 
 /**
- * 更新相关弹窗的统一宿主。SettingsScreen 手动检查与 MainApp 自动检查共用。
- * @param state 当前弹窗状态（null 不显示）
- * @param onStateChange 状态变化回调（下载进度、关闭弹窗等）
+ * 更新相关弹窗的统一宿主。状态统一取自 [UpdateStateManager]（进程级持）。
+ * 因此无论从哪个页面触发，弹窗与下载进度都会固定显示、切页不消失。
  * @param onVersionDismissed 用户关闭"发现新版本"弹窗时回调（用于自动提示记忆"该版本不再提示"）
  */
 @Composable
-fun UpdateDialogHost(
-    state: UpdateDialogState?,
-    onStateChange: (UpdateDialogState?) -> Unit,
-    onVersionDismissed: (String) -> Unit = {}
-) {
+fun UpdateDialogHost(onVersionDismissed: (String) -> Unit = {}) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val state by UpdateStateManager.state
+    val onStateChange: (UpdateDialogState?) -> Unit = { UpdateStateManager.state.value = it }
 
     when (val s = state) {
         is UpdateDialogState.Checking -> AlertDialog(
@@ -179,40 +170,8 @@ fun UpdateDialogHost(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = s.info.apkUrl ?: s.info.htmlUrl
-                    if (s.info.apkUrl == null) {
-                        // 无 APK 直链，回退到浏览器打开详情页
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        } catch (e: Exception) {
-                            android.widget.Toast.makeText(context, "无法打开下载页面", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                        onStateChange(null)
-                        return@TextButton
-                    }
-                    // 有 APK 直链：内置下载并显示进度
-                    val target = UpdateDownloader.apkTargetFile(s.info.versionName)
-                    onStateChange(UpdateDialogState.Downloading(s.info, 0, -1))
-                    scope.launch {
-                        try {
-                            val downloaded = withContext(Dispatchers.IO) {
-                                UpdateDownloader.downloadApk(
-                                    url = url,
-                                    targetFile = target,
-                                    onProgress = { bytes, total ->
-                                        onStateChange(UpdateDialogState.Downloading(s.info, bytes, total))
-                                    }
-                                )
-                            }
-                            // 下载完成后自动调起系统安装界面（若需授权则先引导去授权页）
-                            withContext(Dispatchers.IO) {
-                                UpdateDownloader.installApk(context.applicationContext, downloaded)
-                            }
-                            onStateChange(UpdateDialogState.ReadyToInstall(s.info))
-                        } catch (e: Exception) {
-                            onStateChange(UpdateDialogState.Error("下载失败：${e.message ?: "未知错误"}"))
-                        }
-                    }
+                    // 交给进程级管理器下载：切页/回首页都不中断，完成后自动弹安装提示
+                    UpdateStateManager.startDownload(context, s.info)
                 }) { Text("下载更新") }
             },
             dismissButton = {

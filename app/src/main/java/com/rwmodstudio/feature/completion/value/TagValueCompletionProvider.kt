@@ -1,18 +1,20 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
 /**
  * 标签值补全。
- * type 为 tags / tag list / tag ref / message tag，或 type 为 string(s) 且属性名含 Tag 时触发。
- * 按属性名区分：含 Global/全局 → 全局标签，否则 → 本地标签。
+ * 触发判定：硬编码精确名单（CompletionShared.tagProperties，经 code_reference 逐条核实真实用法）优先，
+ * 含 type 不匹配但用法是标签的属性（onlyUseAsHarvester_ifBaseHasUnitTagged 等 string 型）；名单未命中回退
+ * type 初筛（tags/tag list/tag ref/message tag）。全程不做属性名 contains(tag/标签/global) 模糊匹配。
+ * 按属性区分：全局标签（addGlobalTeamTags/removeGlobalTeamTags）→ 全局标签，否则 → 本地标签。
  * type 为 message tag（带标签发送消息）→ 消息标签（sendMessageWithTags 项目使用处的取值，独立命名空间）。
- * 中文属性名通过翻译库反向查找判别。
  */
 class TagValueCompletionProvider : BaseValueCompletionProvider() {
 
-    /** 触发标签补全的 type 集合 */
+    /** 触发标签补全的 type 集合（初筛） */
     private val tagTypes = setOf("tags", "tag list", "tag ref")
 
     /** 消息标签类型（带标签发送消息/sendMessageWithTags）：来源为项目里 sendMessageWithTags: 行的取值 */
@@ -21,25 +23,14 @@ class TagValueCompletionProvider : BaseValueCompletionProvider() {
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         // 光标位于值内未闭合的 '(' 之后（如 添加标签:(）时，不触发标签补全
         if (request.isInsideParentheses()) return false
+        // 硬编码精确名单优先（含 mutatorX_ 通配，与分类页共源 CompletionShared）——真实标签属性必然命中
+        if (CompletionShared.isTagProperty(request.toEnglishName())) return true
+        // type 初筛兜底（type 不可信，仅作第一道过滤；错误数据已由上述精确名单排除）
         val prop = request.findProperty()
         if (prop != null) {
             val typeLower = prop.type.lowercase().trim()
             if (typeLower == messageTagType) return true
             if (typeLower in tagTypes) return true
-            // type 为 string(s)/strings(s)（数据两种拼写都有，如 仅许带此标签单位攻击 是 strings(s)）且属性名含 Tag/标签
-            if (typeLower == "string(s)" || typeLower == "strings(s)") {
-                val name = listOfNotNull(prop.name, prop.name_en).joinToString(" ").lowercase()
-                if (name.contains("tag")) return true
-            }
-            return false
-        }
-        // findProperty 未找到：英文含 tag，或通过翻译库反向查找
-        if (request.propertyName.lowercase().contains("tag")) return true
-        if (request.isChineseName()) {
-            val enName = request.toEnglishName().lowercase()
-            if (enName.contains("tag")) return true
-            // 兜底：含"标签"
-            if (request.propertyName.contains("标签")) return true
         }
         return false
     }
@@ -86,8 +77,9 @@ class TagValueCompletionProvider : BaseValueCompletionProvider() {
                 }
         }
 
-        val isGlobal = request.propertyName.lowercase().contains("global") ||
-            request.isChineseName() && request.toEnglishName().lowercase().contains("global")
+        // 全局标签精确判定（CompletionShared.globalTagProperties：addGlobalTeamTags/removeGlobalTeamTags），
+        // 不做属性名 contains(global) 模糊匹配
+        val isGlobal = CompletionShared.isGlobalTagProperty(request.toEnglishName())
         val source = if (isGlobal) request.globalTags else request.tags
         if (source.isEmpty()) return emptyList()
 

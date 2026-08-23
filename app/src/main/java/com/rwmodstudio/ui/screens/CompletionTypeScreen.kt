@@ -55,8 +55,9 @@ import kotlinx.coroutines.withContext
  * 补全类型分类页（开发者工具）。
  *
  * 全部属性按「补全类型分类」归类展示（分类 = 调用源：该属性由哪个补全代码服务），
- * 归类只查 CompletionTypeRepository 的**硬编码英文名名单**（不看 type，type 不可靠）；
- * 名单由 tools/gen_completion_types.js 从实际数据生成，本页可对单个属性做 manual 覆盖。
+ * 归类唯一来源是「真实补全判定」（ValueCompletionAggregator.realCompletionClassify）：
+ * 与生产补全同一组 Provider、同顺序、首中即定，**不存在第二份硬编码名单**，永不漂移。
+ * 本页可对单个属性做 manual 覆盖。
  *
  * 分类共 14 类：13 属性类（属性名的补全来源，键不带括号） + 1 参数类（值类，仅作用于值：
  * 直接列出可带括号调用的值本身，如 int(a,b)、distance(x1,y1)、select(bool,textA,textB)）。
@@ -71,15 +72,10 @@ fun CompletionTypeScreen(
     onCloseCallableCategory: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf(false) }
     var entries by remember { mutableStateOf<List<Entry>>(emptyList()) }
-    // 名单源模式：false=硬编码名单，true=真实补全判定（按 Provider 实际服务归属，与自动补全同源）
-    var useRealCompletion by rememberSaveable { mutableStateOf(SettingsManager.completionTypesRealMode) }
-    // 真实补全判定聚合器（全部 Provider、默认选项；与生产补全同源），构建完成后才可切换真实模式
+    // 真实补全判定聚合器（全部 Provider、默认选项；与生产补全同源），条目分类唯一来源
     var classifyAggregator by remember { mutableStateOf<ValueCompletionAggregator?>(null) }
-    // 首屏是否已按真实判定重算过条目（防止每次聚合器变化重复重算）
-    var realApplied by remember { mutableStateOf(false) }
     // manual 覆盖（属性名 → 分类）
     var manualOverrides by remember { mutableStateOf(mapOf<String, String>()) }
     // 资源名补全名单（本地编辑态，保存时写盘）
@@ -99,7 +95,8 @@ fun CompletionTypeScreen(
     var aggregator by remember { mutableStateOf<ValueCompletionAggregator?>(null) }
     var paramLoaded by remember { mutableStateOf(false) }
 
-    // 加载：真实节属性（getRealSectionNames，不含 value 数据文件条目）+ 合成指令属性，硬编码名单归类
+    // 加载：真实节属性（getRealSectionNames，不含 value 数据文件条目）+ 合成指令属性 + 值补全聚合器；
+    // 分类归属唯一来源 = 真实补全判定（manual 覆盖优先，否则按 Provider 实际服务归属，与自动补全同源）
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             val repo = CodeReferenceRepository()
@@ -107,41 +104,11 @@ fun CompletionTypeScreen(
             CompletionTypeRepository.load()
             manualOverrides = CompletionTypeRepository.currentManual()
             rnKeys = ResourceNameKeys.load().keys
-            paramFuncs = loadParamFuncs(context, TranslationEngine.getInstance().getTranslationDict())
-            // 收集 17 个真实节的属性（按 name 去重，首中优先；与生成脚本同口径）
-            val props = linkedMapOf<String, CodeReferenceRepository.PropertyInfo>()
-            repo.getRealSectionNames().forEach { sec ->
-                repo.getPropertiesForSection(sec).forEach { p ->
-                    if (!p.name.contains(": ")) props.putIfAbsent(p.name, p)
-                }
-            }
-            val list = props.values.map { p ->
-                Entry(
-                    p.name, p.name_en.orEmpty(), p.type,
-                    CompletionTypeRepository.classify(p.name, p.name_en),
-                    isResourceName = isResourceName(p, rnKeys)
-                )
-            }.toMutableList()
-            // 合成条目：不在 code_reference 但真实存在的指令属性（复制节 等）
-            CompletionTypeRepository.SYNTHETIC_PROPERTIES.forEach { sp ->
-                list.add(
-                    Entry(
-                        sp.name, sp.nameEn, "-",
-                        CompletionTypeRepository.classify(sp.name, sp.nameEn),
-                        isResourceName = false
-                    )
-                )
-            }
-            entries = list.sortedBy { it.name }
-            loaded = true
-        }
-    }
 
-    // 构建值补全聚合器（「+」号分类浏览与生产补全同源）+ 真实补全判定聚合器（全 Provider 默认选项）
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
+            // 构建值补全聚合器（「+」号分类浏览与生产补全同源）+ 真实补全判定聚合器（全 Provider 默认选项）
             val engine = TranslationEngine.getInstance()
             if (!engine.isLoaded) engine.load(context)
+            paramFuncs = loadParamFuncs(context, engine.getTranslationDict())
             val user = loadUserItems()
             val native = loadNativeItemsVerified(engine)
             val extra = loadExtraItemsVerified(context, engine)
@@ -161,26 +128,45 @@ fun CompletionTypeScreen(
                 engine.getTranslationDict()
             )
             // 真实补全判定聚合器：全部 Provider 默认选项（分类归属与运行时开关无关，与自动补全同源）
-            classifyAggregator = ValueCompletionAggregator(
+            val classifyAgg = ValueCompletionAggregator(
                 context,
                 sp,
                 ValueCompletionOptions(),
                 engine.getTranslationDict()
             )
-            paramLoaded = true
-        }
-    }
+            classifyAggregator = classifyAgg
 
-    // 进入页面时若持久化模式为真实补全且聚合器已就绪，按真实判定重算一次条目（避免首屏仍显示硬编码名单）
-    LaunchedEffect(classifyAggregator) {
-        val agg = classifyAggregator ?: return@LaunchedEffect
-        if (!useRealCompletion || realApplied) return@LaunchedEffect
-        withContext(Dispatchers.IO) {
-            val classify: (Entry) -> String = { e ->
-                manualOverrides[e.name] ?: agg.realCompletionClassify(context, e.name, e.nameEn.takeIf { it.isNotBlank() })
+            // 收集 17 个真实节的属性（按 name 去重，首中优先；与生成脚本同口径）
+            val props = linkedMapOf<String, CodeReferenceRepository.PropertyInfo>()
+            repo.getRealSectionNames().forEach { sec ->
+                repo.getPropertiesForSection(sec).forEach { p ->
+                    if (!p.name.contains(": ")) props.putIfAbsent(p.name, p)
+                }
             }
-            entries = entries.map { it.copy(category = classify(it)) }
-            realApplied = true
+            // 分类：manual 覆盖优先，否则真实补全判定（与自动补全同源，无第二份名单）
+            fun classify(name: String, nameEn: String?): String =
+                manualOverrides[name]
+                    ?: classifyAgg.realCompletionClassify(context, name, nameEn?.takeIf { it.isNotBlank() })
+            val list = props.values.map { p ->
+                Entry(
+                    p.name, p.name_en.orEmpty(), p.type,
+                    classify(p.name, p.name_en),
+                    isResourceName = isResourceName(p, rnKeys)
+                )
+            }.toMutableList()
+            // 合成条目：不在 code_reference 但真实存在的指令属性（复制节 等）
+            CompletionTypeRepository.SYNTHETIC_PROPERTIES.forEach { sp ->
+                list.add(
+                    Entry(
+                        sp.name, sp.nameEn, "-",
+                        classify(sp.name, sp.nameEn),
+                        isResourceName = false
+                    )
+                )
+            }
+            entries = list.sortedBy { it.name }
+            loaded = true
+            paramLoaded = true
         }
     }
 
@@ -201,23 +187,30 @@ fun CompletionTypeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "补全类型分类 + 资源名补全名单（点击可编辑，归类只认硬编码名单不看 type）",
+                "补全类型分类 + 资源名补全名单（点击可编辑，归类=真实补全判定，与自动补全同源）",
                 fontSize = 11.sp,
                 color = RustedOnBackground.copy(alpha = 0.5f),
                 modifier = Modifier.weight(1f)
             )
             if (loaded) {
                 TextButton(onClick = {
-                    // 真正重置：清空内存 manual + 删除持久化文件，完全恢复硬编码名单
+                    // 重置：清空内存 manual + 删除持久化文件，分类回到真实补全判定
                     CompletionTypeRepository.resetManual()
                     ResourceNameKeys.reset()
                     manualOverrides = emptyMap()
                     val defaultKeys = ResourceNameKeys.DEFAULT_KEYS
                     rnKeys = defaultKeys
+                    val agg = classifyAggregator
                     entries = entries.map {
                         Entry(
                             it.name, it.nameEn, it.type,
-                            CompletionTypeRepository.classify(it.name, it.nameEn),
+                            if (agg != null) {
+                                agg.realCompletionClassify(
+                                    context,
+                                    it.name,
+                                    it.nameEn.takeIf { x -> x.isNotBlank() }
+                                )
+                            } else CompletionTypeRepository.CAT_TEXT,
                             isResourceName = ResourceNameKeys(keys = defaultKeys).matches(
                                 it.nameEn.takeIf { x -> x.isNotBlank() } ?: it.name
                             )
@@ -266,66 +259,6 @@ fun CompletionTypeScreen(
             }
             return@Column
         }
-
-        // 名单源模式切换：硬编码名单 / 真实补全判定（切换时重算条目分类 + 联动刷新模拟ini）
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("名单源", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "硬编码",
-                fontSize = 11.sp,
-                color = if (!useRealCompletion) RustedPrimary else RustedOnBackground.copy(alpha = 0.4f)
-            )
-            Switch(
-                checked = useRealCompletion,
-                onCheckedChange = { enable ->
-                    useRealCompletion = enable
-                    SettingsManager.completionTypesRealMode = enable
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            val agg = classifyAggregator
-                            // 重算全部条目分类：manual 覆盖始终生效；真实模式按 Provider 实际服务判定，否则硬编码名单
-                            val classify: (Entry) -> String = { e ->
-                                manualOverrides[e.name] ?: if (enable && agg != null) {
-                                    agg.realCompletionClassify(context, e.name, e.nameEn.takeIf { it.isNotBlank() })
-                                } else {
-                                    CompletionTypeRepository.classify(e.name, e.nameEn)
-                                }
-                            }
-                            entries = entries.map { it.copy(category = classify(it)) }
-                            // 联动刷新模拟ini：跟随当前模式生成（真实模式传 classifier，硬编码模式传 null）
-                            MockIniGenerator.generate(
-                                context,
-                                classifier = if (enable && agg != null) PropertyClassifier { name, nameEn ->
-                                    agg.realCompletionClassify(context, name, nameEn)
-                                } else null,
-                                force = true
-                            )
-                        }
-                        Toast.makeText(
-                            context,
-                            if (enable) "已切换为真实补全判定（模拟ini已同步刷新）" else "已切换为硬编码名单（模拟ini已同步刷新）",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
-                enabled = classifyAggregator != null,
-                modifier = Modifier.scale(0.72f)
-            )
-            Text(
-                "真实补全",
-                fontSize = 11.sp,
-                color = if (useRealCompletion) RustedPrimary else RustedOnBackground.copy(alpha = 0.4f)
-            )
-            if (classifyAggregator == null) {
-                Spacer(Modifier.width(8.dp))
-                Text("判定聚合器加载中…", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f))
-            }
-        }
-        Spacer(Modifier.height(4.dp))
 
         // 分类筛选 + 资源名补全筛选
         LazyRow(
@@ -521,7 +454,7 @@ fun CompletionTypeScreen(
                     Spacer(Modifier.height(4.dp))
                     Text("类型: ${entry.type}", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                     Spacer(Modifier.height(4.dp))
-                    Text("（归类只认硬编码名单，此处为手工覆盖，保存后生效）", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                    Text("（归类=真实补全判定，此处为手工覆盖，保存后生效）", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f))
                     Spacer(Modifier.height(10.dp))
                     Text("属性分类", fontSize = 12.sp, color = RustedOnBackground)
                     Spacer(Modifier.height(4.dp))
@@ -963,8 +896,8 @@ private fun CallableCategoryBrowser(
 
 /**
  * 构建「真实补全判定」聚合器：全部 Provider、默认选项（分类归属与运行时开关无关），
- * 供分类页切换「真实补全」名单与 MainApp 打开模拟 ini 时共用，保证与自动补全同源、不漂移。
- * 需要加载补全三表 + 翻译引擎，较慢，调用方应在 IO 线程。失败返回 null（调用方回退硬编码名单）。
+ * 供分类页与 MainApp 打开模拟 ini 时共用，保证与自动补全同源、不漂移。
+ * 需要加载补全三表 + 翻译引擎，较慢，调用方应在 IO 线程。失败返回 null（调用方处理）。
  */
 suspend fun buildClassifyAggregator(context: Context): ValueCompletionAggregator? {
     return try {
@@ -988,11 +921,10 @@ suspend fun buildClassifyAggregator(context: Context): ValueCompletionAggregator
 }
 
 /**
- * 按持久化模式构建模拟 ini 属性分类器：真实补全模式返回按 Provider 实际服务归属的 [PropertyClassifier]，
- * 硬编码模式返回 null（MockIniGenerator 内部走 CompletionTypeRepository.classify）。
+ * 构建模拟 ini 属性分类器：真实补全判定（与自动补全同源，永不漂移，无第二份名单）。
+ * 失败返回 null（调用方处理）。
  */
 suspend fun buildMockIniClassifier(context: Context): PropertyClassifier? {
-    if (!SettingsManager.completionTypesRealMode) return null
     return buildClassifyAggregator(context)?.let { agg ->
         PropertyClassifier { name, nameEn ->
             agg.realCompletionClassify(context, name, nameEn)

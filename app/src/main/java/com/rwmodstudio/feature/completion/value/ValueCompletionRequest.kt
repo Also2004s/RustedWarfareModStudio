@@ -45,7 +45,11 @@ data class ValueCompletionRequest(
     val attachmentNames: Set<String> = emptySet(),
     val buildableNames: Set<String> = emptySet(),
     val soundFiles: Set<String> = emptySet(),
-    val chainSectionNames: Map<String, Set<String>> = emptyMap()
+    val chainSectionNames: Map<String, Set<String>> = emptyMap(),
+    /** 当前编辑文件所在目录（绝对路径），用于图片/音效「同目录裸名、跨目录 ROOT:」补全判定 */
+    val currentFileDir: String = "",
+    /** 项目根目录（绝对路径），用于将项目相对路径归一到 ROOT:/ 前缀 */
+    val projectRoot: String = ""
 ) {
     /**
      * 在当前节（或全局）中查找属性定义（数据来自自定义补全三表）。

@@ -56,6 +56,7 @@ import com.rwmodstudio.ui.components.DedupResultDialog
 import com.rwmodstudio.ui.components.RainbowBracketSettingsPanel
 import com.rwmodstudio.ui.components.UpdateDialogHost
 import com.rwmodstudio.ui.components.UpdateDialogState
+import com.rwmodstudio.ui.components.UpdateStateManager
 import com.rwmodstudio.ui.theme.*
 import com.rwmodstudio.util.NoMediaHelper
 import kotlinx.coroutines.Dispatchers
@@ -106,7 +107,6 @@ fun MainApp() {
     var currentScreen by rememberSaveable(stateSaver = screenSaver) { mutableStateOf(Screen.HOME) }
 
     // ===== 自动检查更新（一天最多提示一次；用户关闭后该版本不再提示） =====
-    var autoUpdateDialog by remember { mutableStateOf<UpdateDialogState?>(null) }
     LaunchedEffect(Unit) {
         // 当天已提示过则不重复弹
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -128,7 +128,7 @@ fun MainApp() {
         if (result != null) {
             // 弹出即记录当天已提示，保证"一天最多一次"
             SettingsManager.lastUpdatePromptDate = today
-            autoUpdateDialog = result
+            UpdateStateManager.state.value = result
         }
     }
 
@@ -437,10 +437,8 @@ fun MainApp() {
         }
     }
 
-    // 自动更新提示弹窗（全局宿主，任何页面都显示；关闭时记忆该版本不再提示）
+    // 自动更新提示弹窗（全局共享状态：任何页面都显示；关闭时记忆该版本不再提示）
     UpdateDialogHost(
-        state = autoUpdateDialog,
-        onStateChange = { autoUpdateDialog = it },
         onVersionDismissed = { version -> SettingsManager.dismissedUpdateVersion = version }
     )
 
@@ -850,8 +848,8 @@ fun MainApp() {
                     Screen.DEVELOPER -> DeveloperModeScreen(
                         onOpenMockIni = {
                             scope.launch(Dispatchers.IO) {
-                                // 按持久化模式构建分类器：真实补全模式（与自动补全同源）或硬编码名单，模拟 ini 跟随当前模式生成
-                                val classifier = buildMockIniClassifier(context)
+                                // 真实补全分类器（与自动补全同源，永不漂移），模拟 ini 始终按它生成
+                                val classifier = buildMockIniClassifier(context) ?: return@launch
                                 val file = com.rwmodstudio.core.translation.MockIniGenerator.generate(context, classifier)
                                 if (file != null) {
                                     val path = file.absolutePath

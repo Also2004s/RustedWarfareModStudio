@@ -1,4 +1,4 @@
-﻿package com.rwmodstudio.ui.screens
+package com.rwmodstudio.ui.screens
 
 import android.content.Intent
 import android.net.Uri
@@ -42,12 +42,12 @@ import com.rwmodstudio.core.translation.TranslationBlocklist
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.components.ColorWheelPicker
 import com.rwmodstudio.ui.components.DarkTokenColorDialog
-import com.rwmodstudio.ui.components.UpdateDialogHost
-import com.rwmodstudio.ui.components.UpdateDialogState
+import com.rwmodstudio.ui.components.UpdateStateManager
 import com.rwmodstudio.ui.theme.fontFamilyDisplayName
 import com.rwmodstudio.ui.theme.*
 import com.rwmodstudio.util.uriToAbsolutePath
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -89,7 +89,6 @@ fun SettingsScreen(
     var showRestartDialog by remember { mutableStateOf(false) }
     var localConfigMessage by remember { mutableStateOf("") }
     var checkingUpdate by remember { mutableStateOf(false) }
-    var updateDialog by remember { mutableStateOf<UpdateDialogState?>(null) }
     val updateScope = rememberCoroutineScope()
 
     val folderPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -545,22 +544,12 @@ fun SettingsScreen(
                 onClick = {
                     if (!checkingUpdate) {
                         checkingUpdate = true
-                        updateDialog = UpdateDialogState.Checking
+                        // 检查与弹窗由进程级管理器统一处理，切页不消失
+                        UpdateStateManager.checkForUpdate(BuildConfig.VERSION_NAME)
                         updateScope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                try {
-                                    val info = UpdateChecker.fetchLatest()
-                                    if (UpdateChecker.isNewerThan(info.versionName, BuildConfig.VERSION_NAME)) {
-                                        UpdateDialogState.Available(info)
-                                    } else {
-                                        UpdateDialogState.NoUpdate
-                                    }
-                                } catch (e: Exception) {
-                                    UpdateDialogState.Error(e.message ?: "未知错误")
-                                }
-                            }
+                            // 稍等检查开始后，释放本页自己的"检查中"开关（真正完成由状态驱动）
+                            delay(1200)
                             checkingUpdate = false
-                            updateDialog = result
                         }
                     }
                 }
@@ -994,11 +983,6 @@ fun SettingsScreen(
             }
         )
     }
-
-    UpdateDialogHost(
-        state = updateDialog,
-        onStateChange = { updateDialog = it }
-    )
 }
 
 @Composable

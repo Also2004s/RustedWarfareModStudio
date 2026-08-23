@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.LOGIC_SYNTAX_ITEMS
 import com.rwmodstudio.feature.completion.completionMatchLevel
@@ -16,7 +17,7 @@ private fun Collection<String>.rankedByMatch(prefix: String): List<String> {
 /**
  * memory 变量值补全。
  * 触发条件：
- * 1. 属性名含 "memory"（通过 findProperty 或翻译库反向查找），如 setUnitMemory、updateUnitMemory
+ * 1. 内存属性精确名单命中（setUnitMemory/updateUnitMemory/defineUnitMemory/@memory，经 code_reference 核实）
  * 2. 值前缀为 "memory"/"内存"/"memory."/"内存."，或**任意位置**出现 内存./memory. 段
  *    （含 %{ 插值内，如 text:%{内存.攻击目标.}；任意属性值位置直接引用 内存.xxx）
  * 3. 值前缀为 "内存.<单位型变量>." → 单位成员补全（unit 型内存变量等价 当前动作目标，见 memoryUnitVarChainRegex）
@@ -24,21 +25,22 @@ private fun Collection<String>.rankedByMatch(prefix: String): List<String> {
 class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
-        // 方式1a：属性名直接含 "memory"（英文属性）或 "内存"（中文属性），例如 setUnitMemory、设置单位内存
-        if (request.propertyName.lowercase().contains("memory")) return true
-        if (request.propertyName.contains("内存")) return true
-
-        // 方式1b：通过代码表 findProperty 找到属性，且 name/name_en 含 "memory"
+        // 方式1：内存属性精确名单（经 code_reference 逐条核实，与分类页/模拟 ini 共源 CompletionShared），
+        // 不做 contains("memory") 部分名匹配。
+        // 覆盖：setUnitMemory(设置单位内存)/updateUnitMemory/defineUnitMemory(定义单位内存)/@memory，
+        // 以及定义单位内存文档模板（defineUnitMemory: ...）。
+        // 排除含 "memory" 子串但非内存引用的 updateUnitMemoryRate(更新单位内存频率,type=int)。
         val prop = request.findProperty()
-        if (prop != null) {
-            val names = listOfNotNull(prop.name, prop.name_en).joinToString(" ").lowercase()
-            if (names.contains("memory")) return true
+        val direct = request.propertyName.trim().lowercase()
+        val names = buildList {
+            add(direct)
+            if (prop != null) {
+                add(prop.name.trim().lowercase())
+                prop.name_en?.let { add(it.trim().lowercase()) }
+            }
+            if (request.isChineseName()) add(request.toEnglishName().trim().lowercase())
         }
-
-        // 方式1c：中文属性名通过翻译库反向查找，英文名含 "memory"
-        if (request.isChineseName()) {
-            if (request.toEnglishName().lowercase().contains("memory")) return true
-        }
+        if (names.any { it in CompletionShared.memoryPropertyNames }) return true
 
         // 方式2：值前缀为 内存/memory（裸关键字），或任意位置含 内存./memory. 段（含 %{ 插值内）
         val prefix = request.valuePrefix.lowercase()
@@ -111,7 +113,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         memoryUnitVarChainRegex.find(memContext)?.let { m ->
             // 数组下标（内存.空天航线[0].hp）变量名去 `[i]` 后再查声明类型，unit 型成员才补全
             val type = request.memoryTypes[m.groupValues[1].substringBefore('[')]
-            if (type != null && type.lowercase().contains("unit")) {
+            if (type != null && isUnitMemoryType(type)) {
                 val fragment = m.groupValues[2]
                 return buildLogicMemberItems(request, fragment, fragment.length)
             }
@@ -133,11 +135,10 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         val isUnitRhsTarget = isRhsContext && isKvp && run {
             val seg = lastTopLevelSegment(request.textBeforeCursor.substringAfter(':'))
             val eq = topLevelEq(seg)
-            eq >= 0 && (request.memoryTypes[seg.substring(0, eq).trim().substringBefore('[')]
-                ?.lowercase()?.contains("unit") == true)
+            eq >= 0 && isUnitMemoryType(request.memoryTypes[seg.substring(0, eq).trim().substringBefore('[')])
         }
         val rhsNames = if (isUnitRhsTarget) names.filter {
-            (request.memoryTypes[it.substringBefore('[')] ?: "").lowercase().contains("unit")
+            isUnitMemoryType(request.memoryTypes[it.substringBefore('[')])
         } else names
 
         if (isRhsContext) {
@@ -256,6 +257,14 @@ internal fun isMemoryTypePosition(valuePrefix: String): Boolean {
     val seg = valuePrefix.substringAfterLast(',').substringAfterLast('，').trim()
     return seg.isBlank() || !seg.any { it == ' ' || it == '\t' }
 }
+
+/**
+ * 是否为 unit 型内存变量（内存变量声明类型精确匹配，不做 contains("unit") 部分名匹配）。
+ * 内存变量类型来自 defineUnitMemory 的固定类型表（int/float/string/bool/number/text/logic/unit 及其数组），
+ * 单位型仅 unit 与 unit[]（数组下标场景如 内存.空天航线[0]）。
+ */
+internal fun isUnitMemoryType(type: String?): Boolean =
+    type?.lowercase() in setOf("unit", "unit[]")
 
 /**
  * 是否为内存引用裸关键字（memory/内存，未带点）。

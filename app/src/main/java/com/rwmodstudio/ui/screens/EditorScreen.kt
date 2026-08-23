@@ -58,6 +58,7 @@ import com.rwmodstudio.feature.completion.extractFileSymbols
 import com.rwmodstudio.feature.completion.mergeCompletionSymbols
 import com.rwmodstudio.feature.completion.sectionEnToZh
 import com.rwmodstudio.feature.completion.value.ProjectImageCache
+import com.rwmodstudio.feature.completion.value.ProjectIniFileCache
 import com.rwmodstudio.feature.completion.value.ProjectSoundCache
 import com.rwmodstudio.ui.components.*
 import com.rwmodstudio.ui.theme.*
@@ -181,11 +182,14 @@ fun EditorScreen(
         extraCustomCompletions = extraItems
         loaded = true
 
-        // 后台刷新项目图片路径缓存，避免图片路径值补全在主线程扫描目录
-        val imageCachePath = projectRoot.ifEmpty { SettingsManager.defaultPath }
+        // 后台刷新项目图片/音效路径缓存，避免路径值补全在主线程扫描目录。
+        // 项目根统一为「EditorScreen 的项目根脚 defaultModPath」，与补全 Provider 查询路径保持一致，
+        // 否则图片/音效缓存的 cachedProjectPath 与 Provider 的 projectPath 不一致会导致补全为空。
+        val imageCachePath = projectRoot.ifEmpty { SettingsManager.defaultModPath() }
         if (imageCachePath.isNotBlank()) {
             launch(Dispatchers.IO) { ProjectImageCache.refresh(imageCachePath) }
             launch(Dispatchers.IO) { ProjectSoundCache.refresh(imageCachePath) }
+            launch(Dispatchers.IO) { ProjectIniFileCache.refresh(imageCachePath) }
         }
         // 翻译引擎关闭（devTranslationEngine 关或引擎未加载）时，补全 Provider 输入改用本地英文表，
         // 让补全 label 与插入文本保持英文，避免中文键值写死；值补全索引/行尾灯泡仍用下方保留的中文表。
@@ -818,6 +822,11 @@ fun EditorScreen(
                 Text(currentSection ?: "无", fontSize = 11.sp, color = RustedPrimary, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text("${allSections.size} 个节", fontSize = 9.sp, color = RustedOnBackground.copy(alpha = 0.35f))
             }
+        }
+        // 维持补全器当前文件路径与项目根（供图片/音效「同目录裸名、跨目录 ROOT:」判定）
+        LaunchedEffect(filePath, cp, projectRoot) {
+            cp?.currentFilePath = filePath
+            cp?.currentProjectRoot = projectRoot.ifEmpty { SettingsManager.defaultModPath() }
         }
         // Editor - 占满剩余空间
         Box(Modifier.weight(1f)) {

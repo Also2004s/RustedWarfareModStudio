@@ -15,6 +15,7 @@ class UnitNameListPropertyTest {
         assertTrue(CompletionShared.isUnitNameListProperty("unitsSpawnedOnDeath"), "死亡产生单位")
         assertTrue(CompletionShared.isUnitNameListProperty("overrideAndReplace"), "覆盖单位")
         assertTrue(CompletionShared.isUnitNameListProperty("upgradedFrom"), "升级自")
+        assertTrue(CompletionShared.isUnitNameListProperty("displayLocaleKey"), "界面显示内部调用：填单位内部标识")
     }
 
     @Test

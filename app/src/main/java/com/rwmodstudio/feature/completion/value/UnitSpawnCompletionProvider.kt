@@ -25,9 +25,16 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         val prop = request.findProperty() ?: return emptyList()
+        // spawnUnit（单数，可位于抛射体节内）type 虽为 projectile ref，但语义是「在抛射体爆炸处产生单位」，
+        // 值填单位名（已纳入 CompletionShared.unitSpawnProperties 单位名单）。故 type 兜底前须排除它，
+        // 否则会被 contains("projectile") 误判成抛射体生成而只补抛射体节名。
+        val enName = prop.name_en?.lowercase() ?: ""
+        // 名单判定兼容两种形态：name_en（英文）或 name 本身（可能是英文如 spawnUnit，也可能是中文）。
+        val inUnitSpawnList = enName in CompletionShared.unitSpawnProperties ||
+            prop.name.lowercase() in CompletionShared.unitSpawnProperties
         val isProjectile = CompletionShared.isProjectileSpawnProperty(prop.name) ||
             (prop.name_en != null && CompletionShared.isProjectileSpawnProperty(prop.name_en)) ||
-            prop.type.lowercase().contains("projectile")
+            (prop.type.lowercase().contains("projectile") && !inUnitSpawnList)
         val fileName = if (isProjectile) "spawnProjectiles" else "spawnUnits"
         val data = ValueDataLoader.load(request.context, fileName, request.translationDict)
 

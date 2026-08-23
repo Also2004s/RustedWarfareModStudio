@@ -38,7 +38,9 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
         "autoTriggerCheckRate" to "autoTriggerCheckRate",
         // 内置预设选项类：死亡爆炸类型 / 效果图像集（desc 给出明确内置名单）
         "explodeTypeOnDeath" to "explodeTypeOnDeath",
-        "stripIndex" to "stripIndex"
+        "stripIndex" to "stripIndex",
+        // 优先级：接受关键字 veryLow/low/normal/high/veryHigh/critical（也可填数字）
+        "priority" to "priority"
     )
 
     /**

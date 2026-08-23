@@ -44,8 +44,8 @@ object VerifyManager {
     const val NATIVE_TRANSLATION_CODE = "100004"
     const val EXTRA_TRANSLATION_CODE = "100005"
     const val RESOURCE_NAME_KEYS_CODE = "620411"
-    const val COMPLETION_TYPES_CODE = "731826"
-    const val MOCK_INI_CODE = "481215"
+    const val COMPLETION_TYPES_CODE = "731827"
+    const val MOCK_INI_CODE = "481216"
 
     private val defaults = mapOf(
         BLOCKLIST to BLOCKLIST_CODE,

@@ -114,7 +114,9 @@ class ValueCompletionAggregator(
         attachmentNames: Set<String> = emptySet(),
         buildableNames: Set<String> = emptySet(),
         soundFiles: Set<String> = emptySet(),
-        chainSectionNames: Map<String, Set<String>> = emptyMap()
+        chainSectionNames: Map<String, Set<String>> = emptyMap(),
+        currentFileDir: String = "",
+        projectRoot: String = ""
     ): List<CompletionProvider.CompletionItem> {
         return getValueCompletionsGrouped(
             context = context,
@@ -147,7 +149,9 @@ class ValueCompletionAggregator(
             attachmentNames = attachmentNames,
             buildableNames = buildableNames,
             soundFiles = soundFiles,
-            chainSectionNames = chainSectionNames
+            chainSectionNames = chainSectionNames,
+            currentFileDir = currentFileDir,
+            projectRoot = projectRoot
         ).flatMap { it.items }
     }
 
@@ -186,7 +190,9 @@ class ValueCompletionAggregator(
         attachmentNames: Set<String> = emptySet(),
         buildableNames: Set<String> = emptySet(),
         soundFiles: Set<String> = emptySet(),
-        chainSectionNames: Map<String, Set<String>> = emptyMap()
+        chainSectionNames: Map<String, Set<String>> = emptyMap(),
+        currentFileDir: String = "",
+        projectRoot: String = ""
     ): List<ProviderResult> {
         val request = ValueCompletionRequest(
             context = context,
@@ -221,7 +227,9 @@ class ValueCompletionAggregator(
             attachmentNames = attachmentNames,
             buildableNames = buildableNames,
             soundFiles = soundFiles,
-            chainSectionNames = chainSectionNames
+            chainSectionNames = chainSectionNames,
+            currentFileDir = currentFileDir,
+            projectRoot = projectRoot
         )
 
         val results = mutableListOf<ProviderResult>()
@@ -291,9 +299,8 @@ class ValueCompletionAggregator(
     /**
      * 真实补全判定：按「生产补全实际会由哪个 Provider 服务该属性」归类。
      *
-     * 与补全分类页硬编码名单（[CompletionTypeRepository.classify]）不同，这里用与生产补全
-     * 完全相同的 [providers]（同顺序）逐个调用 [BaseValueCompletionProvider.matches]，首个命中
-     * 的 Provider 决定归属——保证分类与真实自动补全同源、不漂移。
+     * 与生产补全用完全相同的 [providers]（同顺序）逐个调用 [BaseValueCompletionProvider.matches]，
+     * 首个命中的 Provider 决定归属——分类与真实自动补全同源，不存在第二份名单，永不漂移。
      *
      * @param name 属性名（中文或英文，与分类页展示一致）
      * @param nameEn 属性英文名（无则传 null）

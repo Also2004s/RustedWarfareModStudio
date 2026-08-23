@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.ResourceNameKeys
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
@@ -34,19 +35,15 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
         // 2) 属性型：光标位于值内未闭合的 '(' 之后（如 价格:(）时不再触发
         if (request.isInsideParentheses()) return false
 
-        // 3) 属性型判定：优先用「资源名补全属性名单」（翻译库英文），命中的属性必然弹资源名；
-        //    名单未命中时回退 type 关键字（price/resource 等），中文兜底仅在没有属性定义时生效。
+        // 3) 属性型判定：硬编码精确名单优先（经 code_reference 逐条核实，与分类页共源 CompletionShared），
+        //    命中的属性必然弹资源名；名单未命中回退 type 关键字（price/resource 等）作初筛。
         //    —— 名单法避免 type 分类/中文关键词的漏洞（如「资源活着时借用」运行时 type 读歪也被名单兜住）。
+        //    —— 全程不做属性名 contains(资源/价格) 模糊匹配。
+        val en = request.toEnglishName()
+        if (CompletionShared.isResourceProperty(en)) return true
+        if (ResourceNameKeys.load().matches(en)) return true
         val prop = request.findProperty()
-        if (prop != null) {
-            if (ResourceNameKeys.load().matches(request.toEnglishName())) return true
-            val typeLower = prop.type.lowercase()
-            if (isResourceTypeKeyword(typeLower)) return true
-            return false
-        }
-        // 中文兜底（仅在找不到属性定义时）：属性名含"资源"或"价格"
-        val pn = request.propertyName
-        if (pn.contains("资源") || pn.contains("价格")) return true
+        if (prop != null && isResourceTypeKeyword(prop.type.lowercase())) return true
         return false
     }
 

@@ -29,21 +29,45 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
         "interface_error", "nuke_explode", "nuke_launch", "laser_deflect", "laser_deflect2"
     )
 
-    /** 开火音效英文属性名（type=string，非项目音频引用，供 isShootSound 判定） */
-    private val shootSoundName = "shoot_sound"
+    /**
+     * 音效路径属性硬编码精确名单（经 code_reference.json 逐条核实真实用法，type 只作初筛）。
+     * 覆盖：action/effect 的 sound ref 播放声音、core 的 sound(s) 指令/选中/死亡音效，
+     * 以及 type 不匹配但用法确为音效的 shoot_sound(string)/soundOnDeath(string(s))。
+     * 排除项（名字或 type 像音效但实际非路径，由名单天然隔离）：
+     * hitSound(打击音效,bool 开关)、shoot_sound_vol(开火音效大小,float)、shoot_flame(开火动画,effects)、shoot_light(开火闪光,color)。
+     */
+    private val soundPathNames = setOf(
+        // action/effect：sound ref 播放声音
+        "playSoundToPlayerOnQueue", "playSoundAtUnit", "playSoundGlobally", "playSoundToPlayer",
+        "alsoPlaySound",
+        // core：sound(s) 指令/选中/死亡音效
+        "soundOnAttackOrder", "soundOnMoveOrder", "soundOnNewSelection",
+        // type 不匹配但用法是音效
+        "shoot_sound", "soundOnDeath"
+    )
+
+    /** 音效多语言变体前缀（playSoundToPlayer_zh 等，属性名后加 _{LANG}），同样按音效补全 */
+    private val soundNamePrefixes = listOf(
+        "playsoundtoplayeronqueue_", "playsoundatunit_", "playsoundglobally_", "playsoundtoplayer_"
+    )
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         if (request.isInsideParentheses()) return false
         val prop = request.findProperty() ?: return false
-        if (isShootSound(prop)) return true
+        if (isSoundProperty(prop)) return true
+        if (isCopyFromFile(prop)) return true
         return projectRefKind(prop.type) != null
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         val prop = request.findProperty() ?: return emptyList()
-        // 开火音效：type=string，非项目音频引用 —— 内置音效 + 项目音频（支持 .wav/.ogg/ROOT: 自定义）并存
-        if (isShootSound(prop)) {
-            return buildItems(request, "音效", (builtInSounds + request.soundFiles).distinct(), descPrefix = "data.value.sound")
+        // 音效：内置音效 + 项目音频（默认同目录裸名、跨目录需 ROOT:）并存
+        if (isSoundProperty(prop)) {
+            return buildSoundItems(request)
+        }
+        // 核心节 复制与(copyFrom)：type=file(s) (ini)，项目 ini/template 文件（默认同目录裸名、跨目录需 ROOT:）
+        if (isCopyFromFile(prop)) {
+            return buildFileItems(request)
         }
         val kind = projectRefKind(prop.type) ?: return emptyList()
         val source = when (kind) {
@@ -56,17 +80,143 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             "decal" -> request.decalNames
             "attachment" -> request.attachmentNames
             "canbuild" -> request.buildableNames
-            // sound 类（sound ref）：内置音效 + 项目音频文件并存
-            "sound" -> (builtInSounds + request.soundFiles).distinct()
+            // sound 类（sound ref）音频：内置音效 + 项目音频（默认同目录裸名、跨目录需 ROOT:）
+            "sound" -> return buildSoundItems(request)
             else -> return emptyList()
         }
         val descPrefix = if (kind == "effect") "data.value.effect" else if (kind == "sound") "data.value.sound" else null
+        // CUSTOM: 前缀：effect 支持 CUSTOM:<项目效果节名>（如 [效果_xxx] 的 xxx），不匹配内置效果节名
+        if (kind == "effect" && prefixIsCustomPrefixed(request.valuePrefix)) {
+            val customNames = request.effectNames
+                .map { it.removePrefix("CUSTOM:").removePrefix("custom:") }
+                .filter { it.isNotBlank() }
+            return buildItems(request, "项目引用", customNames.map { "CUSTOM:$it" }, descPrefix = descPrefix)
+        }
         return buildItems(request, "项目引用", source, descPrefix = descPrefix)
     }
 
-    private fun isShootSound(prop: com.rwmodstudio.core.translation.CodeReferenceRepository.PropertyInfo): Boolean {
-        return prop.name.equals(shootSoundName, ignoreCase = true) ||
-            prop.name_en.equals(shootSoundName, ignoreCase = true)
+    /** valuePrefix 是否以 CUSTOM: 开头 */
+    private fun prefixIsCustomPrefixed(prefix: String): Boolean =
+        prefix.lowercase().startsWith("custom:")
+
+    /**
+     * 音效路径属性判定：硬编码名单精确匹配 + type 初筛兜底。
+     * 名单优先（含多语言变体前缀）；未命中名单时用 type 初筛（sound ref/sound(s)/sounds），
+     * 但会规避 bool/float/effects/color 等非路径类型。
+     */
+    private fun isSoundProperty(prop: com.rwmodstudio.core.translation.CodeReferenceRepository.PropertyInfo): Boolean {
+        val names = listOfNotNull(prop.name, prop.name_en).map { it.trim().lowercase() }
+        // 精确名单命中（含英文 name_en 与中文 name 反查场景）
+        if (names.any { it in soundPathNames }) return true
+        // 多语言变体前缀命中（playSoundToPlayer_zh 等）
+        if (names.any { n -> soundNamePrefixes.any { n.startsWith(it) } }) return true
+        // type 初筛兜底：归一化后含 soundref/sounds 才走音效，bool/float/effects/color 天然隔离
+        return projectRefKind(prop.type) == "sound"
+    }
+
+    /** 核心节 复制与(copyFrom)：type 为 file(s) (ini) 等文件引用（仅核心节的复制与，腿/炮塔的复制与是 int 不命中） */
+    private fun isCopyFromFile(prop: com.rwmodstudio.core.translation.CodeReferenceRepository.PropertyInfo): Boolean {
+        val isCopyFrom = prop.name.equals("copyFrom", ignoreCase = true) ||
+            prop.name_en.equals("copyFrom", ignoreCase = true)
+        return isCopyFrom && prop.type.lowercase().contains("file")
+    }
+
+    /**
+     * 音效补全：内置音效 + 项目音频。与图片路径补全同规则——
+     * 默认（未输入/未点 ROOT:）只列同目录项目音频（裸名）+ 内置音效；
+     * 输入/点击 ROOT: 后才列出跨目录项目音频（ROOT:/相对路径）。
+     */
+    private fun buildSoundItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        val prefix = request.valuePrefix
+        val inRoot = prefix.trim().lowercase().startsWith("root:")
+        // ROOT: 态用「去掉 ROOT: 前缀」的子串；默认态用输入子串
+        val sub = if (inRoot) prefix.trim().lowercase().removePrefix("root:").removePrefix("/").trim()
+        else prefix.trim().lowercase()
+        // 全量项目音频（相对路径，不带 ROOT:），补全侧自行过滤，不依赖预滤波集合
+        val allProjectSounds = ProjectSoundCache.query(request.projectRoot, "", limit = 500)
+
+        val raw = mutableListOf<Pair<String, String>>() // (insert, sortKey)
+        // 默认态：提供 ROOT: 前缀选择项，点击/输入后展开跨目录项目音效
+        if (!inRoot && request.projectRoot.isNotBlank()) raw += "ROOT:" to "ROOT:"
+        // 内置音效：仅默认态显示（按子串匹配）；ROOT: 态只列跨目录项目音频，内置音效不掺入
+        builtInSounds.forEach { name ->
+            if (inRoot) return@forEach
+            if (sub.isEmpty() || name.contains(sub, ignoreCase = true)) raw += name to name
+        }
+        // 项目音频：默认只同目录裸名；ROOT: 态只列跨目录 ROOT:/ 相对路径
+        allProjectSounds.forEach { rel ->
+            val insert = formatProjectRefInsertValue(rel, request.currentFileDir, request.projectRoot)
+            val isCrossDir = insert.startsWith("ROOT:/")
+            if (inRoot != isCrossDir) return@forEach // inRoot→保留跨目录; 默认→保留同目录
+            val base = rel.substringAfterLast('/').substringAfterLast('\\')
+            if (sub.isEmpty() || rel.contains(sub, true) || base.contains(sub, true)) raw += insert to insert
+        }
+        val items = raw.sortedWith(compareBy<Pair<String, String>> { !it.second.contains(sub) }.thenBy { it.second.lowercase() })
+            .map { (insert, _) ->
+                val perName = ValueDescriptionRepository.lookup(request.context, "data.value.sound.$insert")
+                createValueItem(
+                    label = insert,
+                    detail = perName ?: "音效",
+                    insertText = insert,
+                    prefixLength = request.rawValuePrefixLength,
+                    valueType = "string"
+                )
+            }
+            .toMutableList()
+        // 默认态把 ROOT: 前缀选择项置顶（与图片补全一致），便于用户直接点选展开跨目录项目音效
+        if (!inRoot) {
+            items.firstOrNull { it.insertText == "ROOT:" }?.let {
+                items.remove(it)
+                items.add(0, it)
+            }
+        }
+        return items
+    }
+
+    /**
+     * 核心节 复制与(copyFrom) 的文件补全：项目 ini/template 文件。与图片/音效路径补全同规则——
+     * 默认（未输入/未点 ROOT:）只列同目录项目文件（裸名）；
+     * 输入/点击 ROOT: 后才列出跨目录项目文件（ROOT:/相对路径），且 ROOT: 前缀选项默认置顶。
+     */
+    private fun buildFileItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        val prefix = request.valuePrefix
+        val inRoot = prefix.trim().lowercase().startsWith("root:")
+        // ROOT: 态用「去掉 ROOT: 前缀」的子串；默认态用输入子串
+        val sub = if (inRoot) prefix.trim().lowercase().removePrefix("root:").removePrefix("/").trim()
+        else prefix.trim().lowercase()
+        // 全量项目 ini/template 文件（相对路径，不带 ROOT:），补全侧自行过滤
+        val allProjectFiles = ProjectIniFileCache.query(request.projectRoot, "", limit = 500)
+
+        val raw = mutableListOf<Pair<String, String>>() // (insert, sortKey)
+        // 默认态：提供 ROOT: 前缀选择项，点击/输入后展开跨目录项目文件
+        if (!inRoot && request.projectRoot.isNotBlank()) raw += "ROOT:" to "ROOT:"
+        // 项目文件：默认只同目录裸名；ROOT: 态只列跨目录 ROOT:/ 相对路径
+        allProjectFiles.forEach { rel ->
+            val insert = formatProjectRefInsertValue(rel, request.currentFileDir, request.projectRoot)
+            val isCrossDir = insert.startsWith("ROOT:/")
+            if (inRoot != isCrossDir) return@forEach // inRoot→保留跨目录; 默认→保留同目录
+            val base = rel.substringAfterLast('/').substringAfterLast('\\')
+            if (sub.isEmpty() || rel.contains(sub, true) || base.contains(sub, true)) raw += insert to insert
+        }
+        val items = raw.sortedWith(compareBy<Pair<String, String>> { !it.second.contains(sub) }.thenBy { it.second.lowercase() })
+            .map { (insert, _) ->
+                createValueItem(
+                    label = insert,
+                    detail = "ini/template 文件",
+                    insertText = insert,
+                    prefixLength = request.rawValuePrefixLength,
+                    valueType = "string"
+                )
+            }
+            .toMutableList()
+        // 默认态把 ROOT: 前缀选择项置顶（与图片/音效补全一致），便于用户直接点选展开跨目录项目文件
+        if (!inRoot) {
+            items.firstOrNull { it.insertText == "ROOT:" }?.let {
+                items.remove(it)
+                items.add(0, it)
+            }
+        }
+        return items
     }
 
     private fun buildItems(
@@ -88,12 +238,15 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.lowercase() })
             .map { it.first }
             .map { name ->
+                // 项目音频路径（含目录分隔符）格式化为「同目录裸名、跨目录 ROOT:/」；内置音效名保持不变
+                val isProjectPath = name.contains('/') || name.contains('\\')
+                val insert = if (isProjectPath) formatProjectRefInsertValue(name, request.currentFileDir, request.projectRoot) else name
                 // 内置音效/特效（builtInSounds/builtInEffects）逐项查中文说明；项目音频/效果节名等无说明项回退默认 detail
                 val perName = descPrefix?.let { ValueDescriptionRepository.lookup(request.context, "$it.$name") }
                 createValueItem(
-                    label = name,
+                    label = insert,
                     detail = perName ?: detail,
-                    insertText = name,
+                    insertText = insert,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "string"
                 )

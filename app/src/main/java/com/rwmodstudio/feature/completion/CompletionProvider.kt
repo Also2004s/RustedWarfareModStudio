@@ -77,6 +77,11 @@ class CompletionProvider(
     /** 继承链符号（仅父文件/模板，供 @copyFromSection 等只查继承链的补全使用）；由 EditorScreen 后台维护。 */
     var chainSymbols: ProjectTagScanner.ProjectTagInfo? = null
 
+    /** 当前编辑文件绝对路径（由 EditorScreen 维护）。用于图片/音效补全的「同目录裸名、跨目录 ROOT:」判定。 */
+    var currentFilePath: String = ""
+    /** 当前编辑文件所属项目根（由 EditorScreen 设置，与图片/音效缓存刷新路径保持一致） */
+    var currentProjectRoot: String = ""
+
     private val valueAggregator by lazy {
         ValueCompletionAggregator(context, valueSectionProperties, valueCompletionOptions, translationDict)
     }
@@ -251,7 +256,15 @@ class CompletionProvider(
             afterCompleteValue = includeOperators
             // 键/值分隔符取第一个 ':'（INI 键名不含冒号），与 SoraCodeEditor 的触发端保持一致；
             // 值内可含 ':'（如 ROOT:、CUSTOM:），取最后一个会把键名切错导致补全失效。
-            val (keyPart, rawValuePrefix) = splitKeyValueLine(currentLine)
+            // 多行值块（`key:"""` ... `"""`）的续行没有属性键，keyPart 会取到 ROOT 等伪键或为空；
+            // 此时回退取整个多行块的归属属性键（如 复制与）作为 keyPart、以当前行作为值前缀，
+            // 让复制与 的 ini/template 文件补全在续行也能触发。
+            val multilineOwner = multilineValueOwnerKey(textBeforeCursor)
+            val (keyPart, rawValuePrefix) = if (multilineOwner != null) {
+                multilineOwner to currentLine
+            } else {
+                splitKeyValueLine(currentLine)
+            }
             if (keyPart.isNotEmpty()) {
                 // 值补全只替换当前正在输入的"片段"，而非从 ':' 到光标的全部内容。
                 // 以 ','、'，'、'(' 或空白作为分隔，找到最后一个分隔符后的可替换前缀。
@@ -294,13 +307,17 @@ class CompletionProvider(
                 val decalNames = sectionNames["decal"] ?: emptySet()
                 val attachmentNames = sectionNames["attachment"] ?: emptySet()
                 val buildableNames = sectionNames["canbuild"] ?: emptySet()
-                // 声音引用：走音频文件扫描缓存（相对路径，不带 ROOT:）
+                // 声音引用：走音频文件扫描缓存（相对路径，不带 ROOT:）。项目根与缓存刷新源一致（EditorScreen 维护）
                 val soundFiles = run {
-                    val projectPath = SettingsManager.defaultPath.takeIf { it.isNotBlank() }
-                        ?: SettingsManager.lastPath.takeIf { it.isNotBlank() }
-                        ?: ""
+                    val projectPath = currentProjectRoot.ifBlank { SettingsManager.defaultModPath() }
                     if (projectPath.isBlank()) emptySet() else ProjectSoundCache.query(projectPath, valuePrefix).toSet()
                 }
+                // 当前编辑文件目录 + 项目根：供图片/音效「同目录裸名、跨目录 ROOT:」补全判定
+                val currentFileDir = currentFilePath
+                    .let { java.io.File(it) }
+                    .takeIf { it.isAbsolute }
+                    ?.parentFile?.absolutePath.orEmpty()
+                val projectRoot = currentProjectRoot.ifBlank { SettingsManager.defaultModPath() }
                 val valueCandidates = valueAggregator.getValueCompletions(
                     context = context,
                     propertyName = keyPart,
@@ -332,7 +349,9 @@ class CompletionProvider(
                     attachmentNames = attachmentNames,
                     buildableNames = buildableNames,
                     soundFiles = soundFiles,
-                    chainSectionNames = chainSectionNames
+                    chainSectionNames = chainSectionNames,
+                    currentFileDir = currentFileDir,
+                    projectRoot = projectRoot
                 )
                 // 同 label 去重：self.readUnitMemory() 与 readUnitMemory 翻译后同为 读取单位内存，
                 // 避免同一补全重复出现两行（同 label 即同插入文本）
@@ -843,6 +862,44 @@ internal fun splitKeyValueLine(line: String): Pair<String, String> {
     } else {
         "" to ""
     }
+}
+
+/**
+ * 判断光标是否处于某属性 `key:"""` 多行值块内，若是返回该块归属的属性键名（原样，可能是中文 复制与）。
+ * 例如：
+ * ```
+ * 复制与:"""
+ * 战力模块.ini,
+ * ROOT:/建造单位/.../中级建造模块.ini,
+ * """            ← 光标若在这之前（块内），返回「复制与」
+ * ```
+ * 仅在归属块确实已开启、且光标不在开启那行本身（应允许开行 `复制与:"""` 走单行补全）时返回。
+ */
+internal fun multilineValueOwnerKey(textBeforeCursor: String): String? {
+    val lines = textBeforeCursor.split('\n')
+    var inValue = false
+    var owner: String? = null
+    var openIdx = -1
+    for ((idx, raw) in lines.withIndex()) {
+        val t = raw.trim()
+        if (inValue) {
+            // 块内：遇到独立 `"""` 结束行则闭合
+            if (t == "\"\"\"") {
+                inValue = false
+                owner = null
+            }
+        } else {
+            // 块外：`key:"""` 开启新块
+            val ci = t.indexOf(':')
+            if (ci > 0 && t.substring(ci + 1).trim() == "\"\"\"") {
+                owner = t.substring(0, ci).trim()
+                inValue = true
+                openIdx = idx
+            }
+        }
+    }
+    // 光标所在行即开启行（`复制与:"""`）时交给单行补全处理，不算多行块
+    return if (inValue && openIdx >= 0 && openIdx < lines.lastIndex) owner else null
 }
 
 /**

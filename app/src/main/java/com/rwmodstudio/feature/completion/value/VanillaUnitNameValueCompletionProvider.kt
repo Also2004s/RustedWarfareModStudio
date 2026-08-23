@@ -23,19 +23,13 @@ class VanillaUnitNameValueCompletionProvider : BaseValueCompletionProvider() {
 
         if (request.toEnglishName().equals("name", ignoreCase = true)) return true
         if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) return true
-
+        // 单位名固定精确名单（与 UnitNameValueCompletionProvider 共源，见 CompletionShared）
+        if (CompletionShared.isUnitNameProperty(request.toEnglishName())) return true
+        // type 初筛兜底（type 不可信，仅作第一道过滤；错误数据已由上述精确名单排除）
         val prop = request.findProperty()
         if (prop != null) {
             val typeLower = prop.type.lowercase().trim()
             if (CompletionShared.isUnitNameTypeMatch(typeLower)) return true
-            return false
-        }
-        val nameLower = request.propertyName.lowercase()
-        if (nameLower.contains("unit")) return true
-        if (request.isChineseName()) {
-            val enName = request.toEnglishName().lowercase()
-            if (enName.contains("unit")) return true
-            if (request.propertyName.contains("单位")) return true
         }
         return false
     }

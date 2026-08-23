@@ -12,10 +12,10 @@ import org.json.JSONObject
  * 将代码参考库全部属性归类到「补全类型分类」，供开发者模式「补全类型分类」页展示与维护。
  *
  * 归类原则（用户定论）：**不看 type**——type 数据不可靠（同样 type 可能属不同补全、
- * 裸 type 无法区分生成/标记/名字），一律以**硬编码英文名名单**为准；
- * 名单由 tools/gen_completion_types.js 按各补全 Provider 的判定逻辑
- * 从 code_reference.json 一次性生成（首中即定、互斥），审核后嵌入此处。
- * 数据或判定变更后重跑脚本整体替换名单；单个属性归类调整直接挪名单即可。
+ * 裸 type 无法区分生成/标记/名字）。分类归属统一由「真实补全判定」给出：
+ * 与生产补全完全相同的一组 Provider 逐个 matches、首中即定（见
+ * ValueCompletionAggregator.realCompletionClassify），**不存在第二份名单**，永不漂移。
+ * 本仓库只保留：分类常量/展示顺序、manual 覆盖、合成条目（不在 code_reference 的指令属性）。
  *
  * 分类 = 调用源（哪个补全代码服务该属性）：
  * - 13 个属性类：布尔值/逻辑表达式/枚举值/图片路径/事件触发/内存变量/标签/资源/
@@ -24,9 +24,8 @@ import org.json.JSONObject
  *   以证据硬编码的信息卡展示（触发/补全/位置）。
  *
  * 分两层：
- * - 硬编码名单（本文件）：审核后的归类事实，运行时唯一判定依据；
  * - manual：用户在维护页手工覆盖的属性→分类映射（写 RWmod/cache/completion_types.json，
- *   验证码变化或文件缺失时重置回硬编码名单）。
+ *   验证码变化或文件缺失时重置为空）。
  */
 object CompletionTypeRepository {
     private const val TAG = "CompletionTypeRepository"
@@ -124,7 +123,7 @@ object CompletionTypeRepository {
     private var loaded = false
 
     /**
-     * 加载 manual 覆盖（IO 线程调用）。文件缺失或验证码不匹配时重置为空（全走硬编码名单）。
+     * 加载 manual 覆盖（IO 线程调用）。文件缺失或验证码不匹配时重置为空。
      */
     suspend fun load() {
         loaded = true
@@ -176,7 +175,7 @@ object CompletionTypeRepository {
     }
 
     /**
-     * 清空 manual 覆盖并删除持久化文件，完全回到硬编码名单（供维护页「重置」使用）。
+     * 清空 manual 覆盖并删除持久化文件，分类回到真实补全判定（供维护页「重置」使用）。
      */
     fun resetManual() {
         manual = emptyMap()
@@ -185,43 +184,6 @@ object CompletionTypeRepository {
             if (f.exists()) f.delete()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to reset completion types manual", e)
-        }
-    }
-
-    /**
-     * 对指定属性归类（**只查名单，不看 type**）。manual 覆盖优先，否则硬编码名单，
-     * 全部未命中落兜底「文字/任意」（分类页统计可见，便于发现漏归档）。
-     * @param name 中文属性名（或无英文时的原名）
-     * @param nameEn 英文属性名（名单键，小写匹配）
-     */
-    fun classify(name: String, nameEn: String?): String {
-        manual[name]?.let { return it }
-        val en = (nameEn ?: name).lowercase()
-        // 复制节 / 复制但跳过节（合成指令）：与 CopyFromSectionValueCompletionProvider / Bool 同源
-        if (CompletionShared.isCopyFromSectionProperty(name, nameEn)) return CAT_COPY_SECTION
-        return when {
-            // 复制但跳过（合成指令，Bool 服务补 真/假）
-            CompletionShared.isCopyFromSkipSectionProperty(name, nameEn) -> CAT_BOOL
-            en in EVENT_PROPERTIES -> CAT_EVENT
-            en in MEMORY_PROPERTIES -> CAT_MEMORY
-            // 单位名：单位生成(非抛射体) + 单位名列表 + 其余 type 驱动的单位名属性
-            // （与 UnitSpawn/UnitName/Vanilla Provider 共源，规则见 CompletionShared）
-            ((CompletionShared.isUnitSpawnProperty(en) && !CompletionShared.isProjectileSpawnProperty(en)) ||
-                CompletionShared.isUnitNameListProperty(en) || en in UNIT_NAME_PROPERTIES) -> CAT_UNIT_NAME
-            // 单位标记：纯表达式单位标记 + 位置 + 混合型（与 UnitRef Provider 共源，见 CompletionShared）
-            (CompletionShared.isUnitRefExpressionProperty(en) ||
-                CompletionShared.isUnitMarkerPositionProperty(en) ||
-                CompletionShared.isUnitMarkerMixedProperty(en)) -> CAT_UNIT_MARKER
-            en in RESOURCE_PROPERTIES -> CAT_RESOURCE
-            en in ENUM_PROPERTIES -> CAT_ENUM
-            en in LOGIC_PROPERTIES -> CAT_LOGIC
-            // 项目引用：抛射体生成(spawnProjectiles*) + 其余 type 驱动的节引用
-            // （与 UnitSpawn/ProjectRef Provider 共源，见 CompletionShared）
-            (CompletionShared.isProjectileSpawnProperty(en) || en in PROJECT_REF_PROPERTIES) -> CAT_PROJECT_REF
-            en in BOOL_PROPERTIES -> CAT_BOOL
-            en in IMAGE_PROPERTIES -> CAT_IMAGE
-            en in TAG_PROPERTIES -> CAT_TAG
-            else -> CAT_TEXT
         }
     }
 
@@ -238,172 +200,4 @@ object CompletionTypeRepository {
 
     fun isLoaded(): Boolean = loaded
     fun currentManual(): Map<String, String> = manual
-
-    // ===== 以下名单由 tools/gen_completion_types.js 从 code_reference.json 生成（勿手改名单本身，
-    //      数据或判定变更后重跑脚本再整体替换）；运行时只做名单查找，不按 type 推断 =====
-    // 漂移高危区（单位生成/抛射体生成/单位名列表/单位标记/复制节）已下沉 [CompletionShared]，
-    // 由 classify 调用其判定函数统一接管，本文件仅保留剩余「非共享、type 驱动」名单。
-
-    /** 布尔值 分类属性（键=英文小写）；@copyfrom_skipthissection 由共享判定接管 */
-    val BOOL_PROPERTIES = setOf(
-        "action_#_whenbuilding_cannotmove", "addtransportedunits", "addwaypoint_position_fromaction", "addwaypoint_prepend",
-        "addwaypoint_target_mapmustbereachable", "ai_considersameasbuilding", "allowcapturewhenneutralbyai", "allowmultipleinqueue",
-        "alwaysallowedtoattackparentsmaintarget", "alwayssinglepress", "alwaysstartdiratzero", "alwaystartdiratzero",
-        "alwaysvisibleinfog", "animateframelooping", "animation_type_pingpong", "appendresourceinhud_whenthiszero",
-        "areadamagenofalloff", "areahitairandlandatsametime", "areahitunderwateralways", "arearadiusfromedge",
-        "atmospheric", "attachedtounit", "attachments_disconnect", "attachments_unload",
-        "autorepair", "autotargetingondeadtarget", "autotriggercheckwhilenotbuilt", "autotriggercooldowntime_allowdangeroushighcpu",
-        "ballistic", "beamimageendrotated", "beamimagestartrotated", "blocksplacement",
-        "builtfrom_{num}_forcenano", "canattack", "canbeattackedanddamaged", "canbuild_#_islocked",
-        "cannotbedamaged", "cannotbedirectlyattacked", "cannotbegivenordersbyplayer", "canplayercancel",
-        "canreclaimresources", "canrepairbuildings", "canrepairunits", "canshoot",
-        "checkeachtile", "clearactivewaypoint", "clearallactioncooldowns", "clearallwaypoints",
-        "clearturrettargetafterfiring", "converthittosourceteam", "convertto_keepcurrenttags", "converttoneutralifnottransporting",
-        "createincompleteifparentis", "createneutral", "createonaggressiveteam", "createwhenoffscreen",
-        "createwhenoverland", "createwhenoverliquid", "createwhenzoomedout", "deattachifwantingtomove",
-        "deleteself", "dieonattack", "dieonconstruct", "dieonzeroenergy",
-        "disableallunitcollisions", "disabledeathonzerohp", "disableleadtargeting", "disablelowhpfire",
-        "disablelowhpsmoke", "disablepassivetargeting", "disableuse", "disconnectfromparent",
-        "displaycoloruseintext", "displayinhud", "displaynamehidewheniconshowninhud", "displaynamehidewheniconshownintext",
-        "displayremainingstockpile", "displayroundeddown", "displaytextappendresourcewithgap", "displaywhenzero",
-        "displaywithrounding", "dont_load", "draw_foot_on_top", "drawfootwhenzoomedout",
-        "drawlegwhenzoomedout", "drawoverbody", "drawunderallunits", "drawunderunits",
-        "dust_effect", "dusteffect", "dusteffectreverse", "energyneedstorechargetofull",
-        "equivalentglobalresourceforai", "excludeincompletebuildings", "excludenonbuildings", "exitheightignoreparent",
-        "experimental", "explodeondeath", "explodeondeathgroundcollision", "explodeonendoflife",
-        "fadeout", "favouroppositesideneighbours", "finishplayinglastanimation", "flameweapon",
-        "forcenano", "forceunloadtransportnow", "frameindexrandom", "friendlyfire",
-        "hidden", "hidescorchmark", "highpriorityqueue", "hitsound",
-        "hold_moveonlyiffurthest", "holddismin_checkneighbours", "icon_zoomed_out_nevershow", "iconimageuseintext",
-        "ignoreinunitcapcalculation", "ignoreparentshootdamagemultiplier", "image_applyteamcolors", "image_end_teamcolors",
-        "image_shadow_frames", "includeinstats", "includeparentsselection", "instant",
-        "instantreuselast", "instantreuselast_alsochangeturretaim", "instantreuselast_keepareadamagelist", "interceptprojectile_removetargetlifeonly",
-        "invisible", "isalsoviewablebyallies", "isalsoviewablebyenemies", "isbio",
-        "isbug", "isbuilder", "isbuilding", "isfixedfiring",
-        "islockedifgamemodenonuke", "ismainnanoturret", "ismelee", "ispickablestartingunit",
-        "isunrepairableunit", "isunselectable", "isunselectableastarget", "isvisibletoenemies",
-        "joinsgroupformations", "keepalivewhenparentdies", "keepwaypointsneedingmovement", "landonground",
-        "largehiteffect", "lasereffect", "lightcastonground", "lightingeffect",
-        "liveafterattacheddies", "lock_body_rotation_with_main_turret", "lock_leg_rotation_with_main_turret", "lock_shadow_rotation_with_main_turret",
-        "locklegmovement", "lockmovement", "lockrotation", "lowprioritytargetforotherunits",
-        "moveignoringbody", "movementeffectreverseflipeffects", "moveslidingmode", "movewithparent",
-        "nanorangeforreclaimismelee", "nanorangeforrepairismelee", "notpassivelytargetedbyotherunits", "nukeondeath",
-        "nukeondeathdisablewhennonuke", "nukeweapon", "onconvertkeepexistingunitinsameslot", "onlyinpreview",
-        "onlyoneunitatatime", "onlyonnonpreview", "onlyplayerswithunitcontrol", "onlywhenselectedbyallynotownplayer",
-        "onlywhenselectedbyanyplayer", "onlywhenselectedbyenemyplayer", "onlywhenselectedbyownplayer", "onlywhileactive",
-        "onlywhilealive", "onparentteamchangekeepcurrentteam", "physics", "pingpong",
-        "placeonlyonrespool", "playanimationifnotplaying", "prioritizeparentsmaintarget", "redirectdamagetoparent",
-        "redirectdamagetoparent_shieldonly", "refundallqueueditems", "removeallqueueditemswithoutrefund", "resetrotationwhennotattacking",
-        "resettodefaulttags", "resetunitstats", "retargetinginflight", "rotate_with_direction",
-        "rotatewithparent", "setdrawlayeronbottom", "setdrawlayerontop", "shadow",
-        "shielddisplayonlydeflection", "shouldresetturret", "shouldrevealfog", "showenergybar",
-        "showhealthbar", "showineditor", "showinfog", "showonminimap",
-        "showonminimaptoenemies", "showqueuebar", "showrangeuiguide", "showselectionindicator",
-        "showshieldbar", "showshotdelaybar", "showtransportbar", "slave",
-        "slowdeathfall", "smoothlyblendpositionwhenexistingunitadded", "splasteffect", "splasteffectreverse",
-        "stack_drawinreverseorder", "stackhorizontal", "startfallingwhenstartingunit", "startshieldatzero",
-        "startunloadingtransport", "stayneutral", "stoplastanimation", "stoptargetingafterfiring",
-        "switchpricewithstreamingcost", "switchtoaggressiveteam", "switchtoneutralteam", "takeresources_directtransferstoppingatzero",
-        "takeresources_discardcollected", "takeresources_excludeunitswithoutallresources", "takeresources_includeparent", "takeresources_includeunitsintransport",
-        "takeresources_keepresourcesontarget", "takeresources_searchonly", "targetground", "targetground_includetargetheight",
-        "targetheightrelative", "teamcolors", "teamcolorsonturret", "teamcolorsusehue",
-        "teleportsource", "traileffect", "transportunitsaddunloadoption", "transportunitsblockairandwaterunits",
-        "transportunitsblockothertransports", "transportunitseachunitalwaysusessingleslot", "transportunitskeepbuiltunits", "transportunitsonteamchangekeepcurrentteam",
-        "turretmultitargeting", "turretrotatewithbody", "unitshowninuiwithhpbar", "unitshowninuiwithprogressbar",
-        "unitsspawnedondeath_settoteamoflastattacker", "unloadincurrentposition", "useasbuilder", "useasharvester",
-        "useastransport", "valueinstats", "warmupnoreset", "whenbuilding_cannotmove",
-        "whenbuilding_rotateto_aimatactiontarget", "whenbuilding_rotateto_orbackwards", "whenbuilding_rotateto_waittillrotated", "whenusingasharvester_includeotherharvestercounts",
-        "whileneutralconverttotransportedteam", "whileneutraltransportanyteam"
-    )
-
-    /** 逻辑表达式 分类属性（37 个，键=英文小写） */
-    val LOGIC_PROPERTIES = setOf(
-        "ai_isdisabled", "ai_ishighpriority", "alpha", "alsotriggeractionrepeat",
-        "alsotriggerorqueueactionconditional", "altprojectilecondition", "autotrigger", "builtfrom_{num}_islocked",
-        "canattackcondition", "canattackflyingunits", "canattacklandunits", "canattacknottouchingwaterunits",
-        "canattackunderwaterunits", "frame", "generation_active", "iconextraisvisible",
-        "idlesweepcondition", "imagescale", "imagescalex", "imagescaley",
-        "isactive", "isguiblinking", "islocked", "islockedalt",
-        "islockedalt2", "isvisible", "requireconditional", "resetcustomtimer",
-        "setheight", "showallactionsfrom", "stack_indexcount", "stack_indexstart",
-        "switchtoteam", "transportunitscanunloadunits", "transportunitskillondeath", "xoffsetabsolute",
-        "yoffsetabsolute"
-    )
-
-    /** 枚举值 分类属性（22 个，键=英文小写） */
-    val ENUM_PROPERTIES = setOf(
-        "addwaypoint_target_nearestunit_team", "addwaypoint_target_randomunit_team", "addwaypoint_type", "attackmovement",
-        "autotriggercheckrate", "convertto_keepcurrentfields", "displaydigitgrouping", "displaytype",
-        "drawlayer", "drawtype", "explodetypeondeath", "fireturretxatground_onlyoverpassabletileof", "layer",
-        "movementtype", "onactions", "onlyteam", "onnewmapspawn",
-        "searchteam", "setunitstats", "stripindex", "takeresources_includeunitswithinrange_team", "teamcoloringmode",
-        "transportunitsrequiremovementtype", "whenbuilding_temporarilyconvertto_keepfields"
-    )
-
-    /** 图片路径 分类属性（22 个，键=英文小写） */
-    val IMAGE_PROPERTIES = setOf(
-        "beamimage", "beamimageend", "beamimagestart",
-        "chargeeffectimage", "icon_build", "icon_zoomed_out", "iconextraimage",
-        "iconimage", "image", "image_back", "image_end",
-        "image_end_shadow", "image_foot", "image_foot_shadow", "image_leg",
-        "image_middle", "image_shadow", "image_shield", "image_turret",
-        "image_wreak", "imageshadow", "imagestack"
-    )
-
-    /** 事件触发 分类属性（1 个，键=英文小写） */
-    val EVENT_PROPERTIES = setOf(
-        "autotriggeronevent"
-    )
-
-    /** 内存变量 分类属性（5 个，键=英文小写） */
-    val MEMORY_PROPERTIES = setOf(
-        "@memory", "defineunitmemory", "setunitmemory", "updateunitmemory",
-        "updateunitmemoryrate"
-    )
-
-    /** 标签 分类属性（24 个，键=英文小写） */
-    val TAG_PROPERTIES = setOf(
-        "addglobalteamtags", "addwaypoint_target_nearestunit_tagged", "addwaypoint_target_randomunit_tagged", "canonlybeattackedbyunitswithtags",
-        "canonlyattackunitswithouttags", "canonlyattackunitswithtags", "canreclaimresourcesonlywithtags", "canreclaimunitsonlywithtags",
-        "canrepairunitsonlywithtags", "deletenumunitsfromtransport_onlywithtags", "interceptprojectiles_withtags", "mutatorx_ifunitwithouttags",
-        "mutatorx_ifunitwithtags", "removeglobalteamtags", "retargetinginflightsearchonlytags", "searchtags",
-        "sendmessagewithtags", "showactionswithmixedselectionifotherunitshavetag", "similarresourceshavetag", "tags",
-        "takeresources_excludeunitswithouttags", "temporarilyaddtags", "temporarilyremovetags", "transportunitsrequiretag"
-    )
-
-    /** 资源 分类属性（20 个，键=英文小写） */
-    val RESOURCE_PROPERTIES = setOf(
-        "addresources", "addresourcesscaledbyaihandicaps", "addresourceswithlogic", "appendresourceinhud",
-        "borrowresourceswhilealive", "borrowresourceswhilebuilt", "convertresource_from", "convertresource_to",
-        "displaytextappendresource", "generation_resources", "mutatorx_addresourcesareahit", "mutatorx_addresourcesdirecthit",
-        "price", "resourceamount", "resourceamount_addotherresource", "resourceusage",
-        "setresourceswithlogic", "streamingcost", "takeresources", "takeresources_excludeunitswiththeseresources"
-    )
-
-    /** 单位名 分类剩余属性（键=英文小写；仅保留非共享、type 驱动的单位名属性）。
-     *  共享部分（单位生成 spawnUnits 等 / 单位名列表 unitsSpawnedOnDeath 等）已下沉 [CompletionShared]，
-     *  由 classify 调用其 isUnitSpawnProperty/isUnitNameListProperty 判定。 */
-    val UNIT_NAME_PROPERTIES = setOf(
-        "addwaypoint_unittype", "convertto",
-        "descriptionaddunitstats", "guibuildunit", "name", "oncreatespawnunitof",
-        "whenbuilding_temporarilyconvertto"
-    )
-
-    /** 项目引用 分类属性（55 个，键=英文小写；含抛射体引用 spawnProjectiles*、projectile 等） */
-    val PROJECT_REF_PROPERTIES = setOf(
-        "addactioncooldownapplytoactions", "addwaypoint_triggeractioniffailed", "addwaypoint_triggeractionifmatched", "alsoemiteffects",
-        "alsoemiteffectsondeath", "alsoplaysound", "alsoqueueaction", "alsotriggeraction",
-        "altprojectile", "attachedto", "attachments_onlyonslots", "basepositionfromturret",
-        "effectoncreate", "effectondeath", "effectondeathgroundcollision", "effectondeathifunbuilt",
-        "explodeeffect", "explodeeffectonshield", "fireturretxatground", "fireturretxatground_showguidedecals",
-        "fireturretxatground_withprojectile", "fireturretxatselfondeath", "ifspawnfailsemiteffects", "linkdelaywithturret",
-        "movementeffect", "movementeffectreverse", "mutatorx_changedexplodeeffect", "onshoot_playanimation",
-        "onshoot_triggeractions", "playanimation", "playsoundatunit", "playsoundglobally",
-        "playsoundtoplayer", "playsoundtoplayeronqueue", "projectile", "reclaimeffect",
-        "reclaimeffectattarget", "repaireffect", "repaireffectattarget", "shoot_flame",
-        "soundonattackorder", "soundonmoveorder", "soundonnewselection", "spawneffects",
-        "spawneffectsonqueue",
-        "takeresources_triggeractionforeach", "takeresources_triggeractionifanycollected", "takeresources_triggeractionifnonecollected",
-        "warmupstarteffect", "whenbuilding_playanimation", "whenbuilding_rotateto_rotateturretx", "whenbuilding_triggeraction"
-    )
 }
