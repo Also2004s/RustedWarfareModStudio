@@ -304,14 +304,21 @@ class ValueCompletionAggregator(
      *
      * @param name 属性名（中文或英文，与分类页展示一致）
      * @param nameEn 属性英文名（无则传 null）
+     * @param sectionName 该属性所属真实节名（用于依赖节的判定，如 复制与 仅核心节走文件路径；
+     *                    分类页按各真实节判定时传入；无节上下文传 null）
      * @return 分类名（CompletionTypeRepository.CAT_*）；无任何 Provider 命中返回「文字/任意」兜底
      */
-    fun realCompletionClassify(context: Context, name: String, nameEn: String?): String {
+    fun realCompletionClassify(
+        context: Context,
+        name: String,
+        nameEn: String?,
+        sectionName: String? = null
+    ): String {
         val request = ValueCompletionRequest(
             context = context,
             sectionProperties = sectionProperties,
             propertyName = name,
-            sectionName = null,
+            sectionName = sectionName,
             valuePrefix = "",
             rawValuePrefixLength = 0,
             lineText = "",

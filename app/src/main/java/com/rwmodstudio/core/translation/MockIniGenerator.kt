@@ -10,7 +10,8 @@ import com.rwmodstudio.core.VerifyManager
  * （与自动补全同一组 Provider、同顺序，首中即定），不存在第二份名单。
  */
 fun interface PropertyClassifier {
-    fun classify(name: String, nameEn: String?): String
+    /** @param sectionName 属性所属真实节名（无节上下文传 null；用于 复制与 等依赖节的判定） */
+    fun classify(name: String, nameEn: String?, sectionName: String?): String
 }
 
 /**
@@ -58,11 +59,14 @@ object MockIniGenerator {
         repo.loadFromAssets(context)
         CompletionTypeRepository.load()
 
-        // 收集 17 个真实节的属性（按 name 去重，首中优先；与补全类型分类页同口径）
+        // 收集 17 个真实节的属性（按 name 去重，首中优先；与补全类型分类页同口径），并记录属性首中所属真实节
         val props = linkedMapOf<String, CodeReferenceRepository.PropertyInfo>()
+        val sectOf = linkedMapOf<String, String>()
         repo.getRealSectionNames().forEach { sec ->
             repo.getPropertiesForSection(sec).forEach { p ->
-                if (!p.name.contains(": ")) props.putIfAbsent(p.name, p)
+                if (!p.name.contains(": ")) {
+                    if (props.putIfAbsent(p.name, p) == null) sectOf[p.name] = sec
+                }
             }
         }
         // 合成条目（不在 code_reference 但真实存在的指令属性）
@@ -70,9 +74,9 @@ object MockIniGenerator {
             CodeReferenceRepository.PropertyInfo(name = it.name, name_en = it.nameEn)
         }
 
-        // 分类器：真实补全判定（按 Provider 实际服务归属，与自动补全同源）
+        // 分类器：真实补全判定（按 Provider 实际服务归属 + 属性所在真实节，与自动补全同源）
         fun classifyProp(p: CodeReferenceRepository.PropertyInfo): String =
-            classifier.classify(p.name, p.name_en)
+            classifier.classify(p.name, p.name_en, sectOf[p.name])
 
         // 分类名 → 属性英文键列表（有序）
         val categoryKeys = linkedMapOf<String, MutableList<String>>()

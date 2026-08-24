@@ -143,7 +143,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
 
         if (isRhsContext) {
             if (isBareMemoryKeyword(memContext)) {
-                val keyword = if (memLower.startsWith("memory")) "memory" else "内存"
+                val keyword = memoryKeyword(request)
                 return rhsNames.map { name ->
                     createValueItem(
                         label = "$keyword.$name",
@@ -170,7 +170,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
                         )
                     }
             }
-            val keyword = if (memLower.startsWith("memory")) "memory" else "内存"
+            val keyword = memoryKeyword(request)
             return rhsNames
                 .rankedByMatch(memContext)
                 .map { name ->
@@ -187,7 +187,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         // 输入 "内存"/"memory"（未带点）：提供 关键字.变量名 续写项
         // （如 用逻辑设置资源:AI阶段=内存 → 内存.重拦集结），避免只输入关键字时空补全
         if (isBareMemoryKeyword(memContext)) {
-            val keyword = if (memLower.startsWith("memory")) "memory" else "内存"
+            val keyword = memoryKeyword(request)
             return names.map { name ->
                 createValueItem(
                     label = "$keyword.$name",
@@ -272,6 +272,15 @@ internal fun isUnitMemoryType(type: String?): Boolean =
  */
 internal fun isBareMemoryKeyword(prefix: String): Boolean =
     prefix.lowercase() in setOf("memory", "内存")
+
+/**
+ * 内存引用前缀的语言关键字：跟随翻译引擎开关（打开→中文「内存」，关闭→英文「memory」）。
+ * 仅决定补全项「显示与插入值」的语言；**匹配规则不变**（用户无论输入 内存/攻击目标 还是 memory/attackTarget
+ * 都能匹配）。与 LogicExpressionContext.memoryValueItemsByTarget 的 useChinese 判定一致，
+ * 避免 memory./内存. 因语言不一致而双语重复。
+ */
+internal fun memoryKeyword(request: ValueCompletionRequest): String =
+    if (com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) "内存" else "memory"
 
 /**
  * 内存链前缀正则：`内存.<变量>.` 或 `memory.<var>.`（捕获 变量名 与 点后片段），供 unit 型内存变量成员补全。

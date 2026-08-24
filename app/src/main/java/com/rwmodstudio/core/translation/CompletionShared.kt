@@ -111,17 +111,39 @@ object CompletionShared {
 
     // ===== 复制节（CopyFromSectionValueCompletionProvider） =====
 
-    /** 是否为 @copyFromSection（复制节）属性：name_en 或 propertyName 归一化为 @copyfromsection，或中文 复制节 */
+    /** 是否为 @copyFromSection（复制节）属性。英文 nameEn 为基础（调用方可经翻译引擎反查得到），
+     *  中文「复制节」兜底（该词在翻译库，属翻译库形式）。 */
     fun isCopyFromSectionProperty(propertyName: String, nameEn: String?): Boolean =
         nameEn?.lowercase() == "@copyfromsection" ||
             propertyName.lowercase() == "@copyfromsection" ||
             propertyName == "复制节"
 
-    /** 是否为 @copyFrom_skipThisSection（复制但跳过节）属性 */
+    /** 是否为 @copyFrom_skipThisSection（复制但跳过节）属性。英文为基础，中文「复制但跳过节」兜底（翻译库形式）。 */
     fun isCopyFromSkipSectionProperty(propertyName: String, nameEn: String?): Boolean =
         nameEn?.lowercase() == "@copyfrom_skipthissection" ||
             propertyName.lowercase() == "@copyfrom_skipthissection" ||
             propertyName == "复制但跳过节"
+
+    /** 是否为「复制与」(copyFrom) 属性。核心节的 copyFrom 是 ini 文件路径（由 ProjectRefValueCompletionProvider
+     *  处理并归「项目引用」）；其他节（腿/炮塔/效果等）的 copyFrom 引用同类节的节后缀名
+     *  （由 CopyFromSectionValueCompletionProvider 补节名并归「复制节」）。英文为基础，中文「复制与」兜底（翻译库形式）。 */
+    fun isCopyFromProperty(propertyName: String, nameEn: String?): Boolean {
+        val p = propertyName.lowercase().replace(" ", "")
+        val e = nameEn?.lowercase()?.replace(" ", "")
+        return p == "copyfrom" || p == "复制与" || e == "copyfrom"
+    }
+
+    /** 是否为核心节（当前真实节名归一化后等于 中文「核心」或 英文 `core`）。供「核心节复制与=路径、其他节=节名」分流使用。 */
+    fun isCoreSection(sectionName: String?): Boolean {
+        val s = sectionName?.trim()?.lowercase()?.substringBefore('_')
+        return s == "核心" || s == "core"
+    }
+
+    /** 翻译引擎当前是否启用（开关打开且已加载）。补全项「显示与插入值」的语言总闸：
+     *  开→中文（走翻译库），关→英文（不硬编码中文，显示源码字面）。 */
+    fun translationEngineEnabled(): Boolean =
+        com.rwmodstudio.core.SettingsManager.devTranslationEngine &&
+            TranslationEngine.getInstance().isLoaded
 
     // ===== 标签（TagValueCompletionProvider） =====
 

@@ -294,9 +294,9 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
     private fun boolValues(request: ValueCompletionRequest): List<String> {
         return try {
             val data = ValueDataLoader.load(request.context, "bool", request.translationDict)
-            data.data.map { it.name }.ifEmpty { listOf("真", "假") }
+            data.data.map { it.name }.ifEmpty { listOf("true", "false") }
         } catch (e: Exception) {
-            listOf("真", "假")
+            listOf("true", "false")
         }
     }
 

@@ -25,9 +25,9 @@ android {
         minSdk = 26
         targetSdk = 34
         // 版本号：每次发布新版本必须 +1，且只能增加不能减少
-        versionCode = 20
+        versionCode = 21
         // 版本名称：对外展示给用户看的版本号
-        versionName = "1.3.0"
+        versionName = "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

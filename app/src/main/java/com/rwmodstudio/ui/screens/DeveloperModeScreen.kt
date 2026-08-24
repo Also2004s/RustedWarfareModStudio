@@ -144,14 +144,21 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
-                icon = Icons.Default.Translate,
-                title = "翻译引擎",
-                checked = SettingsManager.devTranslationEngine,
-                onCheckedChange = { SettingsManager.devTranslationEngine = it }
+                icon = Icons.Default.Notes,
+                title = "自动补全说明",
+                checked = SettingsManager.completionDetailEnabled,
+                onCheckedChange = { SettingsManager.completionDetailEnabled = it }
             )
             DevDivider()
             DevSwitchCompact(
                 icon = Icons.Default.SpaceBar,
+                title = "节补全",
+                checked = SettingsManager.devSectionCompletion,
+                onCheckedChange = { SettingsManager.devSectionCompletion = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.Translate,
                 title = "翻译自动空格",
                 checked = SettingsManager.autoSpace,
                 onCheckedChange = { SettingsManager.autoSpace = it }

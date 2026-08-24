@@ -204,10 +204,27 @@ fun EditorScreen(
             nativeCompletions = customCompletionsToProviderItems(
                 pNative + pExtra.filter { it.name !in nativeNames }
             )
-            if (engine.isLoaded) {
-                cp = engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
-                    valueSectionProperties = buildValueSectionProperties(mergeCompletionTables(userItems, nativeItems, extraItems)))
-            }
+            // 无论引擎是否加载都构建 CompletionProvider：值补全属性索引用三表，不依赖引擎加载。
+            // 不能走 engine.getCompletionProvider——它要求 appContext 已设（context = appContext ?: throw），
+            // 引擎未加载时 appContext 为 null 会抛异常崩溃；这里直接用本页的 ctx 构造。
+            cp = com.rwmodstudio.feature.completion.CompletionProvider(
+                context = ctx,
+                translationDict = engine.getTranslationDict(),
+                valueSectionProperties = buildValueSectionProperties(mergeCompletionTables(userItems, nativeItems, extraItems)),
+                customCompletions = customCompletions,
+                nativeCompletions = nativeCompletions,
+                showDetail = completionDetailEnabled,
+                valueCompletionEnabled = SettingsManager.devValueCompletion,
+                valueCompletionOptions = com.rwmodstudio.feature.completion.value.ValueCompletionAggregator.ValueCompletionOptions(
+                    boolEnabled = SettingsManager.devValueCompletionBool,
+                    logicBooleanEnabled = SettingsManager.devValueCompletionLogicBoolean,
+                    enumEnabled = SettingsManager.devValueCompletionEnum,
+                    imageEnabled = SettingsManager.devValueCompletionImage,
+                    unitSpawnEnabled = SettingsManager.devValueCompletionUnitSpawn,
+                    autoTriggerOnEventEnabled = SettingsManager.devValueCompletionAutoTriggerOnEvent
+                ),
+                nonValueCompletionLimited = SettingsManager.nonValueCompletionLimited
+            )
         }
     }
 

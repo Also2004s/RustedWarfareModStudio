@@ -76,6 +76,8 @@ fun CompletionTypeScreen(
     var entries by remember { mutableStateOf<List<Entry>>(emptyList()) }
     // 真实补全判定聚合器（全部 Provider、默认选项；与生产补全同源），条目分类唯一来源
     var classifyAggregator by remember { mutableStateOf<ValueCompletionAggregator?>(null) }
+    // 每个属性首中所属的真实节名（分类页按各真实节判定，如 复制与 仅核心节归「项目引用」，不跨节兜底）
+    var entrySection by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     // manual 覆盖（属性名 → 分类）
     var manualOverrides by remember { mutableStateOf(mapOf<String, String>()) }
     // 资源名补全名单（本地编辑态，保存时写盘）
@@ -136,21 +138,25 @@ fun CompletionTypeScreen(
             )
             classifyAggregator = classifyAgg
 
-            // 收集 17 个真实节的属性（按 name 去重，首中优先；与生成脚本同口径）
+            // 收集 17 个真实节的属性（按 name 去重，首中优先；与生成脚本同口径），并记录属性首中所属真实节
             val props = linkedMapOf<String, CodeReferenceRepository.PropertyInfo>()
+            val sectOf = linkedMapOf<String, String>()
             repo.getRealSectionNames().forEach { sec ->
                 repo.getPropertiesForSection(sec).forEach { p ->
-                    if (!p.name.contains(": ")) props.putIfAbsent(p.name, p)
+                    if (!p.name.contains(": ")) {
+                        if (props.putIfAbsent(p.name, p) == null) sectOf[p.name] = sec
+                    }
                 }
             }
-            // 分类：manual 覆盖优先，否则真实补全判定（与自动补全同源，无第二份名单）
-            fun classify(name: String, nameEn: String?): String =
+            entrySection = sectOf
+            // 分类：manual 覆盖优先，否则真实补全判定（按属性所在真实节，与自动补全同源，无第二份名单、不跨节兜底）
+            fun classify(name: String, nameEn: String?, sec: String?): String =
                 manualOverrides[name]
-                    ?: classifyAgg.realCompletionClassify(context, name, nameEn?.takeIf { it.isNotBlank() })
+                    ?: classifyAgg.realCompletionClassify(context, name, nameEn?.takeIf { it.isNotBlank() }, sec) 
             val list = props.values.map { p ->
                 Entry(
                     p.name, p.name_en.orEmpty(), p.type,
-                    classify(p.name, p.name_en),
+                    classify(p.name, p.name_en, sectOf[p.name]),
                     isResourceName = isResourceName(p, rnKeys)
                 )
             }.toMutableList()
@@ -159,7 +165,7 @@ fun CompletionTypeScreen(
                 list.add(
                     Entry(
                         sp.name, sp.nameEn, "-",
-                        classify(sp.name, sp.nameEn),
+                        classify(sp.name, sp.nameEn, null),
                         isResourceName = false
                     )
                 )
@@ -208,7 +214,8 @@ fun CompletionTypeScreen(
                                 agg.realCompletionClassify(
                                     context,
                                     it.name,
-                                    it.nameEn.takeIf { x -> x.isNotBlank() }
+                                    it.nameEn.takeIf { x -> x.isNotBlank() },
+                                    entrySection[it.name]
                                 )
                             } else CompletionTypeRepository.CAT_TEXT,
                             isResourceName = ResourceNameKeys(keys = defaultKeys).matches(
@@ -926,8 +933,8 @@ suspend fun buildClassifyAggregator(context: Context): ValueCompletionAggregator
  */
 suspend fun buildMockIniClassifier(context: Context): PropertyClassifier? {
     return buildClassifyAggregator(context)?.let { agg ->
-        PropertyClassifier { name, nameEn ->
-            agg.realCompletionClassify(context, name, nameEn)
+        PropertyClassifier { name, nameEn, sectionName ->
+            agg.realCompletionClassify(context, name, nameEn, sectionName)
         }
     }
 }

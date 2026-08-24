@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
@@ -55,7 +56,12 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
         if (request.isInsideParentheses()) return false
         val prop = request.findProperty() ?: return false
         if (isSoundProperty(prop)) return true
-        if (isCopyFromFile(prop)) return true
+        // 复制与(copyFrom)：仅核心节参与 ini 文件路径补全；其他节（腿/炮塔/效果等）交
+        // CopyFromSectionValueCompletionProvider 补节名，这里对非核心节复制与一律不响应
+        // （避免 projectRefKind 兜底把炮塔节 reproduction 之类 type=turret ref 的复制与误归路径）
+        if (CompletionShared.isCopyFromProperty(request.propertyName, request.toEnglishName())) {
+            return isCopyFromFile(prop, request)
+        }
         return projectRefKind(prop.type) != null
     }
 
@@ -66,7 +72,8 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             return buildSoundItems(request)
         }
         // 核心节 复制与(copyFrom)：type=file(s) (ini)，项目 ini/template 文件（默认同目录裸名、跨目录需 ROOT:）
-        if (isCopyFromFile(prop)) {
+        // canProvide 已保证只对核心节复制与进入到此分支，provideItems 再按本节口径复核一次
+        if (isCopyFromFile(prop, request)) {
             return buildFileItems(request)
         }
         val kind = projectRefKind(prop.type) ?: return emptyList()
@@ -114,11 +121,18 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
         return projectRefKind(prop.type) == "sound"
     }
 
-    /** 核心节 复制与(copyFrom)：type 为 file(s) (ini) 等文件引用（仅核心节的复制与，腿/炮塔的复制与是 int 不命中） */
-    private fun isCopyFromFile(prop: com.rwmodstudio.core.translation.CodeReferenceRepository.PropertyInfo): Boolean {
+    /** 核心节 复制与(copyFrom)：type 为 file(s) (ini) 等文件引用，**且当前节是核心节** 才走 ini 文件路径补全。
+     * 其他节（腿=int / 炮塔=turret ref / 效果等命名节）的 copyFrom 引用其他节，交 CopyFromSectionValueCompletionProvider
+     * 补节名，本项目不补路径。sectionName 为 null（分类页/跨节判定）时按核心节处理，保持 copyFrom 归「项目引用」。 */
+    private fun isCopyFromFile(
+        prop: com.rwmodstudio.core.translation.CodeReferenceRepository.PropertyInfo,
+        request: ValueCompletionRequest
+    ): Boolean {
         val isCopyFrom = prop.name.equals("copyFrom", ignoreCase = true) ||
             prop.name_en.equals("copyFrom", ignoreCase = true)
-        return isCopyFrom && prop.type.lowercase().contains("file")
+        if (!isCopyFrom || !prop.type.lowercase().contains("file")) return false
+        // 严格只认核心节：只有核心节复制与走 ini 文件路径；其他节（腿/炮塔/效果等）交 CopyFromSectionValueCompletionProvider 补节名。
+        return CompletionShared.isCoreSection(request.sectionName)
     }
 
     /**

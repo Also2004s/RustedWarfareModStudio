@@ -1,5 +1,6 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
@@ -15,6 +16,9 @@ import com.rwmodstudio.feature.completion.LOGIC_SYNTAX_ITEMS
  * 仅用于补全 label 显示，不改数据 name（签名解析仍用原始带参名）。
  */
 internal fun translateValueName(dict: TranslationDict?, name: String): String {
+    // 语言总闸：翻译引擎关闭 → 直接返回源码英文字面，不做翻译（不硬编码中文）。
+    // 避免「开关已关但字典对象仍存活」时仍显示中文。
+    if (!CompletionShared.translationEngineEnabled()) return name
     val base = name.substringBefore('(').trim()
     if (base.isEmpty()) return name
     // 候选键：基名 → 剥离一次 self. 后的裸基名，各配 原样/小写 两个查询键，命中即返回中文

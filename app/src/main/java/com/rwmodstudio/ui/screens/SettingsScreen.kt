@@ -159,8 +159,7 @@ fun SettingsScreen(
         // ===== 编辑器 =====
         SectionHeader(Icons.Default.Edit, "编辑器")
         SettingsCard {
-            var completionDetail by remember { mutableStateOf(SettingsManager.completionDetailEnabled) }
-            var sectionCompletion by remember { mutableStateOf(SettingsManager.devSectionCompletion) }
+            var translationEngine by remember { mutableStateOf(SettingsManager.devTranslationEngine) }
             var rainbowBrackets by remember { mutableStateOf(SettingsManager.rainbowBrackets) }
             var bracketDiagnostics by remember { mutableStateOf(SettingsManager.bracketDiagnostics) }
 
@@ -199,23 +198,13 @@ fun SettingsScreen(
                 onClick = { showFontPicker = true }
             )
             SettingSwitch(
-                icon = Icons.Default.Notes,
-                title = "自动补全说明",
-                subtitle = if (completionDetail) "显示说明" else "仅显示关键词",
-                checked = completionDetail,
+                icon = Icons.Default.Translate,
+                title = "翻译引擎",
+                subtitle = if (translationEngine) "补全/翻译使用中英互译" else "关闭",
+                checked = translationEngine,
                 onCheckedChange = {
-                    completionDetail = it
-                    SettingsManager.completionDetailEnabled = it
-                }
-            )
-            SettingSwitch(
-                icon = Icons.Default.SpaceBar,
-                title = "节补全",
-                subtitle = if (sectionCompletion) "节内空行自动弹出补全" else "关闭",
-                checked = sectionCompletion,
-                onCheckedChange = {
-                    sectionCompletion = it
-                    SettingsManager.devSectionCompletion = it
+                    translationEngine = it
+                    SettingsManager.devTranslationEngine = it
                 }
             )
             SettingSwitch(

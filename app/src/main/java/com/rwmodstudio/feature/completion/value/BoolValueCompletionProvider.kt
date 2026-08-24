@@ -25,8 +25,9 @@ class BoolValueCompletionProvider : BaseValueCompletionProvider() {
         // 括号内由 FunctionParameterCompletionProvider 处理，此处抑制避免刷 真/假
         if (request.isInsideParentheses()) return false
         // 复制但跳过节（@copyFrom_skipThisSection）是布尔指令，detail 为空，按名称启发触发
+        // （中文「复制但跳过节」经翻译引擎反查为英文 nameEn，不硬编码中文）
         val prop = request.findProperty()
-        if (CompletionShared.isCopyFromSkipSectionProperty(request.propertyName, prop?.name_en)) return true
+        if (CompletionShared.isCopyFromSkipSectionProperty(request.propertyName, request.toEnglishName())) return true
         return prop != null && isBoolValueType(prop.type)
     }
 

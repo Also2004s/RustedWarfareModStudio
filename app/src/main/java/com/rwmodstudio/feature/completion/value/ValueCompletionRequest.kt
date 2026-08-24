@@ -55,6 +55,11 @@ data class ValueCompletionRequest(
      * 在当前节（或全局）中查找属性定义（数据来自自定义补全三表）。
      */
     fun findProperty(): CodeReferenceRepository.PropertyInfo? {
+        // 当前节优先，再跨节兜底：很多属性的 type 是固有语义（LogicBoolean/Bool/Enum/图片 等），
+        // 与所在真实节无关，依赖 .type 判定的 Provider 需要能从全表取到定义（如 需要条件/自动触发）。
+        // 当前节优先保证「type 因节而异」的属性（如 复制与：核心=file(ini)/腿=int/炮塔=turret ref）
+        // 优先取当前节定义；该类属性的依赖方（isCopyFromFile）另用显式节判定（sectionName==核心 + type 含 file）
+        // 双防火墙防误判，不依赖此处返回值的节精度。
         val sectionsToSearch = mutableListOf<String>()
         sectionName?.let { sectionsToSearch.add(it) }
         sectionsToSearch.addAll(sectionProperties.keys)

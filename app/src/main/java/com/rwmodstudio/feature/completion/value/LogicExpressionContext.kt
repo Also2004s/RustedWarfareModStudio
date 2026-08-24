@@ -108,7 +108,8 @@ internal fun unitMarkerItems(
         isCallable = true
     )
     // unit 型内存变量（与 设置单位内存:目标= 的 kvp RHS 口径一致）：内存.变量，按已输入前缀过滤
-    val unitMemItems = memoryValueItemsByTarget(prefix, prefixLength, memoryNames, memoryTypes) {
+    val unitMemItems = memoryValueItemsByTarget(prefix, prefixLength, memoryNames, memoryTypes,
+        useChinese = com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) {
         it == LogicTarget.UNIT_MARKER
     }
     return (listOf(selfItem).filter { prefix.isEmpty() || "self".startsWith(prefix, ignoreCase = true) } + logicItems + unitMemItems)
@@ -128,6 +129,7 @@ private fun memoryValueItemsByTarget(
     prefixLength: Int,
     memoryNames: Set<String>,
     memoryTypes: Map<String, String>,
+    useChinese: Boolean,
     allowed: (LogicTarget) -> Boolean
 ): List<CompletionProvider.CompletionItem> {
     // 裸 name 过滤前缀：`内存`/`memory` 关键字（未带点）本身不作为过滤键——空输入或正输入关键字
@@ -155,11 +157,15 @@ private fun memoryValueItemsByTarget(
         .sortedWith(compareByDescending<Pair<String, Int>> { it.second })
         .map { it.first }
         .map { name ->
+            // 内存引用前缀语言跟随翻译引擎（开→中文「内存.」，关→英文「memory.」），
+            // 与 MemoryValueCompletionProvider 完全一致：打开翻译引擎只出中文，关闭只出英文，
+            // 两处同 label 会被聚合器 distinctBy label 去重，绝不出现 memory./内存. 双语重复。
+            val keyword = if (useChinese) "内存" else "memory"
             CompletionProvider.CompletionItem(
-                label = "内存.$name",
+                label = "$keyword.$name",
                 type = CompletionProvider.CompletionType.VALUE,
                 detail = memoryDetail(memoryTypes[name.substringBefore('[')]),
-                insertText = "内存.$name",
+                insertText = "$keyword.$name",
                 valuePrefixLength = prefixLength.coerceAtLeast(0),
                 valueType = memoryTypes[name.substringBefore('[')] ?: "",
                 isCallable = true
@@ -215,7 +221,8 @@ private fun logicExpressionItems(
     val unitMarkers = unitMarkerItems(dict, context, prefix, prefixLength, memoryNames, memoryTypes)
     // 自身类型内存变量（数值/文本/布尔）补充并入，unit 型已含在 unitMarkerItems 内
     val memItems = if (memoryTargets.isNotEmpty()) {
-        memoryValueItemsByTarget(prefix, prefixLength, memoryNames, memoryTypes) { it in memoryTargets }
+        memoryValueItemsByTarget(prefix, prefixLength, memoryNames, memoryTypes,
+            useChinese = com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) { it in memoryTargets }
     } else {
         emptyList()
     }

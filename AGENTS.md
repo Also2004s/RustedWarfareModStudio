@@ -1,7 +1,7 @@
-﻿# AGENTS.md — RustedWarfareModStudio（铁锈工坊）
+# AGENTS.md — RustedWarfareModStudio（铁锈工坊）
 
 > 本文档**以当前源码为准**，供在仓库中工作的 AI 代理与人类开发者使用。
-> 仓库内 `docs/` 下的描述性旧文档已删除；如发现本文与代码不一致，以代码为准并修正本文。
+> 仓库内 `docs/` 下仍留有少量描述性 `.md`（见 §六），均已保留勿删；如发现本文与代码不一致，以代码为准并修正本文。
 
 ## 一、项目简介
 
@@ -33,7 +33,7 @@ RustedWarfareModStudio（应用名「铁锈工坊」，包名 `com.rwmodstudio`�
 - `settings.gradle.kts` 配置阿里云镜像（google/central/gradle-plugin/public），保留原始源作备用，**不要移除镜像**。
 - `local.properties` 存放 SDK 路径与 release 签名信息（`.gitignore` 已忽略，**不得提交**）。
 - `gradle.properties`：`android.overridePathCheck=true`、`android.suppressUnsupportedCompileSdk=36`。
-- 版本号在 `app/build.gradle.kts`：`versionCode = 11`、`versionName = "1.2.0"`（发布时必须递增，只增不减）。
+- 版本号在 `app/build.gradle.kts`：`versionCode = 20`、`versionName = "1.3.0"`（发布时必须递增，只增不减）。
 
 常用命令（PowerShell）：
 ```powershell
@@ -91,6 +91,7 @@ app/src/main/
 | `DiffUtil.kt` | `computeLineDiff` 行级 diff |
 | `LocalConfigManager.kt` | 本地配置 zip 导入/导出 |
 | `TaskProgressManager.kt` | Debug 模式右上角后台任务进度浮窗 |
+| `UpdateChecker.kt` / `UpdateDownloader.kt` | 检查更新（GitHub Releases，直连失败自动切 `gh-proxy` 镜像）/ APK 下载 |
 | `FileSettings.kt` / `ThemeState.kt` / `ThemeManager.kt` / `DarkThemeColors.kt` / `TodoManager.kt` | 文件键值存储 / 主题 / 待办 |
 
 ### core/translation/ 关键模块
@@ -105,6 +106,9 @@ app/src/main/
 | `SearchTranslationCache.kt` | 文件翻译缓存（增量、mtime 判定） |
 | `BehaviorVerifier.kt` / `ProjectRegistry.kt` | 危险行为确认 / 项目注册 |
 | `SnippetRepository.kt` | 代码片段 |
+| `CompletionShared.kt` | 补全统一判定（单位生成/单位名/单位标记/复制节等），供 Provider 与分类页共用 |
+| `MockIniGenerator.kt` / `CompletionTypeRepository.kt` | 模拟 ini 生成 / 补全类型（真实判定，`CompletionTypeRepository` 已并入真实判定） |
+| `ResourceNameKeys.kt` | 资源名属性键（mutator 变体归一化） |
 
 ## 四、关键约定（改动前必读，均来自当前代码）
 
@@ -147,7 +151,7 @@ app/src/main/
 ### 6. 保存安全（EditorScreen.saveSync）
 
 - `saveSync(caller)` 是挂起函数，内部 `withContext(Dispatchers.IO)` 写盘。
-- 保存内容**优先读编辑器实际内容**（`editorRef?.text`），避免状态同步延迟保存旧内容；仅在 `isEnglish && showChinese` 时先反向翻译（`engine.translateToEnglish`）。
+- 保存内容**优先读编辑器实际内容**（`latestEditorText`，由 `onTextChange` 同步维护，非线程安全时再用 `text` 兜底），避免状态同步延迟保存旧内容；仅在 `isEnglish && showChinese` 时先反向翻译（`engine.translateToEnglish`）。
 - 保存前快照 `targetPath`，写入后校验 `targetPath == filePath`（路径变化打警告）。
 - 所有保存调用带 `caller` 标记（BackHandler/SaveAndExit/LifecycleOnPause/TabSwitch/MenuSave/BackConfirm）。
 - 每次保存记录到 `SaveHistoryManager`（`RWmod/config/save_history.json`，上限由 `SettingsManager.recentHistoryLimit` 控制）。
@@ -157,7 +161,7 @@ app/src/main/
 
 - 导航：`ModalNavigationDrawer`（侧边栏）+ `Scaffold` 全局 `topBar`。**所有页面自带全局标题栏，不要再额外加标题栏**。
 - 返回：`backStack` 记录嵌套导航，"从哪个页面打开，就返回哪个页面"（`pushScreen`/`popScreen`/`clearBackStack`）。
-- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST。
+- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST。
 - 关键状态用 `rememberSaveable`（`selectedFile`、`currentScreen`、`saveAndExit` 等）防止配置变更丢失。
 - 编辑器页返回时有「是否保存修改」确认对话框；抽屉离开编辑器时缓存文本（`editorTextCache`）并可触发保存。
 
@@ -186,16 +190,18 @@ app/src/main/
 6. **并发写 JSON**（翻译库/补全表）：快速连点可能写坏文件；参考 `TranslationEngine` 的 `Mutex` 写法。
 7. **新增需要强刷的数据不走 `VerifyManager`**：老用户将永远用旧数据。
 8. **当前已知性能风险**（改动时注意）：
-   - `util/IniImageReader.kt`：主线程同步 `readText` + `BitmapFactory.decodeFile`，无 `inSampleSize`，普通 map 缓存。
-   - `HomeScreen` 打包/解压 `.rwmod`：zip I/O 在按钮回调中直接执行，大目录会卡 UI。
-   - `SaveHistoryManager` / 近期修改 Diff：主线程读写大历史文件与计算 diff。
+   - `util/IniImageReader.kt`：主线程同步 `readText` + `BitmapFactory.decodeFile`，无 `inSampleSize`，普通 map 缓存（缓存达 200 条即清空）。这是当前唯一遗留的主线程 IO 性能点。
+   - 说明：HomeScreen 打包/解压 `.rwmod` 已在 `scope.launch(Dispatchers.IO)` 中执行；近期修改的 Diff 计算在 `Dispatchers.Default`、SaveHistoryManager 读写在 IO 线程，均已避免卡主线程。
 
 ## 六、其他文档
 
 | 文档 | 内容 |
 |---|---|
 | `docs/项目要求.txt` | 项目硬性要求（需求定义，勿删） |
+| `docs/CodeWiki.md` | 代码中文技术参考 Wiki（较新，以此为准） |
+| `docs/补全验证清单.md` / `docs/补全对照核对报告.md` | 补全功能验证/核对记录（可能过期，以代码为准） |
+| `docs/优化计划.md` | 优化计划与执行状态（部分可能过期，以代码为准） |
 | `计划表.md` | 功能迭代计划与阶段划分（部分可能过期，以代码为准） |
 | `README.md` | 项目简介（开发状态部分可能过期，以代码为准） |
 
-> `docs/` 下其余描述性旧文档已删除；`icon_source.jpg` 是 `generate_icons.py` 的图标源图（资源，勿删）。
+> `docs/` 下现存 4 个描述性 `.md`（CodeWiki/补全验证清单/补全对照核对报告/优化计划）均已保留，勿删；`icon_source.jpg` 是 `generate_icons.py` 的图标源图（资源，勿删）。
