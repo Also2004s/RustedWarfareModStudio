@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
@@ -40,17 +41,28 @@ fun ColorWheelPicker(
     var red by remember(initialColor) { mutableIntStateOf(android.graphics.Color.red(initial)) }
     var green by remember(initialColor) { mutableIntStateOf(android.graphics.Color.green(initial)) }
     var blue by remember(initialColor) { mutableIntStateOf(android.graphics.Color.blue(initial)) }
+    // 透明度 0..255，默认不透明
+    var alpha by remember(initialColor) { mutableIntStateOf(android.graphics.Color.alpha(initial)) }
 
-    val currentColor = remember(red, green, blue) {
-        android.graphics.Color.rgb(red, green, blue)
+    val currentColor = remember(red, green, blue, alpha) {
+        android.graphics.Color.argb(alpha, red, green, blue)
     }
 
-    var hexText by remember(currentColor) {
-        mutableStateOf(String.format("#%06X", 0xFFFFFF and currentColor).uppercase())
+    // 不透明时输出 6 位（兼容旧格式），半透明输出 8 位 #AARRGGBB（高 8 位为透明度）
+    fun colorHex(color: Int): String {
+        return if (alpha == 255) String.format("#%06X", 0xFFFFFF and color).uppercase()
+        else String.format("#%08X", color).uppercase()
+    }
+
+    // HEX 输入框聚焦时，文本只由用户输入驱动，避免颜色回写覆盖导致焦点丢失、输入法被收起
+    var hexFocused by remember { mutableStateOf(false) }
+    var hexText by remember(initialColor) {
+        mutableStateOf(colorHex(currentColor))
     }
 
     LaunchedEffect(currentColor) {
-        onColorChanged(String.format("#%06X", 0xFFFFFF and currentColor))
+        if (!hexFocused) hexText = colorHex(currentColor)
+        onColorChanged(colorHex(currentColor))
     }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -64,9 +76,16 @@ fun ColorWheelPicker(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(currentColor))
+                    // 先铺浅灰底，便于观察透明度叠加效果
+                    .background(Color(0xFFE0E0E0.toInt()))
                     .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-            )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(currentColor))
+                )
+            }
             if (showHexInput) {
                 OutlinedTextField(
                     value = hexText,
@@ -74,8 +93,20 @@ fun ColorWheelPicker(
                         val filtered = input.uppercase().filter { it.isDigit() || it in 'A'..'F' }
                         hexText = if (filtered.startsWith("#")) filtered else "#$filtered"
                         if (hexText.length == 7) {
+                            // 6 位 #RRGGBB：不透明，透明度复位为 255
                             try {
                                 val parsed = android.graphics.Color.parseColor(hexText)
+                                red = android.graphics.Color.red(parsed)
+                                green = android.graphics.Color.green(parsed)
+                                blue = android.graphics.Color.blue(parsed)
+                                alpha = 255
+                            } catch (_: Exception) {
+                            }
+                        } else if (hexText.length == 9) {
+                            // 8 位 #AARRGGBB：含透明度
+                            try {
+                                val parsed = android.graphics.Color.parseColor(hexText)
+                                alpha = android.graphics.Color.alpha(parsed)
                                 red = android.graphics.Color.red(parsed)
                                 green = android.graphics.Color.green(parsed)
                                 blue = android.graphics.Color.blue(parsed)
@@ -87,7 +118,7 @@ fun ColorWheelPicker(
                     singleLine = true,
                     textStyle = TextStyle(fontSize = 13.sp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).onFocusChanged { hexFocused = it.isFocused }
                 )
             } else {
                 Text(
@@ -107,6 +138,10 @@ fun ColorWheelPicker(
         RgbSlider("G", green, Color.Green) { green = it }
         Spacer(Modifier.height(4.dp))
         RgbSlider("B", blue, Color.Blue) { blue = it }
+
+        Spacer(Modifier.height(6.dp))
+        // 透明度滑杆：A 高=不透明，轨道用当前色的不透明版本，便于直观对应
+        RgbSlider("A", alpha, Color(red, green, blue, 255)) { alpha = it }
 
         Spacer(Modifier.height(10.dp))
 

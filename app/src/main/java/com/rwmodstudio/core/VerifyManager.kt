@@ -32,7 +32,7 @@ object VerifyManager {
     const val MOCK_INI = "mockIni"
 
     /** 各功能当前验证码（修改即触发对应配置重置） */
-    const val BLOCKLIST_CODE = "384757"
+    const val BLOCKLIST_CODE = "384758"
     const val SECTION_FILTERS_CODE = "813546"
     const val NATIVE_COMPLETIONS_CODE = "819411"
     const val EXTRA_COMPLETIONS_CODE = "530719"

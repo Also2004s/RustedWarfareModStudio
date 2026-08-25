@@ -397,7 +397,7 @@ internal fun resolveFunctionBaseKey(
     while (start > colonIdx) {
         val c = lineBeforeCursor[start]
         if (c == ' ' || c == ',' || c == '，' || c == '(' || c == ':' || c == '=' ||
-            c == '<' || c == '>' || c == '!' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
+            c == '<' || c == '>' || c == '!' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '{'
         ) break
         start--
     }

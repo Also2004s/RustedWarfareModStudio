@@ -193,18 +193,26 @@ fun FileBrowserScreen(
                                 if (isLast) {
                                     DropdownMenu(expanded = showSiblingMenu, onDismissRequest = { showSiblingMenu = false }) {
                                         if (siblingDirs.isEmpty()) {
-                                            DropdownMenuItem(
-                                                text = { Text("无同级文件夹", fontSize = 12.sp) },
-                                                onClick = { showSiblingMenu = false },
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                                            )
+                                            Row(
+                                                Modifier
+                                                    .clickable { showSiblingMenu = false }
+                                                    .heightIn(min = 32.dp)
+                                                    .padding(horizontal = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("无同级文件夹", fontSize = 12.sp)
+                                            }
                                         } else {
                                             siblingDirs.forEach { dir ->
-                                                DropdownMenuItem(
-                                                    text = { Text(dir.name, fontSize = 12.sp, fontFamily = AppCodeFontFamily) },
-                                                    onClick = { currentPath = dir.absolutePath; showSiblingMenu = false },
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                                                )
+                                                Row(
+                                                    Modifier
+                                                        .clickable { currentPath = dir.absolutePath; showSiblingMenu = false }
+                                                        .heightIn(min = 36.dp)
+                                                        .padding(horizontal = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(dir.name, fontSize = 12.sp, fontFamily = AppCodeFontFamily)
+                                                }
                                             }
                                         }
                                     }

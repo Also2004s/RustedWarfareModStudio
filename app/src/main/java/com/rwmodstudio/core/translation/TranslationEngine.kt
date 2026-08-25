@@ -19,12 +19,12 @@ class TranslationEngine private constructor() {
         private val PERCENT_VARIABLE_REGEX = Regex("""%\{((?:[^$}]|\$\{[^}]*\})*?)\}""")
         private val EN_BOOLEANS = setOf("true", "false")
         private val ZH_BOOLEANS = setOf("真", "假")
-        // 匹配作为独立 token 出现的中文布尔值（前面是 = 、( 、, 或行首，后面是 , 、) 或行尾）
-        // 用于翻译 spawnUnits 等参数列表中的 真/假，如 gridAlign=真, skipIfOverlapping=真)
-        private val ZH_BOOL_TOKEN_REGEX = Regex("""(?<=[=,\(])\s*(真|假)\s*(?=[,\)])""")
+        // 匹配作为独立 token 出现的中文布尔值（前面是 = 、( 、, 或行首，后面是 , 、) 、} 或行尾）
+        // 用于翻译 spawnUnits 等参数列表及 %{...} 插值内的 真/假，如 gridAlign=真, skipIfOverlapping=真)、incompleteBuildings=真}
+        private val ZH_BOOL_TOKEN_REGEX = Regex("""(?<=[=,\(])\s*(真|假)\s*(?=[,\)\}])""")
         // 匹配作为独立 token 出现的英文布尔值（不区分大小写）
-        // 用于反向翻译 spawnUnits 等参数列表中的 true/false，如 gridAlign=true, skipIfOverlapping=true)
-        private val EN_BOOL_TOKEN_REGEX = Regex("""(?<=[=,\(])\s*(true|false)\s*(?=[,\)])""", RegexOption.IGNORE_CASE)
+        // 用于反向翻译 spawnUnits 等参数列表及 %{...} 插值内的 true/false，如 gridAlign=true, skipIfOverlapping=true)
+        private val EN_BOOL_TOKEN_REGEX = Regex("""(?<=[=,\(])\s*(true|false)\s*(?=[,\)\}])""", RegexOption.IGNORE_CASE)
 
         private var instance: TranslationEngine? = null
 
@@ -467,7 +467,19 @@ class TranslationEngine private constructor() {
             sb.append(value.substring(lastEnd, match.range.first))
             val inner = match.groupValues[1]
             val translatedInner = translationDict.translateInText(inner, enToZh)
-            sb.append("%{${translatedInner}}")
+            // 翻译插值内部的内嵌布尔 token（如 incompleteBuildings=真}）：translateInText 的 \b
+            // 边界对单字 真/假 不可靠，且 true/false 在 valueTranslations 而非 enToZh 字典，
+            // 与 translateSingleValue 的布尔补救逻辑对齐。
+            val boolInner = if (!enToZh) {
+                ZH_BOOL_TOKEN_REGEX.replace(translatedInner) { match2 ->
+                    translationDict.getValueTranslationBack(match2.groupValues[1])
+                }
+            } else {
+                EN_BOOL_TOKEN_REGEX.replace(translatedInner) { match2 ->
+                    translationDict.getValueTranslation(match2.groupValues[1].lowercase())
+                }
+            }
+            sb.append("%{${boolInner}}")
             lastEnd = match.range.last + 1
         }
         sb.append(value.substring(lastEnd))

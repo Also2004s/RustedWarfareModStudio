@@ -17,7 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -45,15 +44,13 @@ import com.rwmodstudio.core.TaskProgressManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.UpdateChecker
 import com.rwmodstudio.core.computeLineDiff
+import com.rwmodstudio.editor.resolveEditorBackground
 import com.rwmodstudio.core.translation.ProjectRegistry
 import com.rwmodstudio.core.translation.TranslationDedupChecker
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.feature.completion.value.CALLABLE_CATEGORIES
-import com.rwmodstudio.ui.components.ColorPickerDialog
-import com.rwmodstudio.ui.components.DarkTokenColorDialog
 import com.rwmodstudio.ui.components.DedupResultDialog
-import com.rwmodstudio.ui.components.RainbowBracketSettingsPanel
 import com.rwmodstudio.ui.components.UpdateDialogHost
 import com.rwmodstudio.ui.components.UpdateDialogState
 import com.rwmodstudio.ui.components.UpdateStateManager
@@ -182,9 +179,6 @@ fun MainApp() {
     var editorJumpColumnStart by remember { mutableIntStateOf(-1) }
     var editorJumpColumnEnd by remember { mutableIntStateOf(-1) }
 
-    // 彩虹括号参数变化时用于触发编辑器刷新
-    var rainbowSettingsTick by remember { mutableIntStateOf(0) }
-
     // 从抽屉离开编辑器时缓存当前文本；若开启自动保存则触发 EditorScreen 保存
     fun cacheEditorStateBeforeLeave() {
         if (currentScreen == Screen.EDITOR) {
@@ -223,18 +217,24 @@ fun MainApp() {
     val themeIsDark = ThemeState.isDark // Force recompose on theme toggle
     val view = LocalView.current
 
-    // 动态设置状态栏/导航栏/窗口背景色：编辑器页面与底部栏一致，其他页面跟随主题色
-    LaunchedEffect(currentScreen, ThemeState.isDark) {
+    // 动态设置状态栏/导航栏/窗口背景色：非 edge-to-edge 下系统导航栏是一块可见区域，
+    // 将其颜色设为编辑器真实背景色，与编辑区完全一致，底部即无色块。
+    // 用 SideEffect 而非 LaunchedEffect：LaunchedEffect 是协程副作用，组合后异步才执行，
+    // 存在若干帧延迟，导致"刚打开编辑器/某次操作后"短暂露出跟随全局主题色的色块；
+    // SideEffect 在每次重组后同步执行，保证编辑器可见时导航栏始终立即跟随背景色。
+    // 其余页面导航栏跟随全局背景。仅做视觉着色 + 系统栏图标明暗，不动 insets，不叠 imePadding：
+    // 保留 adjustResize 由系统顶高窗口，editor 靠 sora 感知尺寸变化自动校正光标，本就流畅不卡。
+    SideEffect {
         if (!view.isInEditMode) {
             val window = (view.context as Activity).window
             val insetsController = WindowCompat.getInsetsController(window, view)
             if (currentScreen == Screen.EDITOR) {
                 val editorBarColor = Color(0xFF1E1E1E)
-                val editorBgColor = if (ThemeState.isDark) Color(0xFF1E1E1E) else Color(0xFFF0F0F0)
+                val editorBgColor = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
                 // 状态栏与顶部横栏同色
                 window.statusBarColor = editorBarColor.toArgb()
                 insetsController.isAppearanceLightStatusBars = false
-                // 导航栏与窗口背景跟随底部栏主题色，避免输入法间隙黑条
+                // 导航栏与编辑区背景同色，消除底部色块（始终跟随编辑器背景色）
                 window.navigationBarColor = editorBgColor.toArgb()
                 window.decorView.setBackgroundColor(editorBgColor.toArgb())
                 window.decorView.postInvalidate()
@@ -524,144 +524,12 @@ fun MainApp() {
                         Text(titleText, color = contentColor, fontSize = 18.sp, maxLines = 1)
                     }
                     if (currentScreen == Screen.EDITOR) {
-                        var showColors by remember { mutableStateOf(false) }
-                        var showThemes by remember { mutableStateOf(false) }
-                        var showDarkTokens by remember { mutableStateOf(false) }
-                        var showRainbowBracketDialog by remember { mutableStateOf(false) }
                         IconButton(onClick = {
                             editorSaveTrigger++
                             showRecentSheet = true
                             recentSourceScreen = Screen.EDITOR
                         }, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Default.History, "最近", Modifier.size(18.dp), tint = contentColor)
-                        }
-                        IconButton(onClick = { showColors = true }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.Palette, "背景色", Modifier.size(18.dp), tint = contentColor)
-                        }
-                        IconButton(onClick = { showThemes = true }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.Brush, "高亮主题", Modifier.size(18.dp), tint = contentColor)
-                        }
-                        IconButton(onClick = {
-                            try {
-                                val intent = context.packageManager.getLaunchIntentForPackage("com.corrodinggames.rts")
-                                if (intent != null) {
-                                    context.startActivity(intent)
-                                } else {
-                                    Toast.makeText(context, "未安装铁锈战争", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "启动铁锈战争失败", Toast.LENGTH_SHORT).show()
-                            }
-                        }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.RocketLaunch, "启动铁锈战争", Modifier.size(18.dp), tint = contentColor)
-                        }
-                        if (showColors) {
-                            ColorPickerDialog(
-                                initialColor = ThemeState.bgColor,
-                                onDismiss = { showColors = false },
-                                onConfirm = { color ->
-                                    ThemeState.applyBgColor(color)
-                                    showColors = false
-                                },
-                                showInsertButton = true,
-                                onInsert = { color ->
-                                    editorInsertText = color
-                                    editorInsertTick++
-                                    showColors = false
-                                }
-                            )
-                        }
-                        if (showThemes) {
-                            val hlThemes = listOf(
-                                "dark" to "深色",
-                                "light" to "浅色",
-                                "pure" to "纯净",
-                                "custom" to "自定义"
-                            )
-                            DropdownMenu(expanded = showThemes, onDismissRequest = { showThemes = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("切换为${if (ThemeState.isDark) "浅色" else "深色"}", fontSize = 13.sp) },
-                                    onClick = { ThemeState.toggle(); showThemes = false },
-                                    leadingIcon = { Icon(if (ThemeState.isDark) Icons.Default.LightMode else Icons.Default.DarkMode, null, Modifier.size(18.dp)) }
-                                )
-                                HorizontalDivider()
-                                hlThemes.forEach { (id, label) ->
-                                    DropdownMenuItem(
-                                        text = { Text(label, fontSize = 13.sp) },
-                                        onClick = { ThemeState.applyHighlightTheme(id); showThemes = false }
-                                    )
-                                }
-                                if (ThemeState.highlightTheme == "custom") {
-                                    HorizontalDivider()
-                                    DropdownMenuItem(
-                                        text = { Text("自定义高亮色", fontSize = 13.sp) },
-                                        onClick = {
-                                            showThemes = false
-                                            showDarkTokens = true
-                                        }
-                                    )
-                                }
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("括号颜色", fontSize = 13.sp) },
-                                    onClick = {
-                                        showThemes = false
-                                        showRainbowBracketDialog = true
-                                    }
-                                )
-                            }
-                        }
-                        if (showRainbowBracketDialog) {
-                            val previewBg = remember {
-                                try {
-                                    android.graphics.Color.parseColor(ThemeState.bgColor)
-                                } catch (_: Exception) {
-                                    if (ThemeState.isDark) android.graphics.Color.parseColor("#1E1E1E")
-                                    else android.graphics.Color.parseColor("#F0F0F0")
-                                }
-                            }
-                            // 预览基础色：从当前 TextMate 主题读取括号色，读不到用默认兜底，
-                            // 保证预览初始色与编辑器实际渲染一致（会随高亮主题变化而变化）
-                            val previewBaseColor = remember(ThemeState.highlightTheme) {
-                                com.rwmodstudio.editor.RainbowColorUtils.resolvePreviewBaseColor(ThemeState.highlightTheme)
-                            }
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showRainbowBracketDialog = false
-                                    rainbowSettingsTick++
-                                },
-                                title = { Text("括号颜色", fontSize = 16.sp) },
-                                text = {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .verticalScroll(rememberScrollState())
-                                    ) {
-                                        RainbowBracketSettingsPanel(
-                                            previewBackgroundColor = previewBg,
-                                            previewBaseColor = previewBaseColor
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(onClick = {
-                                        showRainbowBracketDialog = false
-                                        rainbowSettingsTick++
-                                    }) {
-                                        Text("关闭")
-                                    }
-                                }
-                            )
-                        }
-                        if (showDarkTokens) {
-                            DarkTokenColorDialog(
-                                initialColors = ThemeState.darkTokenColors,
-                                onDismiss = { showDarkTokens = false },
-                                onConfirm = { colors ->
-                                    ThemeState.applyDarkTokenColors(colors)
-                                    showDarkTokens = false
-                                }
-                            )
                         }
                     }
                     if (currentScreen == Screen.PROJECT_MANAGER) {
@@ -807,8 +675,7 @@ fun MainApp() {
                             jumpColumnStart = editorJumpColumnStart,
                             jumpColumnEnd = editorJumpColumnEnd,
                             onExternalInsertConsumed = { editorInsertText = "" },
-                            onExternalReplaceConsumed = { coordVisualResult = null },
-                            rainbowSettingsTick = rainbowSettingsTick
+                            onExternalReplaceConsumed = { coordVisualResult = null }
                         )
                     }
                     Screen.PROJECT_MANAGER -> {

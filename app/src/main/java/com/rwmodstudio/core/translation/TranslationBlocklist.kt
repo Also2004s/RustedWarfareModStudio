@@ -17,7 +17,7 @@ import java.io.File
 data class TranslationBlocklist(
     val enabled: Boolean = DEFAULT_ENABLED,
     val keys: List<String> = DEFAULT_BLOCK_KEYS,
-    val blockVariables: Boolean = true,
+    val blockVariables: Boolean = false,
     val blockAtTokens: Boolean = true,
     val blockFileNames: Boolean = true,
     val blockQuotedDictWords: Boolean = false,
@@ -149,7 +149,7 @@ data class TranslationBlocklist(
                 TranslationBlocklist(
                     enabled = enabled,
                     keys = keys,
-                    blockVariables = json.optBoolean("blockVariables", true),
+                    blockVariables = json.optBoolean("blockVariables", false),
                     blockAtTokens = json.optBoolean("blockAtTokens", true),
                     blockFileNames = json.optBoolean("blockFileNames", true),
                     blockQuotedDictWords = json.optBoolean("blockQuotedDictWords", false),

@@ -164,6 +164,16 @@ object SettingsManager {
 
     private fun migrateDefaults() {
         try {
+            // 节名行高亮默认色改为含透明度的 #20F05E5A：一次性把"未自定义（无记录或空串）"的老用户迁移到新默认，
+            // 已被用户手动改过的彩色值保留，不覆盖。
+            if (!settings.contains("section_highlight_color_migration_v1")) {
+                val cur = settings.getString("section_highlight_color", "") ?: ""
+                if (cur.isBlank()) {
+                    settings.edit().putString("section_highlight_color", "#20F05E5A").apply()
+                }
+                settings.edit().putBoolean("section_highlight_color_migration_v1", true).apply()
+                Log.d(TAG, "Migrated section_highlight_color default (one-time)")
+            }
             // dev_value_completion 旧版默认 false；本次一次性强制迁移为 true，
             // 并记录 migration 标记避免重复覆盖用户后续手动设置。
             if (!settings.contains("dev_value_completion_migration_v1")) {
@@ -172,6 +182,22 @@ object SettingsManager {
                     .putBoolean("dev_value_completion_migration_v1", true)
                     .apply()
                 Log.d(TAG, "Migrated dev_value_completion to true (one-time)")
+            }
+            // 开发者模式旧版默认 false；本次一次性强制迁移为 true（开发者默认打开）。
+            if (!settings.contains("dev_mode_migration_v1")) {
+                settings.edit()
+                    .putBoolean("dev_mode", true)
+                    .putBoolean("dev_mode_migration_v1", true)
+                    .apply()
+                Log.d(TAG, "Migrated dev_mode to true (one-time)")
+            }
+            // 调色盘统一切换为默认 HSV 色盘：一次性强制迁移为 true（全部默认使用 HSV 色盘）。
+            if (!settings.contains("dev_hsv_picker_migration_v1")) {
+                settings.edit()
+                    .putBoolean("dev_hsv_picker", true)
+                    .putBoolean("dev_hsv_picker_migration_v1", true)
+                    .apply()
+                Log.d(TAG, "Migrated dev_hsv_picker to true (one-time)")
             }
             // 翻译自动空格旧版默认 true；本次一次性强制迁移为 false。
             if (!settings.contains("auto_space_migration_v1")) {
@@ -345,6 +371,20 @@ object SettingsManager {
             return DarkThemeColors.Default.copy(ui = old, section = old).toJson()
         }
         set(value) = settings.edit().putString("dark_token_colors", value).apply()
+
+    /** 节名行高亮是否启用（默认开启）。 */
+    var sectionHighlightEnabled: Boolean
+        get() = settings.getBoolean("section_highlight_enabled", true)
+        set(value) = settings.edit().putBoolean("section_highlight_enabled", value).apply()
+
+    /**
+     * 节名行高亮自定义底色（#AARRGGBB，如 #20F05E5A，高 4 位为透明度）。
+     * 非空时使用该自定义色（含透明度，节行高亮与背景不再随主题明暗自适应）；
+     * 空字符串表示「不自定义」，跟随编辑器背景明暗自适应默认色。
+     */
+    var sectionHighlightColor: String
+        get() = settings.getString("section_highlight_color", "#18F05E5A") ?: "#18F05E5A"
+        set(value) = settings.edit().putString("section_highlight_color", value).apply()
 
     /**
      * 编辑器字体族。
@@ -673,7 +713,7 @@ object SettingsManager {
 
     // 开发者模式
     var devMode: Boolean
-        get() = settings.getBoolean("dev_mode", false)
+        get() = settings.getBoolean("dev_mode", true)
         set(value) = settings.edit().putBoolean("dev_mode", value).apply()
 
     /** 坐标可视化（开发者实验功能） */
@@ -749,6 +789,10 @@ object SettingsManager {
     var devLightbulbEnabled: Boolean
         get() = settings.getBoolean("dev_lightbulb_enabled", false)
         set(value) = settings.edit().putBoolean("dev_lightbulb_enabled", value).apply()
+    /** 调色盘使用 HSV 色盘（左侧取色盘 + 右侧滑杆，默认开启） */
+    var devHsvPicker: Boolean
+        get() = settings.getBoolean("dev_hsv_picker", true)
+        set(value) = settings.edit().putBoolean("dev_hsv_picker", value).apply()
     /** 继承链查看（编辑器更多菜单） */
     var devInheritanceView: Boolean
         get() = settings.getBoolean("dev_inheritance_view", false)

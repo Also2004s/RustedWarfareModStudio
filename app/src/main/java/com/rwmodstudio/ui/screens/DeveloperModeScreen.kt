@@ -200,6 +200,13 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.Palette,
+                title = "HSV 取色盘",
+                checked = SettingsManager.devHsvPicker,
+                onCheckedChange = { SettingsManager.devHsvPicker = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.Tab,
                 title = "标签栏",
                 checked = SettingsManager.devTabBar,

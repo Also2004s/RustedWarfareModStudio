@@ -33,7 +33,7 @@ RustedWarfareModStudio（应用名「铁锈工坊」，包名 `com.rwmodstudio`�
 - `settings.gradle.kts` 配置阿里云镜像（google/central/gradle-plugin/public），保留原始源作备用，**不要移除镜像**。
 - `local.properties` 存放 SDK 路径与 release 签名信息（`.gitignore` 已忽略，**不得提交**）。
 - `gradle.properties`：`android.overridePathCheck=true`、`android.suppressUnsupportedCompileSdk=36`。
-- 版本号在 `app/build.gradle.kts`：`versionCode = 20`、`versionName = "1.3.0"`（发布时必须递增，只增不减）。
+- 版本号在 `app/build.gradle.kts`：`versionCode = 22`、`versionName = "1.3.2"`（发布时必须递增，只增不减）。
 
 常用命令（PowerShell）：
 ```powershell

@@ -20,7 +20,8 @@ fun ColorPickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
     showInsertButton: Boolean = false,
-    onInsert: ((String) -> Unit)? = null
+    onInsert: ((String) -> Unit)? = null,
+    showApplyButton: Boolean = true
 ) {
     var picked by remember { mutableStateOf(initialColor) }
 
@@ -34,13 +35,24 @@ fun ColorPickerDialog(
                     .verticalScroll(rememberScrollState())
             ) {
 
-                ColorWheelPicker(
-                    initialColor = initialColor,
-                    onColorChanged = { picked = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    wheelSize = 180.dp,
-                    showHexInput = true
-                )
+                if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
+                    // 开发者模式：HSV 取色盘（左色盘 + 右滑杆，支持透明度）
+                    ColorWheelHSV(
+                        initialColor = initialColor,
+                        onColorChanged = { picked = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        wheelSize = 180.dp,
+                        showHexInput = true
+                    )
+                } else {
+                    ColorWheelPicker(
+                        initialColor = initialColor,
+                        onColorChanged = { picked = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        wheelSize = 180.dp,
+                        showHexInput = true
+                    )
+                }
             }
         },
         confirmButton = {
@@ -50,9 +62,12 @@ fun ColorPickerDialog(
                         onClick = { onInsert(picked); onDismiss() }
                     ) { Text("插入文本", color = RustedPrimary) }
                 }
-                TextButton(
-                    onClick = { onConfirm(picked) }
-                ) { Text("应用", color = RustedPrimary) }
+                // 符号栏调色盘仅插入、不应用背景色时隐藏「应用」按钮
+                if (showApplyButton) {
+                    TextButton(
+                        onClick = { onConfirm(picked) }
+                    ) { Text("应用", color = RustedPrimary) }
+                }
             }
         },
         dismissButton = {

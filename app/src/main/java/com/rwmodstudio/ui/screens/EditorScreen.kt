@@ -4,12 +4,23 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.graphics.Rect
 import android.util.Log
+import android.view.ViewTreeObserver
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -17,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -27,14 +39,20 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
 import androidx.compose.ui.unit.dp
@@ -54,6 +72,8 @@ import com.rwmodstudio.editor.CURSOR_MARKER
 import com.rwmodstudio.editor.EditorToolbarAction
 import com.rwmodstudio.editor.ReadOnlyCodeEditor
 import com.rwmodstudio.editor.SoraCodeEditor
+import com.rwmodstudio.editor.centerCursorOnVisible
+import com.rwmodstudio.editor.resolveEditorBackground
 import com.rwmodstudio.feature.completion.extractFileSymbols
 import com.rwmodstudio.feature.completion.mergeCompletionSymbols
 import com.rwmodstudio.feature.completion.sectionEnToZh
@@ -119,7 +139,7 @@ private fun mapEnglishColumnsToChineseImpl(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditorScreen(
     fileName: String, filePath: String, autoWrap: Boolean = true, smartWrap: Boolean = true,
@@ -142,7 +162,6 @@ fun EditorScreen(
     jumpColumnEnd: Int = -1,
     onExternalInsertConsumed: () -> Unit = {},
     onExternalReplaceConsumed: () -> Unit = {},
-    rainbowSettingsTick: Int = 0,
     onSaved: ((Boolean) -> Unit)? = null
 ) {
     val ctx = LocalContext.current
@@ -246,6 +265,8 @@ fun EditorScreen(
     var chainSymbols by remember(filePath) { mutableStateOf<ProjectTagScanner.ProjectTagInfo?>(null) }
     var allSections by remember(filePath) { mutableStateOf(listOf<Pair<String, Int>>()) }
     var showSectionJumpDialog by remember(filePath) { mutableStateOf(false) }
+    // 节名显示块：点击展开可跳转的节名列表（DropdownMenu，类似 tab 栏当前文件展开）
+    var showSectionMenu by remember(filePath) { mutableStateOf(false) }
     var cursorWord by remember(filePath) { mutableStateOf("") }
     var cursorPos by remember(filePath) { mutableIntStateOf(0) }
     var fontSizeState by remember { mutableFloatStateOf(SettingsManager.fontSize) }
@@ -254,6 +275,57 @@ fun EditorScreen(
     var showInheritanceView by remember(filePath) { mutableStateOf(false) }
     var inheritanceText by remember { mutableStateOf("") }
     var showSearch by remember(filePath) { mutableStateOf(false) }
+    // 「方块+」折叠菜单：输入法关闭时显示，点击展开「更多」浮层
+    var fabExpanded by remember(filePath) { mutableStateOf(false) }
+    var fabShowColorPicker by remember { mutableStateOf(false) }
+    // 符号栏调色盘：仅插入颜色文本（与「背景色」调色盘区分，不应用背景色）
+    var symbolBarColorPicker by remember(filePath) { mutableStateOf(false) }
+    var fabShowThemes by remember { mutableStateOf(false) }
+    // 高级主题设置（迁自顶栏高亮主题下拉）：自定义高亮色 / 括号颜色
+    var showDarkTokens by remember(filePath) { mutableStateOf(false) }
+    var showRainbowBracketDialog by remember(filePath) { mutableStateOf(false) }
+    var rainbowSettingsTick by remember { mutableIntStateOf(0) }
+    // 节名行高亮：开关 + 自定义底色（调色盘）
+    var showSectionHighlightPicker by remember(filePath) { mutableStateOf(false) }
+    var sectionHighlightTick by remember(filePath) { mutableIntStateOf(0) }
+
+    // 输入法是否展示：控制底部快捷栏处于「完整展开」还是「折叠为方块+」
+    // 用 ViewTreeObserver 全局布局监听检测输入法显隐，比 WindowInsets.isImeVisible 更可靠
+    // （adjustResize + 非 edge-to-edge 下 ime insets 可能不更新，导致快捷栏不隐藏、FAB 不出现）
+    val imeView = LocalView.current
+    var imeVisible by remember { mutableStateOf(false) }
+    DisposableEffect(imeView) {
+        val rect = Rect()
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            val screenHeight = imeView.resources.displayMetrics.heightPixels
+            imeView.getWindowVisibleDisplayFrame(rect)
+            val visibleHeight = rect.bottom - rect.top
+            // 可见高度比全屏短超过 15% 视为输入法占用
+            imeVisible = (screenHeight - visibleHeight) > screenHeight * 0.15
+        }
+        imeView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose {
+            imeView.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+        }
+    }
+    // 调色盘对话框打开时忽略输入法状态：其 HEX 输入框本身就要用输入法，
+    // 若随 IME 弹起联动折叠 +号/重组，会把焦点与输入法一起挤掉。
+    val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker
+    val effectiveIme = imeVisible && !pickerOpen
+    val editingBarShown = !showSearch && effectiveIme
+    val fabShown = !showSearch && !effectiveIme
+    // 输入法重新打开时收起 FAB 折叠菜单及子层，避免浮层悬空。
+    // 注意：调色盘等对话框（fabShowColorPicker / symbolBarColorPicker / showSectionHighlightPicker）
+    // 必须排除在此收起逻辑之外——它们的 HEX 输入框本身就要用输入法，若随键盘收起会连同对话框一起被关掉。
+    LaunchedEffect(fabShown) {
+        if (!fabShown) {
+            fabExpanded = false
+            fabShowThemes = false
+        } else {
+            // 输入法关闭时，确保「更多」弹窗（仅输入法打开时可用）不残留
+            showMore = false
+        }
+    }
     var showSiblingMenu by remember(filePath) { mutableStateOf(false) }
     var siblingDir by remember(filePath) { mutableStateOf<File?>(null) }
     var siblingDirHistory by remember(filePath) { mutableStateOf(listOf<File>()) }
@@ -328,7 +400,16 @@ fun EditorScreen(
                 } else {
                     ed.setSelection(target0, 0)
                 }
-                // 确保选区位置可见并重绘高亮
+                // 光标聚焦行垂直居中，避免跳转后光标顶到视口边缘。
+                // 与中英切换同款稳定化：单次 post 会被稍晚的异步重排/键盘收起/ensureSelectionVisible 覆盖而概率性错位，
+                // 改为递增时间多次重定位，直到布局稳定，确保最终停在目标行。
+                for (d in longArrayOf(0L, 50L, 120L, 240L, 420L, 650L)) {
+                    ed.postDelayed({
+                        val cp = ed.cursor
+                        ed.centerCursorOnVisible(cp.leftLine, cp.leftColumn)
+                    }, d)
+                }
+                // 水平方向照常滚动到已选中内容；光标因垂直已居中，不会顶到视口边缘
                 ed.ensureSelectionVisible()
                 ed.invalidate()
             }
@@ -674,6 +755,14 @@ fun EditorScreen(
     }
 
     BackHandler {
+        if (fabShowThemes) {
+            fabShowThemes = false
+            return@BackHandler
+        }
+        if (fabExpanded) {
+            fabExpanded = false
+            return@BackHandler
+        }
         if (isModified) {
             showBackConfirm = true
         } else {
@@ -735,7 +824,8 @@ fun EditorScreen(
         }
     }
 
-    // Column布局：adjustResize 会让系统自动缩小窗口，底部栏自然在键盘上方
+    // 非 edge-to-edge + adjustResize：系统在键盘弹出时顶高窗口即缩小编辑器，不加 imePadding（避免双重削减），
+    // sora 感知编辑器尺寸变化自动校正光标，此为本仓库验证过的流畅方案。
     Column(Modifier.fillMaxSize().background(RustedBackground)) {
         // Tab bar
         if (SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
@@ -743,12 +833,18 @@ fun EditorScreen(
                 Modifier
                     .fillMaxWidth()
                     .height(22.dp)
-                    .background(RustedSurface.copy(alpha = 0.5f))
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp),
+                    .background(RustedSurface.copy(alpha = 0.5f)),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                (listOf(filePath) + recent).distinct().forEach { path ->
+                // 可滚动的 tab 列表占 72%（开启节名显示块时剩余 28% 留给它，与底部功能栏占比一致）
+                Row(
+                    Modifier
+                        .weight(if (SettingsManager.devSectionBar) 0.72f else 1f)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    (listOf(filePath) + recent).distinct().forEach { path ->
                     val name = File(path).name; val active = path == filePath
                     if (active) {
                         val siblingFiles = remember(siblingDir) {
@@ -776,39 +872,51 @@ fun EditorScreen(
                                 if (siblingDir != null && !atProjectRoot &&
                                     (siblingDirHistory.isNotEmpty() || projectRoot.isNotEmpty())
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("← 返回上一级", fontSize = 12.sp) },
-                                        onClick = {
-                                            siblingDir = if (siblingDirHistory.isNotEmpty()) siblingDirHistory.last() else siblingDir?.parentFile
-                                            if (siblingDirHistory.isNotEmpty()) siblingDirHistory = siblingDirHistory.dropLast(1)
-                                        },
-                                        leadingIcon = { Icon(Icons.Default.ArrowBack, null, Modifier.size(16.dp)) },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                                    )
+                                    Row(
+                                        Modifier
+                                            .clickable {
+                                                siblingDir = if (siblingDirHistory.isNotEmpty()) siblingDirHistory.last() else siblingDir?.parentFile
+                                                if (siblingDirHistory.isNotEmpty()) siblingDirHistory = siblingDirHistory.dropLast(1)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.ArrowBack, null, Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("← 返回上一级", fontSize = 12.sp)
+                                    }
                                     HorizontalDivider()
                                 }
                                 siblingFiles.forEach { f ->
                                     val isCurrent = f.absolutePath == filePath
-                                    DropdownMenuItem(
-                                        text = { Text(f.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                        onClick = {
-                                            if (f.isDirectory) {
-                                                val dir = siblingDir ?: return@DropdownMenuItem
-                                                siblingDirHistory = siblingDirHistory + dir
-                                                siblingDir = f
-                                            } else {
-                                                showSiblingMenu = false
-                                                if (isModified) {
-                                                    scope.launch { saveSync("TabSwitch"); onSwitchFile(f.absolutePath) }
+                                    val enabled = if (f.isDirectory) true else !isCurrent && f.extension.lowercase() in setOf("ini", "template")
+                                    Row(
+                                        Modifier
+                                            .width(140.dp)
+                                            .clickable(enabled = enabled) {
+                                                if (f.isDirectory) {
+                                                    val dir = siblingDir
+                                                    if (dir != null) {
+                                                        siblingDirHistory = siblingDirHistory + dir
+                                                        siblingDir = f
+                                                    }
                                                 } else {
-                                                    onSwitchFile(f.absolutePath)
+                                                    showSiblingMenu = false
+                                                    if (isModified) {
+                                                        scope.launch { saveSync("TabSwitch"); onSwitchFile(f.absolutePath) }
+                                                    } else {
+                                                        onSwitchFile(f.absolutePath)
+                                                    }
                                                 }
                                             }
-                                        },
-                                        enabled = if (f.isDirectory) true else !isCurrent && f.extension.lowercase() in setOf("ini", "template"),
-                                        leadingIcon = { Icon(if (f.isDirectory) Icons.Default.Folder else Icons.Default.Description, null, Modifier.size(16.dp)) },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                                    )
+                                            .heightIn(min = 36.dp)
+                                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(if (f.isDirectory) Icons.Default.Folder else Icons.Default.Description, null, Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(f.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
@@ -828,18 +936,71 @@ fun EditorScreen(
                     }
                 }
             }
-        }
-        // 节名显示栏
-        if (SettingsManager.devSectionBar) {
-            Row(
-                Modifier.fillMaxWidth().height(18.dp).background(RustedSurface.copy(alpha = 0.5f)).clickable { showSectionJumpDialog = true }.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("节: ", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                Text(currentSection ?: "无", fontSize = 11.sp, color = RustedPrimary, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text("${allSections.size} 个节", fontSize = 9.sp, color = RustedOnBackground.copy(alpha = 0.35f))
+            // 节名显示：顶部 tab 栏右侧固定 28% 宽（与底部功能栏占比一致），不随 tab 栏滑动
+            if (SettingsManager.devSectionBar) {
+                Box(
+                    Modifier
+                        .weight(0.28f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        currentSection ?: "无",
+                        fontSize = 12.sp,
+                        color = RustedPrimary,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSectionMenu = true }
+                            .padding(horizontal = 6.dp)
+                    )
+                    // 点击节名展开可跳转的节名列表（类似 tab 栏当前文件展开效果）
+                    DropdownMenu(
+                        expanded = showSectionMenu,
+                        onDismissRequest = { showSectionMenu = false }
+                    ) {
+                        if (allSections.isEmpty()) {
+                            Row(
+                                Modifier
+                                    .clickable { showSectionMenu = false }
+                                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                            ) {
+                                Text("未检测到节", fontSize = 12.sp)
+                            }
+                        } else {
+                            allSections.forEach { (name, line) ->
+                                Row(
+                                    Modifier
+                                        .width(180.dp)
+                                        .clickable {
+                                            showSectionMenu = false
+                                            editorRef?.let { editor ->
+                                                val targetLine = line.coerceIn(0, (editor.text.lineCount - 1).coerceAtLeast(0))
+                                                editor.jumpToLine(targetLine)
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "[$name]", fontSize = 12.sp, color = RustedPrimary,
+                                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("行 ${line + 1}", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        }
+        // 节名显示栏已并入顶部 tab 栏右侧（只显示节名）
         // 维持补全器当前文件路径与项目根（供图片/音效「同目录裸名、跨目录 ROOT:」判定）
         LaunchedEffect(filePath, cp, projectRoot) {
             cp?.currentFilePath = filePath
@@ -876,7 +1037,7 @@ fun EditorScreen(
                         resetTextRequest = resetTextRequest,
                         canUndo = canUndo,
                         canRedo = canRedo,
-                        showBottomToolbar = !showSearch,
+                        showBottomToolbar = editingBarShown,
                         blocklistEnabled = SettingsManager.translationBlockEnabled && SettingsManager.devLightbulbEnabled,
                         blockableStringKeys = blockableStringKeys,
                         onCursorChange = { cursorPos = it },
@@ -953,9 +1114,16 @@ fun EditorScreen(
                                 EditorToolbarAction.AT_REFERENCE -> activePopup = "at"
                                 EditorToolbarAction.SEARCH -> showSearch = true
                                 EditorToolbarAction.MORE -> showMore = true
+                                // 符号栏调色盘快捷入口：仅插入颜色文本；先收起输入法，确保弹窗立即弹出不被键盘遮挡
+                                EditorToolbarAction.COLOR_PICKER -> {
+                                    val imm = imeView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                                    imm?.hideSoftInputFromWindow(imeView.windowToken, 0)
+                                    symbolBarColorPicker = true
+                                }
                             }
                         },
                         rainbowSettingsTick = rainbowSettingsTick,
+                        sectionHighlightTick = sectionHighlightTick,
                         onSymbolInsert = { value ->
                             insertTextRequest = value
                             insertTextTick++
@@ -1057,6 +1225,423 @@ fun EditorScreen(
                                 PlainMenuItem(icon = Icons.Default.DriveFileRenameOutline, title = "复制文件名", subtitle = fileName, onClick = { copyToClip("文件名", fileName); showMore = false })
                                 PlainMenuItem(icon = Icons.Default.FolderCopy, title = "复制相对路径", subtitle = rel, onClick = { copyToClip("路径", rel); showMore = false })
                             }
+                        }
+                    }
+                    // —— 「方块+」折叠菜单：输入法关闭时替代底部快捷栏 ——
+                    if (fabShown) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(bottom = 10.dp, end = 14.dp)
+                                // 「+」展开时拦截容器区域内点击：菜单项/按钮自身仍优先响应（子级先消费事件），
+                                // 仅吞掉条目间隙、空白处等落到底部编辑器区域的点击，避免穿透触发输入法弹出
+                                .pointerInput(fabExpanded) {
+                                    if (fabExpanded) {
+                                        detectTapGestures {
+                                            val imm = imeView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                                            imm?.hideSoftInputFromWindow(imeView.windowToken, 0)
+                                        }
+                                    }
+                                }
+                        ) {
+                            // 语言切换（与「更多」弹窗同逻辑）
+                            val switchLanguage: () -> Unit = {
+                                if (!switchingLanguage) {
+                                    switchingLanguage = true
+                                    scope.launch {
+                                        try {
+                                            if (showChinese) {
+                                                chineseText = text
+                                                val translated = withContext(Dispatchers.Default) { engine.translateToEnglish(text, autoSpace, litLines) }
+                                                englishText = translated
+                                                showChinese = false
+                                                text = translated
+                                            } else {
+                                                englishText = text
+                                                val translated = withContext(Dispatchers.Default) { engine.translateToChinese(text, autoSpace) }
+                                                chineseText = translated
+                                                showChinese = true
+                                                text = translated
+                                            }
+                                            resetTextTick++
+                                            resetTextRequest = text to resetTextTick
+                                            onTextChange?.invoke(text)
+                                        } finally {
+                                            switchingLanguage = false
+                                        }
+                                    }
+                                }
+                            }
+                            // 保存缓存后跳转其它页面（与「更多」弹窗同逻辑）
+                            val navigateAway: (Screen) -> Unit = { screen ->
+                                onTextCacheRequest?.invoke(text)
+                                lifecycleOwner.lifecycleScope.launch {
+                                    if (autoSave && isModified) saveSync("NavigateAway")
+                                    onNavigate(screen)
+                                }
+                            }
+                            // 打开继承链视图
+                            val openInheritance: () -> Unit = {
+                                scope.launch(Dispatchers.IO) {
+                                    val t = com.rwmodstudio.core.InheritanceResolver.resolveFormatted(filePath, homeDir)
+                                    withContext(Dispatchers.Main) {
+                                        inheritanceText = t
+                                        showInheritanceView = true
+                                    }
+                                }
+                            }
+                            // 启动铁锈战争
+                            val launchGame: () -> Unit = {
+                                try {
+                                    val intent = context.packageManager.getLaunchIntentForPackage("com.corrodinggames.rts")
+                                    if (intent != null) context.startActivity(intent)
+                                    else Toast.makeText(context, "未安装铁锈战争", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "启动铁锈战争失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            // 主浮层：竖向展开菜单 + 底部横栏（3 个小圆按钮在 + 号左侧、与 + 垂直居中）+「方块+」按钮本体
+                            Column(horizontalAlignment = Alignment.End) {
+                                // 竖向菜单：展开时从 + 号向上逐条弹出（倒序渲染，最靠近 + 的「保存」最先弹出）
+                                Column(
+                                    modifier = Modifier
+                                        .heightIn(max = 640.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    horizontalAlignment = Alignment.End
+                                ) {
+                                    // 高亮主题子菜单（毛笔按钮激活时显示在菜单顶部）
+                                    if (fabShowThemes) {
+                                        // 主题子菜单从下到上逐个浮现：底部「括号颜色」最先弹出，顶部「切换为」最后弹出
+                                        FabItemStagger(expanded = fabExpanded, index = 6) {
+                                            EditorFabMenuRow(
+                                                title = "切换为${if (ThemeState.isDark) "浅色" else "深色"}",
+                                                // 半日半阴图标：左上半月亮、右下半太阳（Brightness4）
+                                                icon = Icons.Default.Brightness4,
+                                                // 子菜单内点击不收起子菜单（仅切换主题）
+                                                onLabel = { ThemeState.toggle() },
+                                                onIcon = { ThemeState.toggle() }
+                                            )
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        listOf(
+                                            "dark" to ("深色" to Icons.Default.DarkMode),
+                                            "light" to ("浅色" to Icons.Default.LightMode),
+                                            "pure" to ("纯净" to Icons.Default.FilterBAndW),
+                                            "custom" to ("自定义" to Icons.Default.Palette)
+                                        ).forEachIndexed { i, (id, item) ->
+                                            val (label, icon) = item
+                                            // 深色=5、浅色=4、纯净=3、自定义=2（依次向上）
+                                            FabItemStagger(expanded = fabExpanded, index = 5 - i) {
+                                                EditorFabMenuRow(
+                                                    title = label,
+                                                    subtitle = if (ThemeState.highlightTheme == id) "当前" else "",
+                                                    icon = icon,
+                                                    // 子菜单内点击不收起子菜单
+                                                    onLabel = { ThemeState.applyHighlightTheme(id) },
+                                                    onIcon = { ThemeState.applyHighlightTheme(id) }
+                                                )
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        // 节名行高亮：点击标签切换开关，点击图标打开调色盘自定义底色
+                                        FabItemStagger(expanded = fabExpanded, index = 7) {
+                                            EditorFabMenuRow(
+                                                title = "节行高亮",
+                                                subtitle = when {
+                                                    !ThemeState.sectionHighlightEnabled -> "已关闭"
+                                                    ThemeState.sectionHighlightColor.isBlank() -> "跟随背景·自动"
+                                                    else -> ThemeState.sectionHighlightColor.removePrefix("#")
+                                                },
+                                                icon = Icons.Default.Palette,
+                                                iconTint = if (ThemeState.sectionHighlightEnabled) {
+                                                    val argb = ThemeState.sectionHighlightColor
+                                                        .takeIf { it.isNotBlank() }
+                                                        ?.let { runCatching { android.graphics.Color.parseColor(it) }.getOrNull() }
+                                                        ?: com.rwmodstudio.editor.sectionHighlightColor(editorBgForSection())
+                                                    androidx.compose.ui.graphics.Color(argb)
+                                                } else {
+                                                    RustedOnBackground.copy(alpha = 0.4f)
+                                                },
+                                                onLabel = {
+                                                    ThemeState.toggleSectionHighlight()
+                                                    sectionHighlightTick++
+                                                },
+                                                onIcon = { showSectionHighlightPicker = true }
+                                            )
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        FabItemStagger(expanded = fabExpanded, index = 1) {
+                                            EditorFabMenuRow(
+                                                title = "自定义高亮色", icon = Icons.Default.Colorize,
+                                                // 子菜单内点击不收起子菜单，仅打开对话框
+                                                onLabel = { showDarkTokens = true },
+                                                onIcon = { showDarkTokens = true }
+                                            )
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        FabItemStagger(expanded = fabExpanded, index = 0) {
+                                            EditorFabMenuRow(
+                                                title = "括号颜色", icon = Icons.Default.Code,
+                                                // 子菜单内点击不收起子菜单，仅打开对话框
+                                                onLabel = { showRainbowBracketDialog = true },
+                                                onIcon = { showRainbowBracketDialog = true }
+                                            )
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                    }
+                                    // 展开「高亮主题」子菜单时隐藏其它竖栏项（互斥展示）
+                                    if (!fabShowThemes) {
+                                    // 主菜单项（源顺序 = 逻辑从上到下；「保存」在最底部、最靠近 +）
+                                    val mainItems: List<Pair<Boolean, @Composable () -> Unit>> = listOf(
+                                        true to {
+                                            EditorFabMenuRow(
+                                                title = "保存", icon = Icons.Default.Save, iconTint = RustedSecondary,
+                                                onLabel = { scope.launch { saveSync("MenuSave") }; fabExpanded = false },
+                                                onIcon = { scope.launch { saveSync("MenuSave") }; fabExpanded = false }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabMenuRow(
+                                                title = "查找替换", icon = Icons.Default.Search,
+                                                onLabel = { fabExpanded = false; showSearch = true },
+                                                onIcon = { fabExpanded = false; showSearch = true }
+                                            )
+                                        },
+                                        isEnglish to {
+                                            EditorFabMenuRow(
+                                                title = "切换为${if (showChinese) "英文" else "中文"}",
+                                                icon = Icons.Default.Translate, iconTint = RustedSecondary,
+                                                onLabel = { fabExpanded = false; switchLanguage() },
+                                                onIcon = { fabExpanded = false; switchLanguage() }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabCheckRow(
+                                                title = "自动保存",
+                                                checked = autoSave,
+                                                icon = Icons.Default.CheckCircle,
+                                                iconTint = if (autoSave) RustedSecondary else RustedOnBackground,
+                                                showCheck = false,
+                                                onToggle = { autoSave = !autoSave; SettingsManager.autoSave = autoSave }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabSliderRow(
+                                                value = fontSizeState,
+                                                valueRange = 10f..24f,
+                                                valueLabel = "${fontSizeState.toInt()}sp",
+                                                onValueChange = { fontSizeState = roundFontSize(it); SettingsManager.fontSize = fontSizeState }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabMenuRow(
+                                                title = "翻译库", icon = Icons.Default.Translate,
+                                                onLabel = { fabExpanded = false; navigateAway(Screen.TRANSLATION) },
+                                                onIcon = { fabExpanded = false; navigateAway(Screen.TRANSLATION) }
+                                            )
+                                        },
+                                        SettingsManager.devInheritanceView to {
+                                            EditorFabMenuRow(
+                                                title = "继承链",
+                                                icon = Icons.Default.AccountTree, iconTint = RustedSecondary,
+                                                onLabel = { fabExpanded = false; openInheritance() },
+                                                onIcon = { fabExpanded = false; openInheritance() }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabMenuRow(
+                                                title = "补全筛选", icon = Icons.Default.FilterList,
+                                                onLabel = { fabExpanded = false; showCompletionFilter = true },
+                                                onIcon = { fabExpanded = false; showCompletionFilter = true }
+                                            )
+                                        },
+                                        true to {
+                                            EditorFabMenuRow(
+                                                title = "自定义补全", icon = Icons.Default.Extension,
+                                                onLabel = { fabExpanded = false; navigateAway(Screen.CUSTOM) },
+                                                onIcon = { fabExpanded = false; navigateAway(Screen.CUSTOM) }
+                                            )
+                                        },
+                                        (SettingsManager.devCoordVisual && onOpenCoordVisual != null) to {
+                                            EditorFabMenuRow(
+                                                title = "坐标可视化", icon = Icons.Default.Visibility,
+                                                onLabel = { fabExpanded = false; onOpenCoordVisual?.invoke(text) },
+                                                onIcon = { fabExpanded = false; onOpenCoordVisual?.invoke(text) }
+                                            )
+                                        }
+                                    )
+                                    // 正向渲染：源顺序即为从上到下的展示顺序（保存在上、复制相对路径在底部最靠近 +）
+                                    // 弹层顺序反过来：最靠近 + 的底部项先弹出，随后逐条向上浮现
+                                    val shownItems = mainItems.filter { it.first }
+                                    shownItems.forEachIndexed { pos, (_, content) ->
+                                        FabItemStagger(expanded = fabExpanded, index = shownItems.lastIndex - pos) { content() }
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                    } // if (!fabShowThemes)
+                                }
+                                // 展开后菜单与底部横栏之间的间距
+                                if (fabExpanded) Spacer(Modifier.height(14.dp))
+                                // 底部横栏：小圆按钮在 + 号左侧、与 + 垂直居中；全部跟随 +号 展开态显示
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AnimatedVisibility(
+                                        visible = fabExpanded,
+                                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
+                                        exit = fadeOut()
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            RoundIconButton(
+                                                icon = Icons.Default.Settings,
+                                                contentDescription = "设置",
+                                                onClick = { fabExpanded = false; navigateAway(Screen.SETTINGS) }
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            // 启动游戏（与背景色对调位置后位于第二位）
+                                            RoundIconButton(
+                                                icon = Icons.Default.RocketLaunch,
+                                                contentDescription = "启动游戏",
+                                                onClick = launchGame
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            RoundIconButton(
+                                                icon = Icons.Default.Brush,
+                                                contentDescription = "高亮主题",
+                                                isActive = fabShowThemes,
+                                                // 点击「高亮主题」可开可收（切换）
+                                                onClick = { fabShowThemes = !fabShowThemes }
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            // 背景色（调色盘）：跟随 +号 展开显示
+                                            RoundIconButton(
+                                                icon = Icons.Default.Palette,
+                                                contentDescription = "背景色",
+                                                onClick = { fabShowColorPicker = true }
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                        }
+                                    }
+                                    // 「方块+」按钮本体：圆角方块，展开时「+」旋转 45°
+                                    EditorFabButton(
+                                        expanded = fabExpanded,
+                                        onClick = {
+                                            fabExpanded = !fabExpanded
+                                            fabShowThemes = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        // 背景色选色对话框
+                        if (fabShowColorPicker) {
+                            ColorPickerDialog(
+                                initialColor = ThemeState.bgColor,
+                                onDismiss = { fabShowColorPicker = false },
+                                onConfirm = { color ->
+                                    // 背景色不支持透明度：应用时过滤 alpha，转为 6 位不透明色
+                                    val opaque = runCatching {
+                                        String.format(
+                                            "#%06X",
+                                            android.graphics.Color.parseColor(color) and 0x00FFFFFF
+                                        )
+                                    }.getOrDefault(color)
+                                    ThemeState.applyBgColor(opaque)
+                                    fabShowColorPicker = false
+                                },
+                                showInsertButton = true,
+                                onInsert = { color ->
+                                    insertTextRequest = color
+                                    insertTextTick++
+                                    isModified = true
+                                    fabShowColorPicker = false
+                                }
+                            )
+                        }
+                        // 符号栏调色盘：仅插入颜色文本（隐藏「应用」，与「背景色」调色盘区分）
+                        if (symbolBarColorPicker) {
+                            ColorPickerDialog(
+                                initialColor = ThemeState.bgColor,
+                                title = "插入颜色",
+                                onDismiss = { symbolBarColorPicker = false },
+                                onConfirm = { symbolBarColorPicker = false },
+                                showInsertButton = true,
+                                showApplyButton = false,
+                                onInsert = { color ->
+                                    insertTextRequest = color
+                                    insertTextTick++
+                                    isModified = true
+                                    symbolBarColorPicker = false
+                                }
+                            )
+                        }
+                        // 括号颜色设置（迁自顶栏高亮主题下拉）
+                        if (showRainbowBracketDialog) {
+                            val previewBg = remember {
+                                try {
+                                    android.graphics.Color.parseColor(ThemeState.bgColor)
+                                } catch (_: Exception) {
+                                    if (ThemeState.isDark) android.graphics.Color.parseColor("#1E1E1E")
+                                    else android.graphics.Color.parseColor("#F0F0F0")
+                                }
+                            }
+                            val previewBaseColor = remember(ThemeState.highlightTheme) {
+                                com.rwmodstudio.editor.RainbowColorUtils.resolvePreviewBaseColor(ThemeState.highlightTheme)
+                            }
+                            AlertDialog(
+                                onDismissRequest = {
+                                    showRainbowBracketDialog = false
+                                    rainbowSettingsTick++
+                                },
+                                title = { Text("括号颜色", fontSize = 16.sp) },
+                                text = {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .verticalScroll(rememberScrollState())
+                                    ) {
+                                        RainbowBracketSettingsPanel(
+                                            previewBackgroundColor = previewBg,
+                                            previewBaseColor = previewBaseColor
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        showRainbowBracketDialog = false
+                                        rainbowSettingsTick++
+                                    }) {
+                                        Text("关闭")
+                                    }
+                                }
+                            )
+                        }
+                        // 自定义高亮色设置（迁自顶栏高亮主题下拉）
+                        if (showDarkTokens) {
+                            DarkTokenColorDialog(
+                                initialColors = ThemeState.darkTokenColors,
+                                onDismiss = { showDarkTokens = false },
+                                onConfirm = { colors ->
+                                    ThemeState.applyDarkTokenColors(colors)
+                                    showDarkTokens = false
+                                }
+                            )
+                        }
+                        // 节名行高亮自定义底色
+                        if (showSectionHighlightPicker) {
+                            ColorPickerDialog(
+                                initialColor = ThemeState.sectionHighlightColor
+                                    .takeIf { it.isNotBlank() }
+                                    ?.let { runCatching { android.graphics.Color.parseColor(it) }.getOrNull() }
+                                    ?.let { String.format("#%08X", it) }
+                                    ?: com.rwmodstudio.editor.sectionHighlightColor(editorBgForSection())
+                                        .let { String.format("#%08X", it) },
+                                title = "节行高亮底色",
+                                onDismiss = { showSectionHighlightPicker = false },
+                                onConfirm = { color ->
+                                    ThemeState.applySectionHighlightColor(color)
+                                    sectionHighlightTick++
+                                    showSectionHighlightPicker = false
+                                }
+                            )
                         }
                     }
             }
@@ -1626,5 +2211,16 @@ private fun mapSectionName(name: String): String {
         if (normalized.contains(en.lowercase())) return zh
     }
     return trimmed
+}
+
+/**
+ * 计算节名行高亮未自定义时使用的编辑器背景色（int）。
+ * 与编辑器实际使用的 resolveEditorBackground 同一逻辑，保证默认高亮色取自真实背景明暗。
+ */
+private fun editorBgForSection(): Int {
+    val saved = ThemeState.bgColor
+    return runCatching { android.graphics.Color.parseColor(saved) }.getOrNull()
+        ?: if (ThemeState.isDark) android.graphics.Color.parseColor("#1E1E1E")
+        else android.graphics.Color.parseColor("#F0F0F0")
 }
 

@@ -9,6 +9,8 @@ object ThemeState {
     var bgColor by mutableStateOf(SettingsManager.bgColor)
     var highlightTheme by mutableStateOf(SettingsManager.highlightTheme)
     var darkTokenColors by mutableStateOf(SettingsManager.darkTokenColors.toDarkThemeColors())
+    var sectionHighlightEnabled by mutableStateOf(SettingsManager.sectionHighlightEnabled)
+    var sectionHighlightColor by mutableStateOf(SettingsManager.sectionHighlightColor)
 
     // 纯净主题固定背景色
     val pureBgColor = "#F5F5F5"
@@ -32,5 +34,19 @@ object ThemeState {
         highlightTheme = theme
         SettingsManager.highlightTheme = theme
         // 背景色不再随高亮主题切换而变更，保持用户独立设置
+    }
+
+    /** 切换节名行高亮开关。 */
+    fun toggleSectionHighlight() {
+        sectionHighlightEnabled = !sectionHighlightEnabled
+        SettingsManager.sectionHighlightEnabled = sectionHighlightEnabled
+    }
+
+    /** 设置节名行高亮自定义底色（#RRGGBB），并确保开关开启。 */
+    fun applySectionHighlightColor(color: String) {
+        sectionHighlightColor = color
+        SettingsManager.sectionHighlightColor = color
+        sectionHighlightEnabled = true
+        SettingsManager.sectionHighlightEnabled = true
     }
 }

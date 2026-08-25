@@ -41,7 +41,7 @@
 | **项目辅助** | 文件管理、项目标签/全局标签/资源/内存扫描、文件继承链解析、版本对比、坐标可视化、待办 |
 | **数据管理** | 所有生成文件统一存放外部存储 `RWmod/` 分类目录；本地配置 zip 导入/导出；验证码强制刷新机制 |
 
-当前版本：`versionCode = 11`、`versionName = "1.2.0-Release"`。
+当前版本：`versionCode = 22`、`versionName = "1.3.2"`。
 
 ---
 
@@ -78,7 +78,7 @@
 │  MainApp(导航壳) + screens(页面) + components(组件) + theme   │
 ├────────────────────────────────────────────────────────────┤
 │  Feature 层                                                 │
-│  feature/completion 代码补全（CompletionProvider+16个Provider）│
+│  feature/completion 代码补全（CompletionProvider+17个Provider）│
 │  feature/coord 坐标可视化（解析→求值→渲染）                   │
 ├────────────────────────────────────────────────────────────┤
 │  领域/核心层  core/ + core/translation/                      │
@@ -256,14 +256,17 @@ app/src/main/
 
 | key | 常量 | 控制数据 |
 |---|---|---|
-| `BLOCKLIST` | `BLOCKLIST_CODE = "384757"` | 屏蔽词 |
-| `SECTION_FILTERS` | `SECTION_FILTERS_CODE = "592047"` | 节过滤 |
+| `BLOCKLIST` | `BLOCKLIST_CODE = "384758"` | 屏蔽词 |
+| `SECTION_FILTERS` | `SECTION_FILTERS_CODE = "813546"` | 节过滤 |
 | `NATIVE_COMPLETIONS` | `NATIVE_COMPLETIONS_CODE = "819411"` | 原生补全表 |
 | `EXTRA_COMPLETIONS` | `EXTRA_COMPLETIONS_CODE = "530719"` | 附件补全表 |
-| `CODE_REFERENCE` | `CODE_REFERENCE_CODE = "720522"` | 代码参考库 |
+| `CODE_REFERENCE` | `CODE_REFERENCE_CODE = "720523"` | 代码参考库 |
 | `ONBOARDING` | `ONBOARDING_CODE = "294817"` | 首次引导 |
-| `TRANSLATION_CACHE` | `"100001"` | 翻译缓存 |
-| `COMPLETIONS` / `SETTINGS` / `NATIVE_TRANSLATION` / `EXTRA_TRANSLATION` | `"100002"`~`"100005"` | 补全/设置/原生翻译/附件翻译 |
+| `TRANSLATION_CACHE` | `TRANSLATION_CACHE_CODE = "100001"` | 翻译缓存 |
+| `RESOURCE_NAME_KEYS` | `RESOURCE_NAME_KEYS_CODE = "620411"` | 资源名键（mutator 变体归一化） |
+| `COMPLETION_TYPES` | `COMPLETION_TYPES_CODE = "731827"` | 补全类型分类（分类页/模拟 ini） |
+| `MOCK_INI` | `MOCK_INI_CODE = "481216"` | 模拟 ini |
+| `COMPLETIONS` / `SETTINGS` / `NATIVE_TRANSLATION` / `EXTRA_TRANSLATION` | `COMPLETIONS_CODE`~`EXTRA_TRANSLATION_CODE`（`"100002"`~`"100005"`） | 补全/设置/原生翻译/附件翻译 |
 
 **API**：`init()`（从 SharedPreferences / 旧 verify.json / verify.txt 迁移）、`read(key)`、`write(key, code)`、`resetAll()`、`isValid(key, expected)`。
 
@@ -534,13 +537,13 @@ Debug 模式右上角后台任务进度浮窗。`start(name, total)` / `update(c
 **职责**：按 VS Code 插件架构注册多个 Provider，依次调用并合并结果。
 
 - `ValueCompletionOptions`：各 Provider 开关（bool/logicBoolean/enum/image/unitSpawn/autoTriggerOnEvent/memory/tag/resource/unitName/unitRef/functionParam/projectRef/copyFromSection/defineVariable/crossSectionRef）。
-- `init` 中按开关注册 16 个 Provider。
+- `init` 中按开关注册 17 个 Provider（含原版单位名；默认图片 Provider 关、共 16 个激活）。
 - `getValueCompletions(...)` → 摊平结果。
 - `getValueCompletionsGrouped(...)` → 按 Provider 分组（补全查看器用），`ProviderResult(providerLabel, items)`。
 - `getAllCallableItems(context, translationDict, memoryNames, memoryTypes)`：全量可调用条目，仅逻辑类 Provider（LogicBoolean/UnitRef/Memory）走 `provideFullItems`。
 - `providerLabel`：Provider 类名→中文标签（布尔值/逻辑表达式/枚举值/图片路径/单位生成/事件触发/内存变量/标签/资源/单位类型/单位标记/函数参数/项目引用/复制节/变量定义/跨节引用）。
 
-#### 各值类型 Provider（16 个）
+#### 各值类型 Provider（17 个）
 
 | Provider | 触发条件 | 数据源/产出 |
 |---|---|---|
@@ -554,6 +557,7 @@ Debug 模式右上角后台任务进度浮窗。`start(name, total)` / `update(c
 | **TagValueCompletionProvider**（标签） | 属性 type 为 tag/tag list（`tags`/临时标签/消息标签/拦截抛射体等） | 项目标签 + 全局标签 + 消息标签集合 |
 | **ResourceValueCompletionProvider**（资源） | type 关键字 price/resource/customprice/resources/dynamic resources 等；资源链 `<链>资源.` | 项目资源/全局资源名，链式补全（如 `自身资源.最新编号`） |
 | **UnitNameValueCompletionProvider**（单位类型） | 属性 type 为 unitref/unitType/unitTypes（填单位类型名） | 项目单位名（`name:` 收集）+ 内存中 unit 型变量 |
+| **VanillaUnitNameValueCompletionProvider**（原版单位类型） | 与 UnitName 触发一致（unitref/unitType/unitTypes、`name:`、单位名列表） | 内置 `vanilla_units.json` 原版单位名；项目同名单位优先（用户 mod 覆盖），原版兜底去重 |
 | **UnitRefValueCompletionProvider**（单位标记） | 属性 type 为 unit ref/unit/marker/event（`isUnitMarkerType`）；统一 `unitMarkerItems`（self + logicboolean 中单位标记 + 标记链函数）+ unit 型内存变量 | 单位标记表达式（填 `self.父单位`/`创建标记(...)` 等） |
 | **FunctionParameterCompletionProvider**（函数参数） | 光标在已知参数函数括号内（`isKnownParamFunctionContext`，参数表来自 `param/logicboolean.json` + `autoTriggerOnEvent`） | 参数名补全 + 参数值建议（`typeParamValues`、`relationValues` 等） |
 | **ProjectRefValueCompletionProvider**（项目引用） | 属性 type 为 turret ref/projectile ref/effect ref/action ref 等（`projectRefKind`） | 对应命名节名（炮塔/抛射体/效果/行动/动画/贴花/附属/可建造） |
