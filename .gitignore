@@ -36,3 +36,10 @@ tools/jdk/
 
 # Temp files
 .tmp_*
+
+# auto-build daily push marker
+.daily_build_pushed
+
+# auto-gen gradle copies
+tools/gradle-8.14.5-copy/
+tools/gradle-home-iso/
