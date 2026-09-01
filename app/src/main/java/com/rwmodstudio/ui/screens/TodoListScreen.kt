@@ -20,10 +20,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.rwmodstudio.core.TodoManager
 import com.rwmodstudio.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -50,11 +52,19 @@ fun TodoListScreen(
 ) {
     val formatter = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var items by remember(projectPath) { mutableStateOf(listOf<TodoManager.TodoItem>()) }
     var loading by remember(projectPath) { mutableStateOf(true) }
     var filter by remember { mutableStateOf(TodoFilter.ALL) }
     var showDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<TodoManager.TodoItem?>(null) }
+
+    // 待办写盘失败提示（IO 线程调用，内部切主线程 Toast）
+    suspend fun notifyTodoSaveFail() {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "待办保存失败，请重试", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // 初始加载：后台读盘，避免主线程 I/O
     LaunchedEffect(projectPath) {
@@ -113,7 +123,7 @@ fun TodoListScreen(
                 TextButton(
                     onClick = {
                         scope.launch(Dispatchers.IO) {
-                            TodoManager.deleteCompleted(projectPath)
+                            if (!TodoManager.deleteCompleted(projectPath)) notifyTodoSaveFail()
                             val updated = TodoManager.load(projectPath)
                             withContext(Dispatchers.Main) { items = updated }
                         }
@@ -146,7 +156,7 @@ fun TodoListScreen(
                         formatter = formatter,
                         onToggle = {
                             scope.launch(Dispatchers.IO) {
-                                TodoManager.update(projectPath, item.copy(done = !item.done))
+                                if (!TodoManager.update(projectPath, item.copy(done = !item.done))) notifyTodoSaveFail()
                                 val updated = TodoManager.load(projectPath)
                                 withContext(Dispatchers.Main) { items = updated }
                             }
@@ -157,7 +167,7 @@ fun TodoListScreen(
                         },
                         onDelete = {
                             scope.launch(Dispatchers.IO) {
-                                TodoManager.delete(projectPath, item.id)
+                                if (!TodoManager.delete(projectPath, item.id)) notifyTodoSaveFail()
                                 val updated = TodoManager.load(projectPath)
                                 withContext(Dispatchers.Main) { items = updated }
                             }
@@ -176,9 +186,9 @@ fun TodoListScreen(
                 val target = editing
                 scope.launch(Dispatchers.IO) {
                     if (target != null) {
-                        TodoManager.update(projectPath, target.copy(title = title, note = note, priority = priority))
+                        if (!TodoManager.update(projectPath, target.copy(title = title, note = note, priority = priority))) notifyTodoSaveFail()
                     } else {
-                        TodoManager.add(projectPath, title, priority, note)
+                        if (!TodoManager.add(projectPath, title, priority, note)) notifyTodoSaveFail()
                     }
                     val updated = TodoManager.load(projectPath)
                     withContext(Dispatchers.Main) {

@@ -9,6 +9,7 @@ import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
 import io.github.rosemoe.sora.langs.textmate.registry.model.ThemeModel
 import io.github.rosemoe.sora.langs.textmate.registry.provider.AssetsFileResolver
 import com.rwmodstudio.core.DarkThemeColors
+import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.SettingsManager
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import org.eclipse.tm4e.core.registry.IThemeSource
@@ -116,6 +117,10 @@ object SoraEditorInitializer {
     }
 
     private fun defaultBracketColor(themeName: String): Int {
+        // 浅色预设（含导入的浅色主题）用金色，深色用淡紫
+        if (HighlightThemeManager.findPreset(themeName)?.isDark == false) {
+            return 0xFFdeae12.toInt()
+        }
         return if (themeName in setOf("light", "pure")) {
             0xFFdeae12.toInt()
         } else {
@@ -177,41 +182,55 @@ object SoraEditorInitializer {
         italicHighlight: Boolean = true
     ): EditorColorScheme {
         val registry = ThemeRegistry.getInstance()
-        when (highlightTheme) {
-            "custom" -> loadThemeWithColors(
+        val preset = HighlightThemeManager.findPreset(highlightTheme)
+        if (preset != null) {
+            // 用户预设：复用 custom.json 模板 + 预设配色注入（背景由编辑器统一覆盖，无需浅底模板）
+            loadThemeFromJson(
                 registry,
-                "custom",
-                darkTokenColors,
+                "textmate/themes/custom.json",
+                preset.isDark,
+                preset.colors,
                 boldHighlight,
-                italicHighlight
+                italicHighlight,
+                "preset_${preset.id}"
             )
-            "dark" -> loadThemeWithColors(
-                registry,
-                "dark",
-                DarkThemeColors.Default,
-                boldHighlight,
-                italicHighlight
-            )
-            "light" -> loadThemeWithColors(
-                registry,
-                "light",
-                DarkThemeColors.PresetLight,
-                boldHighlight,
-                italicHighlight
-            )
-            "pure" -> loadThemeWithColors(
-                registry,
-                "pure",
-                DarkThemeColors.PresetPure,
-                boldHighlight,
-                italicHighlight
-            )
-            else -> {
-                val fallback = if (isDarkTheme) "dark_vs" else "pure"
-                try {
-                    registry.setTheme(fallback)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to set fallback theme $fallback", e)
+        } else {
+            when (highlightTheme) {
+                "custom" -> loadThemeWithColors(
+                    registry,
+                    "custom",
+                    darkTokenColors,
+                    boldHighlight,
+                    italicHighlight
+                )
+                "dark" -> loadThemeWithColors(
+                    registry,
+                    "dark",
+                    DarkThemeColors.Default,
+                    boldHighlight,
+                    italicHighlight
+                )
+                "light" -> loadThemeWithColors(
+                    registry,
+                    "light",
+                    DarkThemeColors.PresetLight,
+                    boldHighlight,
+                    italicHighlight
+                )
+                "pure" -> loadThemeWithColors(
+                    registry,
+                    "pure",
+                    DarkThemeColors.PresetPure,
+                    boldHighlight,
+                    italicHighlight
+                )
+                else -> {
+                    val fallback = if (isDarkTheme) "dark_vs" else "pure"
+                    try {
+                        registry.setTheme(fallback)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to set fallback theme $fallback", e)
+                    }
                 }
             }
         }
@@ -219,9 +238,8 @@ object SoraEditorInitializer {
     }
 
     /**
-     * 加载指定主题，并按 TextMate scope 注入字重样式与 token 颜色。
-     * 所有内置预设（dark / light / pure）和自定义主题都通过 scope 精确替换，
-     * 保证同一套类别在各个主题下覆盖一致。
+     * 加载内置主题（dark / light / pure / custom），并按 TextMate scope 注入字重样式与 token 颜色。
+     * 所有内置预设和自定义主题都通过 scope 精确替换，保证同一套类别在各个主题下覆盖一致。
      */
     private fun loadThemeWithColors(
         registry: ThemeRegistry,
@@ -232,8 +250,32 @@ object SoraEditorInitializer {
     ) {
         val themeFile = themeFiles[themeKey] ?: "textmate/themes/dark_vs.json"
         val isDark = themeDark[themeKey] ?: true
+        loadThemeFromJson(
+            registry,
+            themeFile,
+            isDark,
+            tokenColors,
+            boldHighlight,
+            italicHighlight,
+            themeKey
+        )
+    }
+
+    /**
+     * 通用主题加载：读 assets 模板 JSON → 注入 fontStyle → 按 [tokenColors] 替换 scope 颜色 → 注册为当前主题。
+     * 内置主题与用户预设共用此路径。
+     */
+    private fun loadThemeFromJson(
+        registry: ThemeRegistry,
+        templatePath: String,
+        isDark: Boolean,
+        tokenColors: DarkThemeColors,
+        boldHighlight: Boolean = false,
+        italicHighlight: Boolean = false,
+        modelBaseName: String
+    ) {
         try {
-            var json = appContext.assets.open(themeFile)
+            var json = appContext.assets.open(templatePath)
                 .bufferedReader().use { it.readText() }
             if (boldHighlight || italicHighlight) {
                 json = injectFontStyles(json, boldHighlight, italicHighlight)
@@ -243,7 +285,7 @@ object SoraEditorInitializer {
                 if (boldHighlight) append("b")
                 if (italicHighlight) append("i")
             }
-            val modelName = if (suffix.isEmpty()) "${themeKey}_styled" else "${themeKey}_${suffix}"
+            val modelName = if (suffix.isEmpty()) "${modelBaseName}_styled" else "${modelBaseName}_${suffix}"
             val source = IThemeSource.fromInputStream(
                 json.byteInputStream(StandardCharsets.UTF_8),
                 "$modelName.json",
@@ -254,16 +296,12 @@ object SoraEditorInitializer {
                 load()
             }
             registry.setTheme(model)
-            Log.d(TAG, "Loaded themed $themeKey with token colors=$tokenColors")
+            Log.d(TAG, "Loaded themed $modelBaseName with token colors=$tokenColors")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load theme $themeKey", e)
+            Log.e(TAG, "Failed to load theme $modelBaseName", e)
             try {
-                registry.setTheme(themeKey)
+                registry.setTheme("dark_vs")
             } catch (_: Exception) {
-                try {
-                    registry.setTheme("dark_vs")
-                } catch (_: Exception) {
-                }
             }
         }
     }

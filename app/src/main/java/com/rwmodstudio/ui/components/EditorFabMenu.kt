@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -84,7 +83,7 @@ fun EditorFabButton(
     }
 }
 
-/** 逐条弹出动画：展开时从右下角向左上逐个浮现（横向向左 + 竖向向上），收起时反向退场。 */
+/** 逐条弹出动画：展开时从下往上浮出（竖向完整高度滑入 + 淡入），收起时反向向下退场。 */
 @Composable
 fun FabItemStagger(
     expanded: Boolean,
@@ -103,11 +102,9 @@ fun FabItemStagger(
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(160)) +
-            slideInHorizontally(tween(200), initialOffsetX = { it }) +
-            slideInVertically(tween(200), initialOffsetY = { it / 2 }),
+            slideInVertically(tween(220), initialOffsetY = { it }),
         exit = fadeOut(tween(90)) +
-            slideOutHorizontally(tween(130), targetOffsetX = { it }) +
-            slideOutVertically(tween(130), targetOffsetY = { it / 2 })
+            slideOutVertically(tween(130), targetOffsetY = { it })
     ) {
         content()
     }
@@ -282,6 +279,32 @@ fun EditorFabSliderRow(
                     .background(RustedSecondary)
             )
         }
+    }
+}
+
+/** 横向逐条弹出动画：展开时从右向左浮出（水平完整宽度滑入 + 淡入），收起时反向向右退场。 */
+@Composable
+fun FabRowItemStagger(
+    expanded: Boolean,
+    index: Int,
+    content: @Composable () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            delay(index * 45L)
+            visible = true
+        } else {
+            visible = false
+        }
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(160)) +
+            slideInHorizontally(tween(220), initialOffsetX = { it }),
+        exit = fadeOut(tween(90))
+    ) {
+        content()
     }
 }
 

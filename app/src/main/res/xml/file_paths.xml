@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="external" path="." />
+    <!-- 收窄共享范围：仅暴露 RWmod 工作目录树（分享配置 zip / 打包 .rwmod / 下载的 APK 均在其中），
+         避免把整个外部存储根目录挂上 FileProvider 共享权限 -->
+    <external-path name="rwmod" path="RWmod/" />
 </paths>

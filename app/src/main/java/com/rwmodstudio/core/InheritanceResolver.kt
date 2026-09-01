@@ -62,7 +62,11 @@ object InheritanceResolver {
      * 解析继承链并返回格式化后的中文文本。
      * 优先读缓存，未命中则计算并写入缓存。
      */
-    fun resolveFormatted(filePath: String, projectRoot: String): String {
+    suspend fun resolveFormatted(filePath: String, projectRoot: String): String {
+        // 必须等翻译引擎加载完毕后才能翻译并写继承链缓存；未就绪专职重试加载，绝不缓存英文/原文
+        if (!com.rwmodstudio.core.translation.TranslationEngine.getInstance().awaitReady()) {
+            return "# 翻译引擎未就绪\n"
+        }
         val file = File(filePath)
         if (!file.exists() || !file.isFile) return "# 文件不存在\n"
         val rootDir = File(projectRoot.ifEmpty { file.parent ?: return "# 项目路径无效\n" })
@@ -80,6 +84,7 @@ object InheritanceResolver {
         // 未命中或过期：重新计算
         val result = resolveInternal(file, rootDir, chain) { readFileContent(it) }
         val formatted = formatForDisplay(result)
+        // awaitReady 已保证引擎就绪，可直接写缓存（writeCache 自身仍带引擎闸门兜底）
         InheritanceCache.writeCache(file, allSourceFiles, formatted)
         return formatted
     }
@@ -99,7 +104,11 @@ object InheritanceResolver {
      * 结果 = 模板 ∪ 复制与 ∪ @copyFromSection ∪ 当前文件 的合并内容扫描；
      * 优先读继承链磁盘缓存 + 内存 memo。
      */
-    fun resolveSymbols(filePath: String, projectRoot: String): ProjectTagScanner.ProjectTagInfo? {
+    suspend fun resolveSymbols(filePath: String, projectRoot: String): ProjectTagScanner.ProjectTagInfo? {
+        // 必须等翻译引擎加载完毕后才能翻译并写继承链缓存；未就绪专职重试加载，绝不缓存英文/原文
+        if (!com.rwmodstudio.core.translation.TranslationEngine.getInstance().awaitReady()) {
+            return null
+        }
         val file = File(filePath)
         if (!file.exists() || !file.isFile) return null
         val rootDir = File(projectRoot.ifEmpty { file.parent ?: return null })
@@ -126,7 +135,7 @@ object InheritanceResolver {
             }
         }
 
-        // 未命中或过期：重新计算合并并写缓存
+        // 未命中或过期：重新计算合并并写缓存（awaitReady 已保证引擎就绪，writeCache 自身仍带闸门兜底）
         val result = resolveInternal(file, rootDir, chain) { readFileContent(it) }
         InheritanceCache.writeCache(file, allSourceFiles, formatForDisplay(result))
         val info = ProjectTagScanner.scanChainLines(result.mergedLines.map { it.content })

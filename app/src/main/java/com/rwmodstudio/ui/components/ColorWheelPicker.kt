@@ -38,11 +38,11 @@ fun ColorWheelPicker(
     showHexInput: Boolean = true
 ) {
     val initial = parseColor(initialColor)
-    var red by remember(initialColor) { mutableIntStateOf(android.graphics.Color.red(initial)) }
-    var green by remember(initialColor) { mutableIntStateOf(android.graphics.Color.green(initial)) }
-    var blue by remember(initialColor) { mutableIntStateOf(android.graphics.Color.blue(initial)) }
+    var red by remember { mutableIntStateOf(android.graphics.Color.red(initial)) }
+    var green by remember { mutableIntStateOf(android.graphics.Color.green(initial)) }
+    var blue by remember { mutableIntStateOf(android.graphics.Color.blue(initial)) }
     // 透明度 0..255，默认不透明
-    var alpha by remember(initialColor) { mutableIntStateOf(android.graphics.Color.alpha(initial)) }
+    var alpha by remember { mutableIntStateOf(android.graphics.Color.alpha(initial)) }
 
     val currentColor = remember(red, green, blue, alpha) {
         android.graphics.Color.argb(alpha, red, green, blue)
@@ -56,13 +56,32 @@ fun ColorWheelPicker(
 
     // HEX 输入框聚焦时，文本只由用户输入驱动，避免颜色回写覆盖导致焦点丢失、输入法被收起
     var hexFocused by remember { mutableStateOf(false) }
-    var hexText by remember(initialColor) {
-        mutableStateOf(colorHex(currentColor))
+    var hexText by remember { mutableStateOf(colorHex(currentColor)) }
+
+    // 记录最近一次对外输出的颜色，用于区分「外部切换 initialColor」与「调用方把自身输出回写」。
+    // 回写时 initialColor == lastEmitted，必须跳过重置，否则会丢弃正在拖拽的状态、中断手势。
+    var lastEmitted by remember { mutableStateOf(colorHex(currentColor)) }
+
+    // 仅当 initialColor 是外部变化（切换分类等）且非自身回写时，才重新装载 RGBA 与 hexText
+    LaunchedEffect(initialColor) {
+        if (initialColor != lastEmitted) {
+            val e = parseColor(initialColor)
+            red = android.graphics.Color.red(e)
+            green = android.graphics.Color.green(e)
+            blue = android.graphics.Color.blue(e)
+            alpha = android.graphics.Color.alpha(e)
+            val hex = colorHex(e)
+            if (!hexFocused) hexText = hex
+            lastEmitted = hex
+        }
     }
 
+    // 颜色变化时同步 hexText（非聚焦）并通知外部，同时记录 lastEmitted 以识别后续回写
     LaunchedEffect(currentColor) {
-        if (!hexFocused) hexText = colorHex(currentColor)
-        onColorChanged(colorHex(currentColor))
+        val hex = colorHex(currentColor)
+        if (!hexFocused) hexText = hex
+        lastEmitted = hex
+        onColorChanged(hex)
     }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {

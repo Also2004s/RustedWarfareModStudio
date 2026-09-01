@@ -5,6 +5,7 @@ import android.util.Log
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.VerifyManager
+import com.rwmodstudio.util.atomicWriteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -43,28 +44,34 @@ class TranslationDict {
     )
 
     /** 英文key → 中文key */
-    private val enToZh = mutableMapOf<String, String>()
+    private val enToZh = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** 中文key → 英文key */
-    private val zhToEn = mutableMapOf<String, String>()
+    private val zhToEn = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** 英文section → 中文section */
-    private val sectionEnToZh = mutableMapOf<String, String>()
+    private val sectionEnToZh = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** 中文section → 英文section */
-    private val sectionZhToEn = mutableMapOf<String, String>()
+    private val sectionZhToEn = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** 特殊值翻译 */
-    private val valueTranslations = mutableMapOf<String, String>()
+    private val valueTranslations = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** 每个条目的来源（key 格式与缓存文件一致：普通 key 或 [section]） */
-    private val entrySources = mutableMapOf<String, TranslationSource>()
+    private val entrySources = java.util.concurrent.ConcurrentHashMap<String, TranslationSource>()
 
     // 预编译统一正则（加载后初始化，避免每次调用 translateInText 时重复编译）
-    private var enToZhPattern: Regex? = null
-    private var zhToEnPattern: Regex? = null
-    private var enToZhLookup: Map<String, String> = emptyMap()
-    private var zhToEnLookup: Map<String, String> = emptyMap()
+    // @Volatile：写线程重建后保证读线程可见，配合不可变快照整体替换，读侧无锁无 CME
+    @Volatile private var enToZhPattern: Regex? = null
+    @Volatile private var zhToEnPattern: Regex? = null
+    @Volatile private var enToZhLookup: Map<String, String> = emptyMap()
+    @Volatile private var zhToEnLookup: Map<String, String> = emptyMap()
+
+    // 字典内存写锁：保存翻译条目（saveToExternal/updateEntry/deleteEntry）与加载/重建
+    // 在后台线程写 map、编辑器线程读 lookup，不加锁时 HashMap 并发读写会数据竞争/CME。
+    // ConcurrentHashMap 消除结构破坏，此锁串行化「多 map 联动更新 + compilePatterns 快照重建」保证一致性。
+    private val dictWriteLock = Any()
 
     private val specialValues = setOf(
         "true", "false", "TRUE", "FALSE", "True", "False",
@@ -133,7 +140,7 @@ class TranslationDict {
     private fun getCacheSourcesFile(context: Context): java.io.File = RwmodPaths.translationCacheSourcesFile
 
     /** 清空所有翻译数据 */
-    fun clearAll() {
+    fun clearAll() = synchronized(dictWriteLock) {
         enToZh.clear()
         zhToEn.clear()
         sectionEnToZh.clear()
@@ -182,7 +189,7 @@ class TranslationDict {
                 put("zh", zh)
             })
         }
-        userFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+        userFile.atomicWriteText(jsonArray.toString(2), Charsets.UTF_8)
         // 清除缓存，下次冷启动时重新合并
         clearCache(context)
         // 增量更新内存中的用户条目，避免全量重载
@@ -228,7 +235,7 @@ class TranslationDict {
      * 只增删改用户表（USER）相关条目，原生/附件表保持不变。
      * 若检测到用户删除了条目，则回退到全量重载以保证原生/附件映射能恢复。
      */
-    private fun updateUserEntriesInMemory(context: Context, entries: List<Pair<String, String>>) {
+    private fun updateUserEntriesInMemory(context: Context, entries: List<Pair<String, String>>) = synchronized(dictWriteLock) {
         // 旧用户条目 key 集合（section 的 key 格式为 [enSection]）
         val oldUserKeys = entrySources
             .filter { it.value == TranslationSource.USER }
@@ -338,7 +345,7 @@ class TranslationDict {
                 }
             }
             if (!replaced) sb.appendLine(newLine)
-            file.writeText(sb.toString().trimEnd().plus("\n"), Charsets.UTF_8)
+            file.atomicWriteText(sb.toString().trimEnd().plus("\n"), Charsets.UTF_8)
             return true
         } catch (e: Exception) {
             Log.e(TAG, "updateNativeExtraEntry failed: $key=$value", e)
@@ -360,7 +367,7 @@ class TranslationDict {
             }
             val remaining = lines.filterNot { pattern.matches(it) }
             if (remaining.size == lines.size) return false
-            file.writeText(remaining.joinToString("\n").trimEnd().plus("\n"), Charsets.UTF_8)
+            file.atomicWriteText(remaining.joinToString("\n").trimEnd().plus("\n"), Charsets.UTF_8)
             return true
         } catch (e: Exception) {
             Log.e(TAG, "deleteNativeExtraEntry failed: $key", e)
@@ -398,12 +405,12 @@ class TranslationDict {
                 put("zh", zh)
             })
         }
-        file.writeText(array.toString(2), Charsets.UTF_8)
+        file.atomicWriteText(array.toString(2), Charsets.UTF_8)
     }
 
-    /** 修改用户表中的单个条目 */
-    private fun updateUserEntry(context: Context, key: String, value: String): Boolean {
-        return try {
+    /** 修改用户表中的单个条目（读改写持 dictWriteLock：翻译页与编辑器并发编辑同文件时不丢条目） */
+    private fun updateUserEntry(context: Context, key: String, value: String): Boolean = synchronized(dictWriteLock) {
+        try {
             val entries = readUserEntries(context)
             val idx = entries.indexOfFirst { it.first == key }
             if (idx >= 0) entries[idx] = key to value else entries.add(key to value)
@@ -415,13 +422,13 @@ class TranslationDict {
         }
     }
 
-    /** 删除用户表中的单个条目 */
-    private fun deleteUserEntry(context: Context, key: String): Boolean {
-        return try {
+    /** 删除用户表中的单个条目（读改写持 dictWriteLock） */
+    private fun deleteUserEntry(context: Context, key: String): Boolean = synchronized(dictWriteLock) {
+        try {
             val entries = readUserEntries(context)
             val originalSize = entries.size
             entries.removeAll { it.first == key }
-            if (entries.size == originalSize) return false
+            if (entries.size == originalSize) return@synchronized false
             writeUserEntries(context, entries)
             true
         } catch (e: Exception) {
@@ -431,7 +438,7 @@ class TranslationDict {
     }
 
     /** 更新内存中的单个条目（含来源映射） */
-    private fun updateMemoryEntry(source: TranslationSource, key: String, value: String) {
+    private fun updateMemoryEntry(source: TranslationSource, key: String, value: String) = synchronized(dictWriteLock) {
         if (key.startsWith("[") && value.startsWith("[")) {
             val enSec = key.removeSurrounding("[", "]")
             val zhSec = value.removeSurrounding("[", "]")
@@ -457,7 +464,7 @@ class TranslationDict {
     }
 
     /** 从内存中移除单个条目（含来源映射） */
-    private fun removeMemoryEntry(key: String) {
+    private fun removeMemoryEntry(key: String) = synchronized(dictWriteLock) {
         if (key.startsWith("[") && key.endsWith("]")) {
             val enSec = key.removeSurrounding("[", "]")
             val zhSec = sectionEnToZh.remove(enSec)
@@ -484,8 +491,8 @@ class TranslationDict {
         }
     }
 
-    /** 加载合并后的翻译库（带缓存） */
-    private fun loadMerged(context: Context) {
+    /** 加载合并后的翻译库（带缓存）。写内存操作统一持 dictWriteLock，避免与保存条目并发 */
+    private fun loadMerged(context: Context) = synchronized(dictWriteLock) {
         val cacheFile = getCacheFile(context)
         val metaFile = getCacheMetaFile(context)
         val sourcesFile = getCacheSourcesFile(context)
@@ -494,7 +501,7 @@ class TranslationDict {
             // 缓存有效，直接加载缓存和来源映射
             loadFromFile(cacheFile)
             loadSources(sourcesFile)
-            return
+            return@synchronized
         }
 
         // 重新合并三个表：用户表 > 原生表 > 附件表
@@ -574,7 +581,7 @@ class TranslationDict {
             }
         }
 
-        cacheFile.writeText(sb.toString(), Charsets.UTF_8)
+        cacheFile.atomicWriteText(sb.toString(), Charsets.UTF_8)
 
         val meta = JSONObject().apply {
             put("version", CACHE_VERSION)
@@ -585,14 +592,14 @@ class TranslationDict {
             put("supplementHash", hashAsset(context, "data/extra_translation_supplement.txt"))
             put("generatedAt", System.currentTimeMillis())
         }
-        metaFile.writeText(meta.toString(2), Charsets.UTF_8)
+        metaFile.atomicWriteText(meta.toString(2), Charsets.UTF_8)
 
         // 写入来源映射
         val sources = JSONObject()
         for ((key, source) in entrySources.entries.sortedBy { it.key }) {
             sources.put(key, source.name)
         }
-        sourcesFile.writeText(sources.toString(2), Charsets.UTF_8)
+        sourcesFile.atomicWriteText(sources.toString(2), Charsets.UTF_8)
     }
 
     /** 从来源映射文件加载来源 */
@@ -754,7 +761,7 @@ class TranslationDict {
                 Log.e(TAG, "Failed to load translation supplement", e)
             }
 
-            file.writeText(sb.toString(), Charsets.UTF_8)
+            file.atomicWriteText(sb.toString(), Charsets.UTF_8)
             VerifyManager.write(VerifyManager.EXTRA_TRANSLATION, VerifyManager.EXTRA_TRANSLATION_CODE)
             Log.d(TAG, "Generated extra translation file: ${file.absolutePath}")
         } catch (e: Exception) {
@@ -941,8 +948,8 @@ class TranslationDict {
         return false
     }
 
-    /** 预编译统一正则表达式，只用 enToZh 和 zhToEn，不包含 valueTranslations */
-    private fun compilePatterns() {
+    /** 预编译统一正则表达式，只用 enToZh 和 zhToEn，不包含 valueTranslations（读 map 建快照，须持写锁） */
+    private fun compilePatterns() = synchronized(dictWriteLock) {
         // 英→中：只用 enToZh（和Python的 translate_in_text 对齐）
         val enSorted = enToZh.entries
             .filter { (k, v) -> k.length > 1 && v != k && k !in enToZh.values }

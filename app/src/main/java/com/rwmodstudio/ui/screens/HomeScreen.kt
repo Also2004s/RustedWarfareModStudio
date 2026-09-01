@@ -1,7 +1,6 @@
 package com.rwmodstudio.ui.screens
 
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.compose.animation.core.Animatable
@@ -9,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -28,6 +28,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -36,15 +39,20 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.translation.ProjectRegistry
@@ -53,6 +61,7 @@ import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.theme.*
 import com.rwmodstudio.util.IniImageReader
 import com.rwmodstudio.util.NoMediaHelper
+import com.rwmodstudio.util.atomicWriteText
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
@@ -65,15 +74,20 @@ private const val SEARCH_RESULT_LIMIT = 200
 
 /** 单条匹配：基于英文原文的行列位置（用于跳转），同时携带中文行用于免翻译显示。 */
 private data class SearchMatch(
-    val englishLine: Int,        // 英文原文行号 1-based
-    val englishColumnStart: Int, // 英文原文列起始
-    val englishColumnEnd: Int,   // 英文原文列结束
+    val englishLine: Int,        // 英文原文行号 1-based（跨行匹配为起始行）
+    val englishColumnStart: Int, // 英文原文列起始（跨行匹配为起始列）
+    val englishColumnEnd: Int,   // 英文原文列结束（单行匹配有效；跨行匹配为首行片段结束列，用于跳转高亮）
     val englishFullLine: String, // 英文原文完整行
     val chineseFullLine: String, // 中文翻译完整行（从翻译缓存读取，渲染时免翻译）
     val chineseColumnStart: Int, // 中文行匹配位置起始（用于预览聚焦，-1 表示未知）
     val chineseColumnEnd: Int,   // 中文行匹配位置结束（用于预览聚焦，-1 表示未知）
-    val matchedKeyword: String,  // 实际匹配到的关键词（英文变体，在文件中真实存在的字符串）
-    val userQuery: String        // 用户原始输入的搜索词（用于 UI 回显和替换匹配）
+    val matchedKeyword: String,  // 实际匹配到的关键词（英文变体，在文件中真实存在的字符串；跨行匹配为首行片段）
+    val userQuery: String,       // 用户原始输入的搜索词（用于 UI 回显和替换匹配）
+    val isMultiline: Boolean = false, // 是否跨行匹配（含换行符的查询）
+    val englishEndLine: Int = -1,     // 英文原文结束行号（跨行且可定位英文区间时有效，-1 表示无有效英文区间）
+    val englishEndColumn: Int = -1,   // 英文原文结束列（englishEndLine 行内，跨行替换用）
+    val matchedFullText: String = "", // 英文原文完整匹配文本（跨行替换用；单行匹配为空则用 matchedKeyword）
+    val multilineChineseFull: String = "" // 多行匹配的完整中文内容（起始行~结束行拼接，含换行符），仅 isMultiline 有效
 )
 
 /** 预览数据：包含截取的文本以及匹配词在截取文本中的偏移 */
@@ -127,6 +141,25 @@ private fun buildChinesePreview(
     }
 }
 
+/** 将「去行尾符文本」中的绝对偏移映射到 1-based 行号 + 0-based 列 */
+private fun offsetToLineCol(lines: List<String>, offset: Int): Pair<Int, Int> {
+    var remaining = offset
+    for ((i, l) in lines.withIndex()) {
+        if (remaining <= l.length) return (i + 1) to remaining
+        remaining -= l.length + 1
+    }
+    return lines.size to 0
+}
+
+/** 计算 1-based 行号 + 0-based 列在「去行尾符文本」中的绝对偏移 */
+private fun offsetOf(lines: List<String>, line: Int, col: Int): Int {
+    if (line <= 0) return col.coerceAtLeast(0)
+    var offset = 0
+    val end = minOf(line - 1, lines.size)
+    for (i in 0 until end) offset += lines[i].length + 1
+    return offset + col.coerceAtLeast(0)
+}
+
 /** 文件分组的搜索结果：可展开/折叠，匹配项可单独删除。
  *  expanded 和 matches 使用可观察状态，确保 Compose 能跟踪变化。 */
 private class FileSearchResult(
@@ -157,8 +190,14 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var pinned by remember(defaultPath) { mutableStateOf(SettingsManager.pinnedHomeItems) }
     var refresh by remember { mutableIntStateOf(0) }
-    var mods by remember(defaultPath, refresh, pinned) { mutableStateOf(loadMods(dir, pinned)) }
-    LaunchedEffect(refresh) { mods = loadMods(dir, pinned) }
+    // 目录列表移入 IO 线程加载：大目录同步 listFiles+排序会卡组合期主线程，先置空再异步填充
+    var mods by remember(defaultPath, refresh, pinned) { mutableStateOf(emptyList<File>()) }
+    var modsLoading by remember { mutableStateOf(true) }
+    LaunchedEffect(defaultPath, refresh, pinned) {
+        modsLoading = true
+        mods = withContext(Dispatchers.IO) { loadMods(dir, pinned) }
+        modsLoading = false
+    }
 
     var showDel by remember { mutableStateOf<File?>(null) }
     var showExt by remember { mutableStateOf<File?>(null) }
@@ -176,6 +215,14 @@ fun HomeScreen(
                     Spacer(Modifier.height(12.dp))
                     Text("目录不存在", fontSize = 16.sp, color = RustedError)
                     Text(dir.absolutePath, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.3f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        } else if (mods.isEmpty() && modsLoading) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = RustedPrimary)
+                    Spacer(Modifier.height(12.dp))
+                    Text("加载中...", fontSize = 16.sp, color = RustedOnBackground.copy(alpha = 0.4f))
                 }
             }
         } else if (mods.isEmpty()) {
@@ -259,14 +306,36 @@ fun HomeScreen(
                     try {
                         val t = File(f.parentFile, f.nameWithoutExtension)
                         t.mkdirs()
+                        val targetRoot = t.absolutePath
+                        val maxExtractBytes = 500L * 1024 * 1024   // 解压总量上限，防 zip 炸弹
+                        val maxEntries = 10000                      // 条目数上限（大型模组可能数千文件，2000 会误伤合法包）
+                        var totalBytes = 0L
+                        var entryCount = 0
                         java.util.zip.ZipInputStream(f.inputStream()).use { z ->
                             var e = z.nextEntry
                             while (e != null) {
-                                val o = File(t, e.name)
+                                entryCount++
+                                if (entryCount > maxEntries) throw IllegalStateException("压缩包条目过多")
+                                val name = e.name.replace('\\', '/')
+                                // zip-slip 防护：entry 路径规范化后必须落在目标目录内，拒绝 .. 逃逸/绝对路径
+                                val normalized = File(t, name).canonicalPath
+                                if (normalized != targetRoot && !normalized.startsWith(targetRoot + File.separator)) {
+                                    throw IllegalStateException("非法路径: $name")
+                                }
+                                val o = File(normalized)
                                 if (e.isDirectory) o.mkdirs()
                                 else {
                                     o.parentFile?.mkdirs()
-                                    o.outputStream().use { z.copyTo(it) }
+                                    o.outputStream().use { os ->
+                                        val buf = ByteArray(64 * 1024)
+                                        while (true) {
+                                            val n = z.read(buf)
+                                            if (n < 0) break
+                                            totalBytes += n
+                                            if (totalBytes > maxExtractBytes) throw IllegalStateException("解压内容过大")
+                                            os.write(buf, 0, n)
+                                        }
+                                    }
                                 }
                                 z.closeEntry()
                                 e = z.nextEntry
@@ -277,6 +346,8 @@ fun HomeScreen(
                     } catch (e: Exception) {
                         success = false
                         errorMsg = e.message
+                        // 解压失败时清理半成品目录，避免残留脏数据
+                        try { File(f.parentFile, f.nameWithoutExtension).deleteRecursively() } catch (_: Exception) {}
                     }
                     withContext(Dispatchers.Main) {
                         extracting = false
@@ -352,6 +423,9 @@ fun HomeSearchScreen(
     searchInContent: Boolean = true,
     onSearchInContentChange: (Boolean) -> Unit = {},
     showSearchModeToggle: Boolean = true,
+    onFilesModified: (Set<String>) -> Unit = {}, // 替换写盘成功后上报被修改的绝对路径集合，供上层失效工作区缓存
+    // 替换写盘前回调：供上层把「打开着且未保存」的缓存工作区先落盘，避免替换基于旧盘内容覆盖未保存修改
+    onSaveWorkspaceBeforeReplace: suspend (Set<String>) -> Unit = {},
     onJumpToLine: (String, String, Int, Int, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -422,170 +496,317 @@ fun HomeSearchScreen(
                 .filter { it.isFile && it.extension.lowercase() in INI_EXTENSIONS }
                 .toList()
             Log.d(TAG, "search: found ${candidates.size} .ini files, queries=$searchQueries")
-            val fileMap = LinkedHashMap<File, MutableList<SearchMatch>>()
-            var totalMatches = 0
-            run filesLoop@{
-                candidates.forEach { file ->
-                        ensureActive()
-                        if (totalMatches >= SEARCH_RESULT_LIMIT) return@filesLoop
-                        if (searchInContent) {
-                            try {
-                                // 缓存新鲜直接同步读（避免 withContext 开销），不新鲜则翻译并写入
-                                val chineseContent = SearchTranslationCache.readCacheSync(file)
-                                    ?: SearchTranslationCache.getChineseContent(file)
-                                val chineseLines = chineseContent.split("\n")
-                                val englishLines = file.readLines()
-                                val totalLines = max(englishLines.size, chineseLines.size)
-                                // 同一文件内按物理位置去重，避免中英文行内容相同或不同搜索词命中同一位置时重复显示
-                                val seenPositions = mutableSetOf<Triple<Int, Int, Int>>()
-                                // 对中/英文两套内容都做匹配
-                                for (idx in 0 until totalLines) {
+            // 单文件搜索：返回该文件命中的匹配列表（线程隔离，多线程安全）
+            suspend fun searchOneFile(file: File): List<SearchMatch> {
+                ensureActive()
+                if (searchInContent) {
+                    return try {
+                        // 缓存新鲜直接同步读（避免 withContext 开销），不新鲜则翻译并写入
+                        val chineseContent = SearchTranslationCache.readCacheSync(file)
+                            ?: SearchTranslationCache.getChineseContent(file)
+                        val chineseLines = chineseContent.split("\n")
+                        val englishLines = file.readLines()
+                        val totalLines = max(englishLines.size, chineseLines.size)
+                        // 多行查询（含换行符）：对整份内容做跨行匹配。
+                        // 优先锚定英文原文（文件真实内容，可替换）；中文译文命中时映射回英文定位，映射失败仅展示。
+                        val multilineQueries = searchQueries.filter { it.contains("\n") }
+                        if (multilineQueries.isNotEmpty()) {
+                            val chineseFull = chineseLines.joinToString("\n")
+                            val englishFull = englishLines.joinToString("\n")
+                            val multilineMatches = mutableListOf<SearchMatch>()
+                            val seenEnglishOffsets = mutableSetOf<Int>() // 英文原文起始偏移，跨语言去重，保证替换不重复
+                            val seenChineseOffsets = mutableSetOf<Int>() // 中文匹配起始偏移去重
+                            val seenChineseSpans = mutableSetOf<Pair<String, Int>>() // 跨路径位置去重：key=（完整中文内容, 起始行）。
+                            // 同一位置（同行起点）的英文/中文路径重复只保留一条；不同位置但内容相同则各自保留（起始行不同）
+                            // 根据英文原文偏移区间生成可替换的跨行匹配（锚定英文、携带中文预览列）
+                            // 返回 null 表示该位置已在其它路径命中，跳过避免重复显示
+                            fun buildEnglishMatch(engStart: Int, engEnd: Int, query: String): SearchMatch? {
+                                val (sLine, sCol) = offsetToLineCol(englishLines, engStart)
+                                val (eLine, eCol) = offsetToLineCol(englishLines, engEnd)
+                                val engLineText = englishLines.getOrElse(sLine - 1) { "" }
+                                val chLineText = chineseLines.getOrElse(sLine - 1) { engLineText }
+                                val fullMatched = englishFull.substring(engStart, engEnd)
+                                // 首行片段（预览/跳转高亮用）
+                                val portionLen = minOf(engEnd - engStart, (engLineText.length - sCol).coerceAtLeast(0)).coerceAtLeast(0)
+                                val firstLinePortion = fullMatched.substring(0, portionLen)
+                                // 中文预览列：把首行片段翻译回中文定位
+                                var chS = -1; var chE = -1
+                                if (portionLen > 0 && engine.isLoaded) {
+                                    try {
+                                        val cn = engine.getTranslationDict().translateInText(firstLinePortion, isEnToZh = true)
+                                        val pos = if (caseSensitive) chLineText.indexOf(cn) else chLineText.indexOf(cn, ignoreCase = true)
+                                        if (pos >= 0) { chS = pos; chE = pos + cn.length }
+                                    } catch (_: Exception) {}
+                                }
+                                // 完整多行中文：英文起始行~结束行对应的中文行拼接（行数可能不同，取安全边界）
+                                val zhMultiText = if (eLine > sLine) {
+                                    chineseLines.subList(sLine - 1, minOf(eLine, chineseLines.size)).joinToString("\n")
+                                } else chLineText
+                                if (!seenChineseSpans.add(zhMultiText to sLine)) return null
+                                return SearchMatch(
+                                    sLine, sCol, sCol + portionLen, engLineText, chLineText,
+                                    chS, chE, firstLinePortion, query, isMultiline = true,
+                                    englishEndLine = eLine, englishEndColumn = eCol, matchedFullText = fullMatched,
+                                    multilineChineseFull = zhMultiText
+                                )
+                            }
+                            // 第一遍：直接匹配英文原文（可替换）
+                            for (sq in multilineQueries) {
+                                ensureActive()
+                                val regex = if (useRegex) {
+                                    try {
+                                        if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE)
+                                    } catch (_: Exception) { null }
+                                } else null
+                                var searchFrom = 0
+                                while (true) {
                                     ensureActive()
-                                    if (totalMatches >= SEARCH_RESULT_LIMIT) break
-                                    val engLine = englishLines.getOrElse(idx) { "" }
-                                    val chLine = chineseLines.getOrElse(idx) { engLine }
-                                    val linesIdentical = chLine == engLine
-                                    // 同一行、同一搜索词不重复计入
-                                    val matchedQueries = mutableSetOf<String>()
-                                    for (sq in searchQueries) {
-                                        if (totalMatches >= SEARCH_RESULT_LIMIT) break
-                                        val regex = if (useRegex) {
-                                            try {
-                                                if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE)
-                                            } catch (_: Exception) { null }
-                                        } else null
-                                        val wordRegex = if (!useRegex && wholeWord) {
-                                            val escaped = Regex.escape(sq)
-                                            if (caseSensitive) Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])")
-                                            else Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])", RegexOption.IGNORE_CASE)
-                                        } else null
-                                        for (targetLine in listOf(engLine, chLine)) {
-                                            // 中文行与英文行内容完全一致时，无需重复扫描
-                                            if (targetLine !== engLine && linesIdentical) continue
-                                            if (sq in matchedQueries) continue
-                                            var searchFrom = 0
-                                            while (true) {
-                                                val (matchStart, matchEnd) = when {
-                                                    regex != null -> {
-                                                        val m = regex.find(targetLine, searchFrom) ?: break
-                                                        m.range.first to m.range.last + 1
-                                                    }
-                                                    wordRegex != null -> {
-                                                        val m = wordRegex.find(targetLine, searchFrom) ?: break
-                                                        m.range.first to m.range.last + 1
-                                                    }
-                                                    else -> {
-                                                        val pos = if (caseSensitive) targetLine.indexOf(sq, searchFrom)
-                                                        else targetLine.indexOf(sq, searchFrom, ignoreCase = true)
-                                                        if (pos < 0) break
-                                                        pos to pos + sq.length
-                                                    }
+                                    val (start, end) = when {
+                                        regex != null -> {
+                                            val m = regex.find(englishFull, searchFrom) ?: break
+                                            m.range.first to m.range.last + 1
+                                        }
+                                        else -> {
+                                            val pos = if (caseSensitive) englishFull.indexOf(sq, searchFrom)
+                                            else englishFull.indexOf(sq, searchFrom, ignoreCase = true)
+                                            if (pos < 0) break else pos to pos + sq.length
+                                        }
+                                    }
+                                    searchFrom = end
+                                    if (!seenEnglishOffsets.add(start)) continue
+                                    buildEnglishMatch(start, end, q)?.let { multilineMatches.add(it) }
+                                }
+                            }
+                            // 第二遍：匹配中文译文，映射回英文定位；映射失败仅展示（不可替换）
+                            for (sq in multilineQueries) {
+                                ensureActive()
+                                val regex = if (useRegex) {
+                                    try {
+                                        if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE)
+                                    } catch (_: Exception) { null }
+                                } else null
+                                var searchFrom = 0
+                                while (true) {
+                                    ensureActive()
+                                    val (start, end) = when {
+                                        regex != null -> {
+                                            val m = regex.find(chineseFull, searchFrom) ?: break
+                                            m.range.first to m.range.last + 1
+                                        }
+                                        else -> {
+                                            val pos = if (caseSensitive) chineseFull.indexOf(sq, searchFrom)
+                                            else chineseFull.indexOf(sq, searchFrom, ignoreCase = true)
+                                            if (pos < 0) break else pos to pos + sq.length
+                                        }
+                                    }
+                                    searchFrom = end
+                                    if (!seenChineseOffsets.add(start)) continue
+                                    val (sLine, sCol) = offsetToLineCol(chineseLines, start)
+                                    val zhMatched = chineseFull.substring(start, end)
+                                    val engLineText = englishLines.getOrElse(sLine - 1) { "" }
+                                    val chLineText = chineseLines.getOrElse(sLine - 1) { engLineText }
+                                    var mapped = false
+                                    if (engine.isLoaded) {
+                                        try {
+                                            val dict = engine.getTranslationDict()
+                                            val enText = dict.translateInText(zhMatched, isEnToZh = false)
+                                            if (enText != zhMatched && enText.isNotBlank()) {
+                                                val pos = if (caseSensitive) englishFull.indexOf(enText)
+                                                else englishFull.indexOf(enText, ignoreCase = true)
+                                                if (pos >= 0 && seenEnglishOffsets.add(pos)) {
+                                                    // 映射成功；若该中文内容已被其它路径命中则视为已处理，不再走仅展示路径
+                                                    mapped = true
+                                                    buildEnglishMatch(pos, pos + enText.length, q)?.let { multilineMatches.add(it) }
                                                 }
-                                                // 中文行匹配时，把匹配文本翻译回英文并在英文行中定位，确保替换位置正确
-                                                val (finalStart, finalEnd, finalKeyword) = if (targetLine !== engLine) {
-                                                    val matchedText = targetLine.substring(matchStart, matchEnd)
-                                                    val translatedKeyword = if (engine.isLoaded) {
-                                                        try {
-                                                            val dict = engine.getTranslationDict()
-                                                            dict.translateInText(matchedText, isEnToZh = false)
-                                                        } catch (_: Exception) { matchedText }
-                                                    } else matchedText
-                                                    val ep = if (translatedKeyword != matchedText && translatedKeyword.isNotBlank()) {
-                                                        if (caseSensitive) engLine.indexOf(translatedKeyword)
-                                                        else engLine.indexOf(translatedKeyword, ignoreCase = true)
-                                                    } else -1
-                                                    if (ep >= 0) {
-                                                        Triple(ep, ep + translatedKeyword.length, translatedKeyword)
-                                                    } else {
-                                                        // 再尝试用当前搜索词的英文形式定位
-                                                        val enSq = if (engine.isLoaded) {
-                                                            try {
-                                                                val dict = engine.getTranslationDict()
-                                                                dict.translateInText(sq, isEnToZh = false)
-                                                            } catch (_: Exception) { sq }
-                                                        } else sq
-                                                        val searchWord = if (enSq != sq && enSq.isNotBlank()) enSq else sq
-                                                        val ep2 = if (caseSensitive) engLine.indexOf(searchWord)
-                                                        else engLine.indexOf(searchWord, ignoreCase = true)
-                                                        if (ep2 >= 0) Triple(ep2, ep2 + searchWord.length, searchWord)
-                                                        else {
-                                                            // 无法映射到英文原文，跳过该匹配并继续向后查找，避免在同一位置死循环
-                                                            searchFrom = matchEnd
-                                                            continue
-                                                        }
-                                                    }
-                                                } else {
-                                                    Triple(matchStart, matchEnd, sq)
-                                                }
-                                                // 计算中文行中的匹配位置，用于搜索结果预览聚焦
-                                                val (chStart, chEnd) = if (targetLine !== engLine) {
-                                                    matchStart to matchEnd
-                                                } else {
-                                                    val matchedText = engLine.substring(matchStart, matchEnd)
-                                                    val cnKeyword = if (engine.isLoaded) {
-                                                        try {
-                                                            val dict = engine.getTranslationDict()
-                                                            dict.translateInText(matchedText, isEnToZh = true)
-                                                        } catch (_: Exception) { matchedText }
-                                                    } else matchedText
-                                                    if (cnKeyword != matchedText && cnKeyword.isNotBlank()) {
-                                                        val cp = if (caseSensitive) chLine.indexOf(cnKeyword)
-                                                        else chLine.indexOf(cnKeyword, ignoreCase = true)
-                                                        if (cp >= 0) cp to cp + cnKeyword.length else -1 to -1
-                                                    } else {
-                                                        -1 to -1
-                                                    }
-                                                }
-                                                // 按物理位置去重：同一行同一英文列范围只保留一次
-                                                val posKey = Triple(idx + 1, finalStart, finalEnd)
-                                                if (posKey in seenPositions) {
-                                                    searchFrom = matchEnd
-                                                    continue
-                                                }
-                                                seenPositions.add(posKey)
-                                                matchedQueries.add(sq)
-                                                fileMap.getOrPut(file) { mutableListOf() }.add(
-                                                    SearchMatch(idx + 1, finalStart, finalEnd, engLine, chLine, chStart, chEnd, finalKeyword, q)
-                                                )
-                                                totalMatches++
-                                                if (totalMatches >= SEARCH_RESULT_LIMIT) break
-                                                searchFrom = matchEnd
                                             }
-                                            if (totalMatches >= SEARCH_RESULT_LIMIT) break
+                                        } catch (_: Exception) {}
+                                    }
+                                    if (!mapped) {
+                                        // 无法映射到英文原文：仅展示（不可替换）
+                                        val portionLen = minOf(end - start, (chLineText.length - sCol).coerceAtLeast(0)).coerceAtLeast(0)
+                                        val firstLinePortion = zhMatched.substring(0, portionLen)
+                                        val (zELine, _) = offsetToLineCol(chineseLines, end)
+                                        val zhMultiText = chineseLines.subList(sLine - 1, minOf(zELine, chineseLines.size)).joinToString("\n")
+                                        // 与其它路径命中同一位置（同内容同起始行）时跳过；不同位置的相同内容各自保留
+                                        if (seenChineseSpans.add(zhMultiText to sLine)) {
+                                            multilineMatches.add(
+                                                SearchMatch(
+                                                    sLine, -1, -1, engLineText, chLineText,
+                                                    sCol, sCol + portionLen, firstLinePortion, q, isMultiline = true,
+                                                    multilineChineseFull = zhMultiText
+                                                )
+                                            )
                                         }
                                     }
                                 }
-                            } catch (e: Exception) { Log.w(TAG, "操作失败", e) }
-                        } else {
-                            // 文件名搜索：用每个搜索词变体匹配文件名
+                            }
+                            return multilineMatches
+                        }
+                        val matches = mutableListOf<SearchMatch>()
+                        // 同一文件内按物理位置去重，避免中英文行内容相同或不同搜索词命中同一位置时重复显示
+                        val seenPositions = mutableSetOf<Triple<Int, Int, Int>>()
+                        // 对中/英文两套内容都做匹配
+                        for (idx in 0 until totalLines) {
+                            ensureActive()
+                            val engLine = englishLines.getOrElse(idx) { "" }
+                            val chLine = chineseLines.getOrElse(idx) { engLine }
+                            val linesIdentical = chLine == engLine
+                            // 同一行、同一搜索词不重复计入
+                            val matchedQueries = mutableSetOf<String>()
                             for (sq in searchQueries) {
                                 val regex = if (useRegex) {
-                                    try { if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE) }
-                                    catch (_: Exception) { null }
+                                    try {
+                                        if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE)
+                                    } catch (_: Exception) { null }
                                 } else null
-                                val matched = when {
-                                    regex != null -> regex.containsMatchIn(file.name)
-                                    wholeWord -> {
-                                        val escaped = Regex.escape(sq)
-                                        val wr = if (caseSensitive) Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])")
-                                            else Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])", RegexOption.IGNORE_CASE)
-                                        wr.containsMatchIn(file.name)
+                                val wordRegex = if (!useRegex && wholeWord) {
+                                    val escaped = Regex.escape(sq)
+                                    if (caseSensitive) Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])")
+                                    else Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])", RegexOption.IGNORE_CASE)
+                                } else null
+                                for (targetLine in listOf(engLine, chLine)) {
+                                    // 中文行与英文行内容完全一致时，无需重复扫描
+                                    if (targetLine !== engLine && linesIdentical) continue
+                                    if (sq in matchedQueries) continue
+                                    var searchFrom = 0
+                                    while (true) {
+                                        val (matchStart, matchEnd) = when {
+                                            regex != null -> {
+                                                val m = regex.find(targetLine, searchFrom) ?: break
+                                                m.range.first to m.range.last + 1
+                                            }
+                                            wordRegex != null -> {
+                                                val m = wordRegex.find(targetLine, searchFrom) ?: break
+                                                m.range.first to m.range.last + 1
+                                            }
+                                            else -> {
+                                                val pos = if (caseSensitive) targetLine.indexOf(sq, searchFrom)
+                                                else targetLine.indexOf(sq, searchFrom, ignoreCase = true)
+                                                if (pos < 0) break
+                                                pos to pos + sq.length
+                                            }
+                                        }
+                                        // 中文行匹配时，把匹配文本翻译回英文并在英文行中定位，确保替换位置正确
+                                        val (finalStart, finalEnd, finalKeyword) = if (targetLine !== engLine) {
+                                            val matchedText = targetLine.substring(matchStart, matchEnd)
+                                            val translatedKeyword = if (engine.isLoaded) {
+                                                try {
+                                                    val dict = engine.getTranslationDict()
+                                                    dict.translateInText(matchedText, isEnToZh = false)
+                                                } catch (_: Exception) { matchedText }
+                                            } else matchedText
+                                            val ep = if (translatedKeyword != matchedText && translatedKeyword.isNotBlank()) {
+                                                if (caseSensitive) engLine.indexOf(translatedKeyword)
+                                                else engLine.indexOf(translatedKeyword, ignoreCase = true)
+                                            } else -1
+                                            if (ep >= 0) {
+                                                Triple(ep, ep + translatedKeyword.length, translatedKeyword)
+                                            } else {
+                                                // 再尝试用当前搜索词的英文形式定位
+                                                val enSq = if (engine.isLoaded) {
+                                                    try {
+                                                        val dict = engine.getTranslationDict()
+                                                        dict.translateInText(sq, isEnToZh = false)
+                                                    } catch (_: Exception) { sq }
+                                                } else sq
+                                                val searchWord = if (enSq != sq && enSq.isNotBlank()) enSq else sq
+                                                val ep2 = if (caseSensitive) engLine.indexOf(searchWord)
+                                                else engLine.indexOf(searchWord, ignoreCase = true)
+                                                if (ep2 >= 0) Triple(ep2, ep2 + searchWord.length, searchWord)
+                                                else {
+                                                    // 无法映射到英文原文，跳过该匹配并继续向后查找，避免在同一位置死循环
+                                                    searchFrom = matchEnd
+                                                    continue
+                                                }
+                                            }
+                                        } else {
+                                            Triple(matchStart, matchEnd, sq)
+                                        }
+                                        // 计算中文行中的匹配位置，用于搜索结果预览聚焦
+                                        val (chStart, chEnd) = if (targetLine !== engLine) {
+                                            matchStart to matchEnd
+                                        } else {
+                                            val matchedText = engLine.substring(matchStart, matchEnd)
+                                            val cnKeyword = if (engine.isLoaded) {
+                                                try {
+                                                    val dict = engine.getTranslationDict()
+                                                    dict.translateInText(matchedText, isEnToZh = true)
+                                                } catch (_: Exception) { matchedText }
+                                            } else matchedText
+                                            if (cnKeyword != matchedText && cnKeyword.isNotBlank()) {
+                                                val cp = if (caseSensitive) chLine.indexOf(cnKeyword)
+                                                else chLine.indexOf(cnKeyword, ignoreCase = true)
+                                                if (cp >= 0) cp to cp + cnKeyword.length else -1 to -1
+                                            } else {
+                                                -1 to -1
+                                            }
+                                        }
+                                        // 按物理位置去重：同一行同一英文列范围只保留一次
+                                        val posKey = Triple(idx + 1, finalStart, finalEnd)
+                                        if (posKey in seenPositions) {
+                                            searchFrom = matchEnd
+                                            continue
+                                        }
+                                        seenPositions.add(posKey)
+                                        matchedQueries.add(sq)
+                                        matches.add(
+                                            SearchMatch(idx + 1, finalStart, finalEnd, engLine, chLine, chStart, chEnd, finalKeyword, q)
+                                        )
+                                        searchFrom = matchEnd
                                     }
-                                    caseSensitive -> sq in file.name
-                                    else -> file.name.contains(sq, ignoreCase = true)
-                                }
-                                if (matched) {
-                                    val pos = if (caseSensitive) file.name.indexOf(sq) else file.name.indexOf(sq, ignoreCase = true)
-                                    val endPos = if (pos >= 0) pos + sq.length else pos
-                                    fileMap.getOrPut(file) { mutableListOf() }.add(
-                                        SearchMatch(0, pos, endPos, file.name, file.name, pos, endPos, sq, q)
-                                    )
-                                    totalMatches++
-                                    break
                                 }
                             }
                         }
+                        matches
+                    } catch (e: Exception) { Log.w(TAG, "操作失败", e); emptyList() }
+                } else {
+                    // 文件名搜索：用每个搜索词变体匹配文件名
+                    val matches = mutableListOf<SearchMatch>()
+                    for (sq in searchQueries) {
+                        val regex = if (useRegex) {
+                            try { if (caseSensitive) Regex(sq) else Regex(sq, RegexOption.IGNORE_CASE) }
+                            catch (_: Exception) { null }
+                        } else null
+                        val matched = when {
+                            regex != null -> regex.containsMatchIn(file.name)
+                            wholeWord -> {
+                                val escaped = Regex.escape(sq)
+                                val wr = if (caseSensitive) Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])")
+                                    else Regex("(?<![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])$escaped(?![\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff])", RegexOption.IGNORE_CASE)
+                                wr.containsMatchIn(file.name)
+                            }
+                            caseSensitive -> sq in file.name
+                            else -> file.name.contains(sq, ignoreCase = true)
+                        }
+                        if (matched) {
+                            val pos = if (caseSensitive) file.name.indexOf(sq) else file.name.indexOf(sq, ignoreCase = true)
+                            val endPos = if (pos >= 0) pos + sq.length else pos
+                            matches.add(
+                                SearchMatch(0, pos, endPos, file.name, file.name, pos, endPos, sq, q)
+                            )
+                            break
+                        }
                     }
+                    return matches
+                }
+            }
+
+            // 多线程开关开启且候选多时并行搜索，否则串行；每文件结果按候选顺序合并，保持结果确定
+            val perFileMatches = if (SettingsManager.devParallelPreheat && candidates.size > 1) {
+                coroutineScope {
+                    candidates.map { file -> async(Dispatchers.Default) { file to searchOneFile(file) } }.awaitAll()
+                }
+            } else {
+                candidates.map { file -> file to searchOneFile(file) }
+            }
+            val fileMap = LinkedHashMap<File, MutableList<SearchMatch>>()
+            var totalMatches = 0
+            for ((file, matches) in perFileMatches) {
+                if (totalMatches >= SEARCH_RESULT_LIMIT) break
+                if (matches.isNotEmpty()) {
+                    fileMap[file] = matches.toMutableList()
+                    totalMatches += matches.size
+                }
             }
             val results = fileMap.map { (file, matches) ->
                 val rel = try { file.relativeTo(base).path } catch (_: Exception) { file.name }
@@ -593,7 +814,10 @@ fun HomeSearchScreen(
             }
             Log.d(TAG, "search: done ${totalMatches} matches in ${System.currentTimeMillis() - startMs}ms")
             withContext(Dispatchers.Main) {
-                highlightWords = searchQueries.toList()
+                // 多行查询额外加入首行片段，便于预览高亮
+                val highlightWordsList = searchQueries.toMutableList()
+                searchQueries.filter { it.contains("\n") }.forEach { highlightWordsList.add(it.substringBefore("\n")) }
+                highlightWords = highlightWordsList
                 searchResults.clear()
                 searchResults.addAll(results)
                 totalMatchCount = totalMatches
@@ -604,95 +828,205 @@ fun HomeSearchScreen(
         }
     }
 
+    /** 单行替换：逐行处理，兼容 CRLF，带关键词重定位兜底；返回新内容，失败返回 null。 */
+    fun applySingleLineReplacement(content: String, match: SearchMatch, replaceText: String, caseSensitive: Boolean): String? {
+        val lines = content.split("\n").toMutableList()
+        val idx = match.englishLine - 1
+        if (idx !in lines.indices) return null
+        // 兼容 CRLF：split("\n") 会让行尾残留 \r，比较/定位前剥离，写回时保留，避免 CRLF 文件替换失效
+        var line = lines[idx]
+        val trailingCR = line.endsWith('\r')
+        val clean = if (trailingCR) line.dropLast(1) else line
+        val expected = match.matchedKeyword
+        val start = match.englishColumnStart.coerceIn(0, clean.length)
+        val end = match.englishColumnEnd.coerceIn(0, clean.length)
+        val actual = clean.substring(start, end)
+        val newLine = when {
+            actual == expected ->
+                clean.replaceRange(start, end, replaceText)
+            else -> {
+                // 尝试在当前行重新定位英文关键词（行内容可能在搜索后变化）
+                val relocated = if (caseSensitive) clean.indexOf(expected)
+                else clean.indexOf(expected, ignoreCase = true)
+                if (relocated >= 0)
+                    clean.replaceRange(relocated, relocated + expected.length, replaceText)
+                else null
+            }
+        }
+        if (newLine == null) return null
+        lines[idx] = if (trailingCR) "$newLine\r" else newLine
+        return lines.joinToString("\n")
+    }
+
+    /** 跨行替换：把匹配的英文区间换算为整份文本的绝对偏移后整段替换（合并多行为一行），兼容 CRLF。 */
+    fun applyMultilineReplacement(content: String, match: SearchMatch, replaceText: String, caseSensitive: Boolean): String? {
+        val rawLines = content.split("\n")
+        val cleanLines = rawLines.map { if (it.endsWith('\r')) it.dropLast(1) else it }
+        val cleanFull = cleanLines.joinToString("\n")
+        val crlf = content.contains("\r\n")
+        val startOffset = offsetOf(cleanLines, match.englishLine, match.englishColumnStart)
+        val endOffset = offsetOf(cleanLines, match.englishEndLine, match.englishEndColumn)
+        if (startOffset < 0 || endOffset < startOffset || endOffset > cleanFull.length) return null
+        var start = startOffset
+        var end = endOffset
+        val expected = match.matchedFullText
+        if (expected.isNotEmpty()) {
+            val actual = cleanFull.substring(startOffset, endOffset)
+            val ok = if (caseSensitive) actual == expected else actual.equals(expected, ignoreCase = true)
+            if (!ok) {
+                // 文件在搜索后可能变化，尝试重定位完整匹配文本
+                val pos = if (caseSensitive) cleanFull.indexOf(expected)
+                else cleanFull.indexOf(expected, ignoreCase = true)
+                if (pos < 0) return null
+                start = pos
+                end = pos + expected.length
+            }
+        }
+        val newCleanFull = cleanFull.replaceRange(start, end, replaceText)
+        return if (crlf) newCleanFull.replace("\n", "\r\n") else newCleanFull
+    }
+
     /**
-     * 替换单条匹配：在文件中将 matchedKeyword 替换为 replaceText。
+     * 替换单条匹配：单行匹配逐行替换，跨行匹配按英文原文区间整段替换。
      * 替换后从搜索结果中移除该条；该文件所有匹配清完后移除文件条目。
      */
     fun performReplace(match: SearchMatch, fileResult: FileSearchResult) {
-        if (replaceText.isBlank() || replaceText == match.matchedKeyword) return
+        val actualText = match.matchedFullText.ifEmpty { match.matchedKeyword }
+        // 文件以英文为基底：把用户输入的替换文本（可能是中文）翻译成英文再写入，只翻译替换文本本身
+        val replacement = if (engine.isLoaded && replaceText.isNotBlank()) {
+            try { engine.translateToEnglish(replaceText, SettingsManager.autoSpace) }
+            catch (_: Exception) { replaceText }
+        } else replaceText
+        if (replacement.isBlank() || replacement == actualText) return
+        // 跨行匹配但无法定位英文原文（仅中文命中且映射失败）时提示并跳过
+        if (match.isMultiline && match.englishEndLine <= 0) {
+            android.widget.Toast.makeText(context, "该多行匹配无法定位到英文原文，不能替换", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch(Dispatchers.IO) {
             try {
+                // 先保存该文件「打开着且未保存」的缓存工作区，再基于最新盘内容替换，避免覆盖未保存修改
+                onSaveWorkspaceBeforeReplace(setOf(fileResult.file.absolutePath))
                 val content = fileResult.file.readText()
-                val lines = content.split("\n").toMutableList()
-                val idx = match.englishLine - 1
-                if (idx in lines.indices) {
-                    val line = lines[idx]
-                    val expected = match.matchedKeyword
-                    val actual = line.substring(
-                        match.englishColumnStart.coerceIn(0, line.length),
-                        match.englishColumnEnd.coerceIn(0, line.length)
-                    )
-                    // 验证行内容未变且位置正确（防止并发修改或中文映射偏差导致替换错位）
-                    if (line == match.englishFullLine && actual == expected) {
-                        lines[idx] = line.replaceRange(match.englishColumnStart, match.englishColumnEnd, replaceText)
-                        fileResult.file.writeText(lines.joinToString("\n"))
-                    } else if (actual != expected) {
-                        // 尝试在当前行重新定位英文关键词
-                        val relocated = if (caseSensitive) line.indexOf(expected)
-                        else line.indexOf(expected, ignoreCase = true)
-                        if (relocated >= 0) {
-                            lines[idx] = line.replaceRange(relocated, relocated + expected.length, replaceText)
-                            fileResult.file.writeText(lines.joinToString("\n"))
-                        }
-                    }
+                val newContent = if (match.isMultiline) {
+                    applyMultilineReplacement(content, match, replacement, caseSensitive)
+                } else {
+                    applySingleLineReplacement(content, match, replacement, caseSensitive)
+                }
+                if (newContent != null) {
+                    fileResult.file.atomicWriteText(newContent)
+                    // 记录到近期修改（保存历史），与编辑器保存同口径
+                    SaveHistoryManager.record(context, fileResult.file.absolutePath, content, newContent)
                 }
                 withContext(Dispatchers.Main) {
+                    if (newContent != null) {
+                        onFilesModified(setOf(fileResult.file.absolutePath))
+                    } else {
+                        android.widget.Toast.makeText(context, "替换失败，可能文件已变化", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                     fileResult.matches.remove(match)
                     totalMatchCount = (totalMatchCount - 1).coerceAtLeast(0)
                     if (fileResult.matches.isEmpty()) {
                         searchResults.remove(fileResult)
                     }
                 }
-            } catch (e: Exception) { Log.w(TAG, "操作失败", e) }
+            } catch (e: Exception) {
+                Log.w(TAG, "操作失败", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "替换失败，可能文件已变化", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
-    /** 全部替换：按文件分组，从后往前逐行替换（避免行偏移），写回后清空搜索结果。 */
+    /** 全部替换：按文件分组，按英文原文绝对偏移从后往前整段替换（单行与跨行统一处理），写回后清空搜索结果。 */
     fun performReplaceAll() {
         if (replaceText.isBlank() || searchResults.isEmpty()) return
         scope.launch(Dispatchers.IO) {
             try {
-                // 按文件分组匹配，行号从高到低排序（避免替换导致行偏移）
+                // 文件以英文为基底：把用户输入的替换文本（可能是中文）翻译成英文再写入，只翻译替换文本本身
+                val replacement = if (engine.isLoaded) {
+                    try { engine.translateToEnglish(replaceText, SettingsManager.autoSpace) }
+                    catch (_: Exception) { replaceText }
+                } else replaceText
+                if (replacement.isBlank()) return@launch
+                // 按文件分组匹配（跳过文件名匹配、替换文本与匹配内容相同、以及无法定位英文原文的跨行匹配）
                 val byFile = LinkedHashMap<File, MutableList<SearchMatch>>()
                 searchResults.forEach { fr ->
-                    fr.matches.filter { replaceText != it.matchedKeyword }
-                        .forEach { byFile.getOrPut(fr.file) { mutableListOf() }.add(it) }
+                    fr.matches.filter { m ->
+                        val target = m.matchedFullText.ifEmpty { m.matchedKeyword }
+                        m.englishLine > 0 && replacement != target && !(m.isMultiline && m.englishEndLine <= 0)
+                    }.forEach { byFile.getOrPut(fr.file) { mutableListOf() }.add(it) }
                 }
+                // 先保存这些文件「打开着且未保存」的缓存工作区，再基于最新盘内容替换，避免覆盖未保存修改
+                onSaveWorkspaceBeforeReplace(byFile.keys.map { it.absolutePath }.toSet())
+                val replacedPaths = mutableSetOf<String>()
+                var totalSkipped = 0
                 for ((file, matches) in byFile) {
-                    matches.sortWith(compareByDescending<SearchMatch> { it.englishLine }.thenByDescending { it.englishColumnStart })
                     val content = file.readText()
-                    val lines = content.split("\n").toMutableList()
+                    val rawLines = content.split("\n")
+                    val cleanLines = rawLines.map { if (it.endsWith('\r')) it.dropLast(1) else it }
+                    val cleanFull = cleanLines.joinToString("\n")
+                    val crlf = content.contains("\r\n")
+                    // 计算每个匹配的绝对替换区间
+                    val ranges = mutableListOf<Triple<Int, Int, SearchMatch>>()
                     for (match in matches) {
-                        val idx = match.englishLine - 1
-                        if (idx in lines.indices) {
-                            val line = lines[idx]
-                            val expected = match.matchedKeyword
-                            val actual = line.substring(
-                                match.englishColumnStart.coerceIn(0, line.length),
-                                match.englishColumnEnd.coerceIn(0, line.length)
-                            )
-                            if (line == match.englishFullLine && actual == expected) {
-                                lines[idx] = line.replaceRange(
-                                    match.englishColumnStart, match.englishColumnEnd, replaceText
-                                )
-                            } else if (actual != expected) {
-                                val relocated = if (caseSensitive) line.indexOf(expected)
-                                else line.indexOf(expected, ignoreCase = true)
-                                if (relocated >= 0) {
-                                    lines[idx] = line.replaceRange(
-                                        relocated, relocated + expected.length, replaceText
-                                    )
-                                }
-                            }
+                        val endLine = if (match.isMultiline) match.englishEndLine else match.englishLine
+                        val endCol = if (match.isMultiline) match.englishEndColumn else match.englishColumnEnd
+                        val start = offsetOf(cleanLines, match.englishLine, match.englishColumnStart)
+                        val end = offsetOf(cleanLines, endLine, endCol)
+                        if (start >= 0 && end >= start && end <= cleanFull.length) {
+                            ranges.add(Triple(start, end, match))
                         }
                     }
-                    file.writeText(lines.joinToString("\n"))
+                    // 从后往前替换，避免偏移失效
+                    ranges.sortByDescending { it.first }
+                    var result = cleanFull
+                    var skipped = 0
+                    for ((start, end, match) in ranges) {
+                        val expected = match.matchedFullText.ifEmpty { match.matchedKeyword }
+                        var s = start
+                        var e = end
+                        val actual = result.substring(start, end)
+                        val ok = if (caseSensitive) actual == expected else actual.equals(expected, ignoreCase = true)
+                        if (!ok && expected.isNotEmpty()) {
+                            // 文件内容可能在搜索后变化，尝试重定位
+                            val pos = if (caseSensitive) result.indexOf(expected)
+                            else result.indexOf(expected, ignoreCase = true)
+                            if (pos < 0) { skipped++; continue }
+                            s = pos
+                            e = pos + expected.length
+                        }
+                        result = result.replaceRange(s, e, replacement)
+                    }
+                    if (skipped > 0) {
+                        Log.w(TAG, "替换跳过 $skipped 条（文件已变化无法重定位）: ${file.name}")
+                        totalSkipped += skipped
+                    }
+                    val afterContent = if (crlf) result.replace("\n", "\r\n") else result
+                    file.atomicWriteText(afterContent)
+                    replacedPaths.add(file.absolutePath)
+                    // 记录到近期修改（保存历史），与编辑器保存同口径
+                    SaveHistoryManager.record(context, file.absolutePath, content, afterContent)
                 }
                 withContext(Dispatchers.Main) {
+                    if (replacedPaths.isNotEmpty()) onFilesModified(replacedPaths)
                     searchResults.clear()
                     totalMatchCount = 0
+                    if (totalSkipped > 0) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "有 $totalSkipped 条匹配因文件已变化未能替换",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
-            } catch (e: Exception) { Log.w(TAG, "操作失败", e) }
+            } catch (e: Exception) {
+                Log.w(TAG, "操作失败", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "替换失败，可能文件已变化", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -703,7 +1037,7 @@ fun HomeSearchScreen(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = RustedSurface,
+        containerColor = RustedBackground,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
         Column(
@@ -722,8 +1056,8 @@ fun HomeSearchScreen(
             ) {
                 // ── 搜索行 ──
                 Row(
-                    Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
                     // 左侧：替换展开/折叠三角
                     IconButton(
@@ -736,33 +1070,48 @@ fun HomeSearchScreen(
                             tint = RustedOnBackground.copy(alpha = 0.4f)
                         )
                     }
-                    // 输入区
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = RustedOnBackground),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(RustedPrimary),
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                        decorationBox = { inner ->
-                            Box {
-                                if (query.isEmpty()) {
-                                    Text("搜索", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.35f))
+                    // 输入区（多行，支持换行符搜索；单行时文字垂直居中与右侧按钮组对齐）
+                    Box(
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp).heightIn(min = 28.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = query,
+                            onValueChange = onQueryChange,
+                            maxLines = 3,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 14.sp,
+                                lineHeight = 18.sp,
+                                color = RustedOnBackground
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(RustedPrimary),
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                    if (query.isEmpty()) {
+                                        Text("搜索", fontSize = 14.sp, lineHeight = 18.sp, color = RustedOnBackground.copy(alpha = 0.35f))
+                                    }
+                                    inner()
                                 }
-                                inner()
                             }
+                        )
+                    }
+                    // 清除按钮：有内容时显示在 Aa 左侧
+                    if (query.isNotEmpty()) {
+                        Box(Modifier.size(28.dp).clip(RoundedCornerShape(10.dp)).clickable { onQueryChange("") }, contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Clear, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.5f))
                         }
-                    )
+                    }
                     // 右侧切换按钮组
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).clickable { caseSensitive = !caseSensitive }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(10.dp)).clickable { caseSensitive = !caseSensitive }, contentAlignment = Alignment.Center) {
                         Text("Aa", fontSize = 12.sp, fontWeight = if (caseSensitive) FontWeight.Bold else FontWeight.Normal,
                             color = if (caseSensitive) RustedPrimary else RustedOnBackground.copy(alpha = 0.5f))
                     }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).clickable { wholeWord = !wholeWord }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(10.dp)).clickable { wholeWord = !wholeWord }, contentAlignment = Alignment.Center) {
                         Text("ab", fontSize = 12.sp, fontWeight = if (wholeWord) FontWeight.Bold else FontWeight.Normal,
                             color = if (wholeWord) RustedPrimary else RustedOnBackground.copy(alpha = 0.5f))
                     }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).clickable { useRegex = !useRegex }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(10.dp)).clickable { useRegex = !useRegex }, contentAlignment = Alignment.Center) {
                         Text(".*", fontSize = 12.sp, fontWeight = if (useRegex) FontWeight.Bold else FontWeight.Normal,
                             color = if (useRegex) RustedPrimary else RustedOnBackground.copy(alpha = 0.5f))
                     }
@@ -770,26 +1119,45 @@ fun HomeSearchScreen(
                 // ── 替换行（可折叠，左侧缩进对齐三角位） ──
                 if (showReplace) {
                     Row(
-                        Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
                         Spacer(Modifier.width(28.dp)) // 对齐上方三角位
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = replaceText,
-                            onValueChange = { replaceText = it },
-                            singleLine = true,
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = RustedOnBackground),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(RustedPrimary),
-                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                            decorationBox = { inner ->
-                                Box {
-                                    if (replaceText.isEmpty()) {
-                                        Text("替换", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.35f))
+                        // 输入区（多行，支持换行符替换；单行时文字垂直居中与右侧按钮组对齐）
+                        Box(
+                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp).heightIn(min = 28.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = replaceText,
+                                onValueChange = { replaceText = it },
+                                maxLines = 3,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 14.sp,
+                                    lineHeight = 18.sp,
+                                    color = RustedOnBackground
+                                ),
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(RustedPrimary),
+                                modifier = Modifier.fillMaxWidth(),
+                                decorationBox = { inner ->
+                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                        if (replaceText.isEmpty()) {
+                                            Text("替换", fontSize = 14.sp, lineHeight = 18.sp, color = RustedOnBackground.copy(alpha = 0.35f))
+                                        }
+                                        inner()
                                     }
-                                    inner()
                                 }
+                            )
+                        }
+                        // 清除按钮：有内容时显示
+                        if (replaceText.isNotEmpty()) {
+                            Box(
+                                Modifier.size(28.dp).clip(RoundedCornerShape(10.dp)).clickable { replaceText = "" },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Clear, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.5f))
                             }
-                        )
+                        }
                         if (replaceText.isNotBlank() && searchResults.isNotEmpty()) {
                             TextButton(
                                 onClick = { performReplaceAll() },
@@ -803,11 +1171,18 @@ fun HomeSearchScreen(
             }
             Spacer(Modifier.height(4.dp))
             if (showSearchModeToggle) {
-                ElevatedCard(
-                    Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = RustedBackground),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (ThemeState.isDark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.60f)
+                        )
+                        .border(
+                            1.dp,
+                            if (ThemeState.isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                        )
                 ) {
                     Row(
                         Modifier
@@ -877,8 +1252,7 @@ fun HomeSearchScreen(
                 }
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
                     items(searchResults, key = { it.file.absolutePath }) { fileResult ->
                         FileSearchResultCard(
@@ -933,70 +1307,64 @@ private fun FileSearchResultCard(
     onToggleExpand: () -> Unit,
     onReplace: (SearchMatch) -> Unit
 ) {
-    ElevatedCard(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = RustedBackground),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(Modifier.fillMaxWidth()) {
-            // 文件头：展开/折叠箭头 + 文件名 + 匹配数 + 关闭按钮
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggleExpand() }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+    // 统一 MT 管理器扁平列表风格：结果块无卡片外壳，文件头行 + 匹配行直接平铺
+    Column(Modifier.fillMaxWidth()) {
+        // 文件头：展开/折叠箭头 + 文件名 + 匹配数 + 关闭按钮
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onToggleExpand() }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (fileResult.expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                null,
+                Modifier.size(16.dp),
+                tint = RustedOnBackground.copy(alpha = 0.5f)
+            )
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Default.Description,
+                null,
+                Modifier.size(22.dp),
+                tint = RustedPrimary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = fileResult.relativePath,
+                fontSize = 14.sp,
+                color = RustedPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "${fileResult.matches.size}",
+                fontSize = 9.sp,
+                color = RustedOnBackground.copy(alpha = 0.5f)
+            )
+            Spacer(Modifier.width(4.dp))
+            IconButton(
+                onClick = onRemoveFile,
+                modifier = Modifier.size(20.dp)
             ) {
-                Icon(
-                    if (fileResult.expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
-                    null,
-                    Modifier.size(16.dp),
-                    tint = RustedOnBackground.copy(alpha = 0.5f)
-                )
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    Icons.Default.Description,
-                    null,
-                    Modifier.size(14.dp),
-                    tint = RustedPrimary
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = fileResult.relativePath,
-                    fontSize = 12.sp,
-                    color = RustedPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "${fileResult.matches.size}",
-                    fontSize = 11.sp,
-                    color = RustedOnBackground.copy(alpha = 0.5f)
-                )
-                Spacer(Modifier.width(4.dp))
-                IconButton(
-                    onClick = onRemoveFile,
-                    modifier = Modifier.size(20.dp)
-                ) {
-                    Icon(Icons.Default.Close, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.5f))
-                }
+                Icon(Icons.Default.Close, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.5f))
             }
-            if (fileResult.expanded) {
-                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
-                Column {
-                    fileResult.matches.forEach { match ->
-                        MatchLineItem(
-                            match = match,
-                            highlightWords = highlightWords,
-                            caseSensitive = caseSensitive,
-                            onJumpToLine = { onJumpToLine(match) },
-                            onRemove = { onRemoveMatch(match) },
-                            onReplace = { onReplace(match) }
-                        )
-                    }
+        }
+        if (fileResult.expanded) {
+            HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
+            Column {
+                fileResult.matches.forEach { match ->
+                    MatchLineItem(
+                        match = match,
+                        highlightWords = highlightWords,
+                        caseSensitive = caseSensitive,
+                        onJumpToLine = { onJumpToLine(match) },
+                        onRemove = { onRemoveMatch(match) },
+                        onReplace = { onReplace(match) }
+                    )
                 }
             }
         }
@@ -1017,9 +1385,16 @@ private fun MatchLineItem(
     onRemove: () -> Unit,
     onReplace: () -> Unit
 ) {
-    // 纯字符串操作：以实际匹配位置为中心截取预览，无翻译调用
-    val previewData = remember(match.chineseFullLine, match.chineseColumnStart, match.chineseColumnEnd, highlightWords) {
-        buildChinesePreview(match.chineseFullLine, match.chineseColumnStart, match.chineseColumnEnd, highlightWords)
+    // 纯字符串操作：以实际匹配位置为中心截取预览，无翻译调用。
+    // 多行匹配直接显示完整中文内容（含换行符），不做单行截取。
+    val previewData = remember(
+        match.isMultiline, match.multilineChineseFull, match.chineseFullLine,
+        match.chineseColumnStart, match.chineseColumnEnd, highlightWords
+    ) {
+        if (match.isMultiline && match.multilineChineseFull.isNotEmpty())
+            PreviewData(match.multilineChineseFull, 0)
+        else
+            buildChinesePreview(match.chineseFullLine, match.chineseColumnStart, match.chineseColumnEnd, highlightWords)
     }
     val scrollState = rememberScrollState()
 
@@ -1045,7 +1420,7 @@ private fun MatchLineItem(
             text = highlightMatch(previewData.text, highlightWords, caseSensitive),
             fontSize = 12.sp,
             color = RustedOnBackground,
-            maxLines = 1,
+            maxLines = if (match.isMultiline) 3 else 1,
             softWrap = false,
             modifier = Modifier
                 .weight(1f)
@@ -1156,14 +1531,29 @@ private fun ModListCard(
     val isIni = file.extension.lowercase() in INI_EXTENSIONS
     val ico = when { isDir -> Icons.Default.Folder; isRw -> Icons.Default.Archive; isIni -> Icons.Default.Description; else -> Icons.Default.InsertDriveFile }
     val clr = when { isDir -> RustedAccent; isRw -> RustedSecondary; isIni -> RustedPrimary; else -> RustedOnBackground.copy(alpha = 0.35f) }
-    val iniImage = if (isIni) IniImageReader.getImageForFile(file) else null
+
+    // 首页固定「大」档位：统一 MT 管理器风格（无边框扁平），大图标 + 文件名 + 描述 + 类型行
+    val padV = 6.dp
+    val iconBox = 56.dp
+    val icon = 40.dp
+    val nameSp = 16.sp
+    val descSp = 11.sp
+    val typeSp = 11.sp
+    val actionBtn = 36.dp
+    val actionIcon = 20.dp
+    // 目录预览图与描述（首页显示）
     var dirImage by remember(file.absolutePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var description by remember(file.absolutePath) { mutableStateOf<String?>(null) }
     LaunchedEffect(file.absolutePath) {
         if (isDir && file.exists()) {
             dirImage = withContext(Dispatchers.IO) {
-                file.listFiles()?.firstOrNull { f -> f.extension.lowercase() in IMAGE_EXTENSIONS }?.let {
-                    try { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } catch (_: Exception) { null }
+                // 优先 mod-info.txt 的 thumbnail 键，缺失/失败回退到目录第一个图片
+                // 统一走采样解码（1024px 上限），避免 2K/4K 大贴图整图解码 OOM
+                val fromThumb = resolveThumbnailFile(file)?.let {
+                    IniImageReader.decodeSampled(it)?.asImageBitmap()
+                }
+                fromThumb ?: file.listFiles()?.firstOrNull { f -> f.extension.lowercase() in IMAGE_EXTENSIONS }?.let {
+                    IniImageReader.decodeSampled(it)?.asImageBitmap()
                 }
             }
             description = withContext(Dispatchers.IO) { readModInfoDescription(file) }
@@ -1198,7 +1588,6 @@ private fun ModListCard(
         Box(
             Modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(14.dp))
                 .background(if (isPinned) RustedError.copy(alpha = 0.08f * progress) else RustedSecondary.copy(alpha = 0.08f * progress)),
             contentAlignment = Alignment.CenterEnd
         ) {
@@ -1211,49 +1600,46 @@ private fun ModListCard(
                 tint = if (isPinned) RustedError else RustedSecondary
             )
         }
-        ElevatedCard(
+        // 统一 MT 管理器风格：无边框、无背景色块、无圆角（仅选中时淡色高亮）
+        Box(
             Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-            colors = CardDefaults.elevatedCardColors(containerColor = RustedSurface),
-            shape = RoundedCornerShape(14.dp),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp, pressedElevation = 4.dp)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
         ) {
+            // 统一 MT 管理器风格两行布局（大/中/小仅尺寸不同）
             Row(
-                Modifier.padding(12.dp),
+                Modifier.padding(horizontal = 10.dp, vertical = padV),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(clr.copy(alpha = 0.1f)),
+                    Modifier.size(iconBox),
                     contentAlignment = Alignment.Center
                 ) {
-                    dirImage?.let { Image(it, null, Modifier.fillMaxSize().padding(4.dp).clip(RoundedCornerShape(10.dp))) }
-                        ?: iniImage?.let { Image(it, null, Modifier.fillMaxSize().padding(4.dp).clip(RoundedCornerShape(10.dp))) }
-                        ?: Icon(ico, null, Modifier.size(28.dp), tint = clr.copy(alpha = 0.85f))
-                }
-                Spacer(Modifier.width(14.dp))
-                if (isPinned) {
-                    Box(
-                        Modifier.height(56.dp).width(18.dp),
-                        contentAlignment = Alignment.TopCenter
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.BookmarkBorder,
-                            contentDescription = "已置顶",
-                            modifier = Modifier.size(18.dp),
-                            tint = RustedSecondary
+                    if (dirImage != null) {
+                        Image(
+                            dirImage!!,
+                            null,
+                            Modifier.fillMaxSize().padding(2.dp).clip(RoundedCornerShape(4.dp))
                         )
+                    } else {
+                        Icon(ico, null, Modifier.size(icon), tint = clr.copy(alpha = 0.85f))
                     }
-                    Spacer(Modifier.width(8.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                if (isPinned) {
+                    Icon(
+                        imageVector = Icons.Outlined.BookmarkBorder,
+                        contentDescription = "已置顶",
+                        modifier = Modifier.size(14.dp),
+                        tint = RustedSecondary
+                    )
+                    Spacer(Modifier.width(6.dp))
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         file.name,
-                        fontSize = 14.sp,
+                        fontSize = nameSp,
                         fontWeight = FontWeight.Medium,
                         color = RustedOnBackground,
                         maxLines = 1,
@@ -1263,14 +1649,13 @@ private fun ModListCard(
                         Spacer(Modifier.height(2.dp))
                         Text(
                             text = it,
-                            fontSize = 11.sp,
+                            fontSize = descSp,
                             color = RustedOnBackground.copy(alpha = 0.55f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 14.sp
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(1.dp))
                     Text(
                         text = when {
                             isDir -> "文件夹"
@@ -1278,33 +1663,54 @@ private fun ModListCard(
                             isIni -> "INI 文件"
                             else -> file.extension.uppercase()
                         },
-                        fontSize = 10.sp,
-                        color = clr.copy(alpha = 0.8f),
+                        fontSize = typeSp,
+                        color = clr.copy(alpha = 0.55f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (onPack != null || onDedup != null || onShare != null) {
+                    Spacer(Modifier.width(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         onShare?.let {
-                            IconButton(onClick = it, modifier = Modifier.size(36.dp)) {
-                                Icon(Icons.Default.Share, null, Modifier.size(20.dp), tint = RustedPrimary)
+                            IconButton(onClick = it, modifier = Modifier.size(actionBtn)) {
+                                Icon(Icons.Default.Share, null, Modifier.size(actionIcon), tint = RustedPrimary)
                             }
                         }
                         onDedup?.let {
-                            IconButton(onClick = it, modifier = Modifier.size(36.dp)) {
-                                Icon(Icons.Default.FindInPage, null, Modifier.size(20.dp), tint = RustedPrimary)
+                            IconButton(onClick = it, modifier = Modifier.size(actionBtn)) {
+                                Icon(Icons.Default.FindInPage, null, Modifier.size(actionIcon), tint = RustedPrimary)
                             }
                         }
                         onPack?.let {
-                            IconButton(onClick = it, modifier = Modifier.size(36.dp)) {
-                                Icon(Icons.Default.Compress, null, Modifier.size(20.dp), tint = RustedSecondary)
+                            IconButton(onClick = it, modifier = Modifier.size(actionBtn)) {
+                                Icon(Icons.Default.Compress, null, Modifier.size(actionIcon), tint = RustedSecondary)
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * 生成亚克力磨砂噪点画笔：64x64 位图撒细密颗粒，平铺到卡片表面形成磨砂玻璃质感。
+ * white=true 用于深色模式（白颗粒），white=false 用于浅色模式（深灰颗粒）。
+ */
+private fun buildNoisePaint(white: Boolean): android.graphics.Paint {
+    val s = 64
+    val bmp = android.graphics.Bitmap.createBitmap(s, s, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    val dot = android.graphics.Paint()
+    val rnd = java.util.Random(2024)
+    repeat(1600) {
+        val a = rnd.nextInt(20) + 6
+        dot.color = if (white) android.graphics.Color.argb(a, 255, 255, 255) else android.graphics.Color.argb(a, 32, 32, 32)
+        canvas.drawPoint(rnd.nextInt(s).toFloat(), rnd.nextInt(s).toFloat(), dot)
+    }
+    return android.graphics.Paint().apply {
+        shader = android.graphics.BitmapShader(bmp, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
     }
 }
 
@@ -1335,6 +1741,18 @@ private fun readModInfoValue(dir: File, key: String): String? {
     } catch (_: Exception) { null }
 }
 
+/** 解析 mod-info.txt 中 thumbnail 键指向的图片文件；无值/文件不存在/路径越界返回 null。 */
+private fun resolveThumbnailFile(dir: File): File? {
+    val value = readModInfoValue(dir, "thumbnail") ?: return null
+    val target = File(dir, value)   // 相对路径直接拼，支持子目录 units/xxx.png
+    return try {
+        val base = dir.canonicalPath
+        val abs = target.canonicalPath
+        // 防路径逃逸：拒绝绝对路径与 ../ 越界；正常相对路径不受影响
+        if (target.isFile && (abs == base || abs.startsWith(base + File.separator))) target else null
+    } catch (_: Exception) { null }
+}
+
 private fun readModInfoDescription(dir: File): String? =
     readModInfoValue(dir, "description")?.replace("\\n", "\n")
 
@@ -1347,7 +1765,23 @@ private fun fmt(b: Long) = when { b < 1024 -> "$b B"; b < 1024*1024 -> "${b/1024
 
 private fun shareRwmod(context: android.content.Context, file: File) {
     try {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        // FileProvider 只暴露 RWmod 目录树（安全收窄，见 res/xml/file_paths.xml）。
+        // 首页/浏览器分享的 .rwmod 可能位于 RWmod 之外（下载目录、外部项目等），
+        // 直接 getUriForFile 会因路径不在暴露范围内抛异常导致分享失败——
+        // 外部文件先拷入 RWmod/exports 再分享，保持共享范围收窄的同时保证任意位置分享可用。
+        val rwmodRoot = com.rwmodstudio.core.RwmodPaths.rwmodDir.absolutePath
+        val shareFile = if (file.absolutePath.startsWith(rwmodRoot)) {
+            file
+        } else {
+            val exportDir = com.rwmodstudio.core.RwmodPaths.exportsDir
+            exportDir.mkdirs()
+            // exports 是导出/分享区，同名覆盖是预期行为（分享的就是最新文件，旧导出被顶掉），
+            // 不要加时间戳后缀——会让导出区堆副本
+            val copy = File(exportDir, file.name)
+            file.copyTo(copy, overwrite = true)
+            copy
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", shareFile)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)

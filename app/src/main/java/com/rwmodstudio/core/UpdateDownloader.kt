@@ -58,7 +58,8 @@ object UpdateDownloader {
         conn.requestMethod = "GET"
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS
-        val tmp = File(targetFile.parentFile, targetFile.name + ".tmp")
+        // 临时文件名加唯一后缀：并发/重复下载时不会互相截断同一个 tmp 写坏数据
+        val tmp = File(targetFile.parentFile, "${targetFile.name}.tmp.${System.currentTimeMillis()}")
         try {
             conn.connect()
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
@@ -148,20 +149,34 @@ object UpdateDownloader {
     }
 
     /**
-     * 清理更新目录下遗留的旧安装包。新版本启动时调用即可实现"安装完自动清理"。
+     * 清理更新目录下遗留的旧安装包。
+     * 只删除「版本早于当前运行版本」的安装包（即已安装成功的旧包）；
+     * 保留等于/新于当前版本的包——用户下载完未安装就退出再重进时，不会把待安装的新包误删。
+     * 无法解析版本的文件（下载中的临时文件等）视为旧包清理。
      */
     fun cleanupStale(context: Context) {
         try {
             val dir = RwmodPaths.updateDir
             if (!dir.exists()) return
+            val current = com.rwmodstudio.BuildConfig.VERSION_NAME
             dir.listFiles()?.forEach { file ->
                 if (file.isFile) {
-                    // 本次启动后调起安装时不会再读取旧包，直接清理
-                    file.delete()
+                    val apkVersion = apkVersionOf(file)
+                    // 版本解析失败 或 旧于当前版本 → 清理；否则（等于/新于当前）保留
+                    if (apkVersion == null || !UpdateChecker.isNewerThan(apkVersion, current) && apkVersion != current) {
+                        file.delete()
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "清理旧安装包失败", e)
         }
+    }
+
+    /** 从安装包文件名解析版本号（形如 铁锈工坊-1.3.6.apk），无法解析返回 null */
+    private fun apkVersionOf(file: File): String? {
+        val name = file.name.removeSuffix(".apk")
+        val prefix = "铁锈工坊-"
+        return if (name.startsWith(prefix)) name.removePrefix(prefix).takeIf { it.isNotBlank() } else null
     }
 }

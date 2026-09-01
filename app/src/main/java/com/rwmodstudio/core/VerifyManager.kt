@@ -3,6 +3,7 @@ package com.rwmodstudio.core
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.rwmodstudio.util.atomicWriteText
 import org.json.JSONObject
 
 /**
@@ -34,14 +35,14 @@ object VerifyManager {
     /** 各功能当前验证码（修改即触发对应配置重置） */
     const val BLOCKLIST_CODE = "384758"
     const val SECTION_FILTERS_CODE = "813546"
-    const val NATIVE_COMPLETIONS_CODE = "819411"
+    const val NATIVE_COMPLETIONS_CODE = "819413"
     const val EXTRA_COMPLETIONS_CODE = "530719"
-    const val CODE_REFERENCE_CODE = "720523"
+    const val CODE_REFERENCE_CODE = "720524"
     const val ONBOARDING_CODE = "294817"
     const val TRANSLATION_CACHE_CODE = "100001"
     const val COMPLETIONS_CODE = "100002"
     const val SETTINGS_CODE = "100003"
-    const val NATIVE_TRANSLATION_CODE = "100004"
+    const val NATIVE_TRANSLATION_CODE = "100107"
     const val EXTRA_TRANSLATION_CODE = "100005"
     const val RESOURCE_NAME_KEYS_CODE = "620411"
     const val COMPLETION_TYPES_CODE = "731827"
@@ -65,6 +66,12 @@ object VerifyManager {
     )
 
     private var migrated = false
+
+    // 读写串行锁：设置页重置 / 翻译引擎加载 / 缓存版本计算可能并发访问 verify.json，
+    // 不加锁时「整文件读→改→整文件写回」会互相覆盖丢 key，或读到写一半的坏文件（解析失败当默认值 → 数据被误重置）。
+    private val verifyLock = Any()
+    // 内存缓存：read 不再每次全文件 IO；write/writeAll 后同步更新，文件不存在时按默认值建缓存
+    private var cache: Map<String, String>? = null
 
     private val file get() = RwmodPaths.verifyFile
 
@@ -118,28 +125,18 @@ object VerifyManager {
     }
 
     /** 读取指定验证码，文件不存在时写入默认值 */
-    fun read(key: String): String {
-        ensureDefaults()
-        return try {
-            val json = JSONObject(file.readText(Charsets.UTF_8))
-            json.optString(key, defaults[key] ?: "")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to read verify code $key", e)
-            defaults[key] ?: ""
-        }
+    fun read(key: String): String = synchronized(verifyLock) {
+        ensureDefaultsLocked()
+        loadCacheLocked()[key] ?: defaults[key] ?: ""
     }
 
     /** 写入指定验证码 */
-    fun write(key: String, code: String) {
-        ensureDefaults()
-        try {
-            val json = JSONObject(file.readText(Charsets.UTF_8))
-            json.put(key, code)
-            file.parentFile?.mkdirs()
-            file.writeText(json.toString(2), Charsets.UTF_8)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write verify code $key", e)
-        }
+    fun write(key: String, code: String) = synchronized(verifyLock) {
+        ensureDefaultsLocked()
+        // 必须先加载缓存再改：cache 未建立时若基于空 map 写回，会清掉文件中其它已存在的 key
+        val map = loadCacheLocked().toMutableMap()
+        map[key] = code
+        writeAllLocked(map)
     }
 
     /** 重置所有验证码为代码默认值 */
@@ -150,20 +147,42 @@ object VerifyManager {
     /** 检查验证码是否匹配代码默认值 */
     fun isValid(key: String, expected: String): Boolean = read(key) == expected
 
-    private fun ensureDefaults() {
+    private fun ensureDefaults() = synchronized(verifyLock) { ensureDefaultsLocked() }
+
+    private fun ensureDefaultsLocked() {
         if (!file.exists()) {
-            writeAll(defaults)
+            writeAllLocked(defaults)
         }
     }
 
-    private fun writeAll(map: Map<String, String>) {
+    /** 加载内存缓存（锁内调用）：缓存未建立时读文件，避免 write 基于空 map 丢其它 key */
+    private fun loadCacheLocked(): Map<String, String> {
+        cache?.let { return it }
+        val loaded = try {
+            val json = JSONObject(file.readText(Charsets.UTF_8))
+            defaults.keys.mapNotNull { k ->
+                if (json.has(k)) k to json.getString(k) else null
+            }.toMap()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read verify codes", e)
+            emptyMap()
+        }
+        cache = loaded
+        return loaded
+    }
+
+    private fun writeAll(map: Map<String, String>) = synchronized(verifyLock) { writeAllLocked(map) }
+
+    private fun writeAllLocked(map: Map<String, String>) {
         try {
             file.parentFile?.mkdirs()
             val json = JSONObject()
             for ((k, v) in map) {
                 json.put(k, v)
             }
-            file.writeText(json.toString(2), Charsets.UTF_8)
+            // 原子写 + 成功后更新内存缓存，避免半写文件被误读为默认值
+            file.atomicWriteText(json.toString(2), Charsets.UTF_8)
+            cache = map
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write verify codes", e)
         }

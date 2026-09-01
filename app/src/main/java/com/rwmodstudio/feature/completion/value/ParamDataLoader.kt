@@ -23,6 +23,9 @@ object ParamDataLoader {
         val zh: String = "",
         val type: String = "",
         val values: List<String> = emptyList(),
+        // 枚举/关系参数对应的 value_desc.json 值说明文件名（如 addWaypoint_type/relation），
+        // 非空时参数值补全按 data.value.<valueFile>.<英文值> 查中文说明。
+        val valueFile: String = "",
         // 数值型参数是否接受逻辑表达式（坐标/角度参数如 创建标记 的 x/y/height/dir、
         // 获取相对/绝对偏移 的 x/y/height/角度偏移）；纯数值参数（范围内/超过/少于/等于/几秒内/几秒后）缺省 false。
         val expression: Boolean = false

@@ -7,6 +7,7 @@ import com.rwmodstudio.core.SettingsManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 翻译屏蔽词配置
@@ -72,13 +73,7 @@ data class TranslationBlocklist(
             "onShoot_playAnimation",
             "displayText_zh",
             "text_zh",
-            // 中文 key
-            "复制与",
-            "描述",
-            "界面显示名称",
-            "界面显示描述",
-            "别名",
-            "覆盖单位",
+            // 中文 key（无英文对应项，保留；有英文对应项的去重后仅保留英文）
             "添加指定标签的随机单位",
             "添加路径点失败触发",
             "添加路径点匹配触发",
@@ -89,24 +84,8 @@ data class TranslationBlocklist(
             "转换成",
             "图标",
             "产生效果",
-            "也添加进队列",
-            "也执行动作",
-            "只攻击带特定标签单位",
-            "添加全局标签",
-            "移除全局标签",
-            "拦截抛射体需有标签",
-            "带标签发送消息",
-            "不攻击带特定标签单位",
-            "有此标签才作为采集者",
-            "重新瞄准在飞行时针对标签",
-            "仅允许回收特定标签单位",
-            "仅允许维修特定标签单位",
-            "仅允许回收特定标签资源",
-            "从载具删除带标签单位",
-            "像用于此标签的单位",
             "临时标签删除",
             "临时标签添加",
-            "被运输单位需要标签",
             "仅许带此标签单位攻击"
         )
 
@@ -148,7 +127,7 @@ data class TranslationBlocklist(
                 }
                 TranslationBlocklist(
                     enabled = enabled,
-                    keys = keys,
+                    keys = deduplicateKeys(keys),
                     blockVariables = json.optBoolean("blockVariables", false),
                     blockAtTokens = json.optBoolean("blockAtTokens", true),
                     blockFileNames = json.optBoolean("blockFileNames", true),
@@ -159,6 +138,20 @@ data class TranslationBlocklist(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load blocklist, using default", e)
                 TranslationBlocklist()
+            }
+        }
+
+        /**
+         * 屏蔽词去重：保留英文、去掉其对应中文重复项（如 别名 与 altNames 同时存在时仅保留 altNames）。
+         * 依据翻译库的中→英映射判断；翻译库未加载时 getTranslationBack 返回原值，不会误删。
+         */
+        private fun deduplicateKeys(keys: List<String>): List<String> {
+            if (keys.size < 2) return keys
+            val dict = TranslationEngine.getInstance().getTranslationDict()
+            val keySet = keys.toSet()
+            return keys.filter { key ->
+                val en = dict.getTranslationBack(key)
+                !(en != key && en in keySet)
             }
         }
 
@@ -179,7 +172,7 @@ data class TranslationBlocklist(
                     put("forcePercentVariables", blocklist.forcePercentVariables)
                     put("verifyCode", DEFAULT_VERIFY_CODE)
                 }
-                file.writeText(json.toString(2), Charsets.UTF_8)
+                file.atomicWriteText(json.toString(2), Charsets.UTF_8)
                 SettingsManager.writeVerifyCode(SettingsManager.VERIFY_BLOCKLIST, DEFAULT_VERIFY_CODE)
                 true
             } catch (e: Exception) {

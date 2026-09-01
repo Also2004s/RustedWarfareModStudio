@@ -54,10 +54,10 @@ fun ColorWheelHSV(
     showHexInput: Boolean = true
 ) {
     val initial = fromRgb(initialColor)
-    var hue by remember(initialColor) { mutableFloatStateOf(initial.h) }      // 0..360
-    var sat by remember(initialColor) { mutableFloatStateOf(initial.s) }      // 0..1
-    var value by remember(initialColor) { mutableFloatStateOf(initial.v) }    // 0..1
-    var alpha by remember(initialColor) { mutableIntStateOf(initial.a) }      // 0..255
+    var hue by remember { mutableFloatStateOf(initial.h) }      // 0..360
+    var sat by remember { mutableFloatStateOf(initial.s) }      // 0..1
+    var value by remember { mutableFloatStateOf(initial.v) }    // 0..1
+    var alpha by remember { mutableIntStateOf(initial.a) }      // 0..255
 
     val currentColor = remember(hue, sat, value, alpha) {
         android.graphics.Color.HSVToColor(alpha, floatArrayOf(hue, sat, value))
@@ -70,11 +70,29 @@ fun ColorWheelHSV(
 
     // HEX 输入框聚焦时，文本只由用户输入驱动，避免颜色回写覆盖导致焦点丢失、输入法被收起
     var hexFocused by remember { mutableStateOf(false) }
-    var hexText by remember(initialColor) { mutableStateOf(colorHex(currentColor)) }
+    var hexText by remember { mutableStateOf(colorHex(currentColor)) }
 
+    // 记录最近一次对外输出的颜色，用于区分「外部切换 initialColor」与「调用方把自身输出回写」。
+    // 回写时 initialColor == lastEmitted，必须跳过重置，否则会丢弃正在拖拽的状态、中断手势。
+    var lastEmitted by remember { mutableStateOf(colorHex(currentColor)) }
+
+    // 仅当 initialColor 是外部变化（切换分类等）且非自身回写时，才重新装载 HSV 与 hexText
+    LaunchedEffect(initialColor) {
+        if (initialColor != lastEmitted) {
+            val e = fromRgb(initialColor)
+            hue = e.h; sat = e.s; value = e.v; alpha = e.a
+            val hex = colorHex(android.graphics.Color.HSVToColor(e.a, floatArrayOf(e.h, e.s, e.v)))
+            if (!hexFocused) hexText = hex
+            lastEmitted = hex
+        }
+    }
+
+    // 颜色变化时同步 hexText（非聚焦）并通知外部，同时记录 lastEmitted 以识别后续回写
     LaunchedEffect(currentColor) {
-        if (!hexFocused) hexText = colorHex(currentColor)
-        onColorChanged(colorHex(currentColor))
+        val hex = colorHex(currentColor)
+        if (!hexFocused) hexText = hex
+        lastEmitted = hex
+        onColorChanged(hex)
     }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {

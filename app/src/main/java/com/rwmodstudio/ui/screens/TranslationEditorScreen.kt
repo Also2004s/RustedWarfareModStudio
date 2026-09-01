@@ -41,6 +41,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.rwmodstudio.util.atomicWriteText
 
 private const val TAG = "TranslationEditorScreen"
 
@@ -590,9 +591,9 @@ fun saveDedupWords(words: Set<String>) {
         file.parentFile?.mkdirs()
         // 先清空再保存
         if (words.isEmpty()) {
-            file.writeText("", Charsets.UTF_8)
+            file.atomicWriteText("", Charsets.UTF_8)
         } else {
-            file.writeText(words.joinToString("\n"), Charsets.UTF_8)
+            file.atomicWriteText(words.joinToString("\n"), Charsets.UTF_8)
         }
     } catch (e: Exception) {
         Log.e(TAG, "Failed to save dedup words", e)

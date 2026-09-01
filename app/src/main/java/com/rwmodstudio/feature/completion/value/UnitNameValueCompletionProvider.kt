@@ -1,8 +1,38 @@
 package com.rwmodstudio.feature.completion.value
 
+import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.completionMatchLevel
+
+/**
+ * 把核心节建造速度原始值格式化为可读时间。
+ * 纯数字按「秒 = 1 ÷ (建造速度 × 60)」换算为秒并加 S 后缀，秒数保留 1 位小数（截断而非四舍五入，
+ * 与游戏显示口径一致：0.0011 → 15.1515…S 截断为 15.1S）；
+ * 已是带单位/其他格式（如 3s）或非正数时原样返回，不做换算。
+ */
+internal fun formatBuildSpeed(raw: String): String {
+    val v = raw.trim().toDoubleOrNull() ?: return raw
+    if (v <= 0.0) return raw
+    val seconds = 1.0 / (v * 60.0)
+    val truncated = Math.floor(seconds * 10.0) / 10.0
+    return String.format("%.1fS", truncated)
+}
+
+/**
+ * 由单位 [core] 建造信息生成右侧补全详情。
+ * 精简格式：建造速度换算秒数 + 价格，用「｜」拼接（如 15.1S｜500）。
+ * 价格为 0 或无任何可用信息时回退 [fallback]（如「单位名」）。
+ */
+internal fun unitBuildDetail(info: ProjectTagScanner.UnitBuildInfo?, fallback: String): String {
+    if (info == null) return fallback
+    // 价格为 0 视为无有效建造信息（免费/装饰单位），只显示单位名
+    if (info.price.trim().toDoubleOrNull() == 0.0) return fallback
+    val parts = mutableListOf<String>()
+    if (info.buildSpeed.isNotBlank()) parts.add(formatBuildSpeed(info.buildSpeed))
+    if (info.price.isNotBlank()) parts.add(info.price)
+    return if (parts.isEmpty()) fallback else parts.joinToString("｜")
+}
 
 /**
  * 单位名值补全。
@@ -57,7 +87,9 @@ class UnitNameValueCompletionProvider : BaseValueCompletionProvider() {
             .map { name ->
                 createValueItem(
                     label = name,
-                    detail = "单位名",
+                    // 项目单位详情：核心节建造信息（建造速度换算为秒 + 价格）；
+                    // 无数据时回退「单位名」
+                    detail = unitBuildDetail(request.unitData[name], "单位名"),
                     insertText = name,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "unitref"

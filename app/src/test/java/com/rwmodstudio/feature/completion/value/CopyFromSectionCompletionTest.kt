@@ -71,9 +71,10 @@ class CopyFromSectionCompletionTest {
 
     // ===== buildCopyFromSectionNames =====
 
-    // 数据源为继承链节名（chainSectionNames），与 内存/资源 一致只查继承链
-    private fun build(useChinese: Boolean, currentBase: String? = null) = buildCopyFromSectionNames(
-        useChinesePrefix = useChinese,
+    // 数据源为继承链节名（chainSectionNames），与 内存/资源 一致只查继承链；
+    // 节基名前缀一律英文（INI 语法固定词，不硬编码中文），withBasePrefix 决定是否带基名
+    private fun build(withBasePrefix: Boolean, currentBase: String? = null) = buildCopyFromSectionNames(
+        withBasePrefix = withBasePrefix,
         currentBase = currentBase,
         chainSectionNames = mapOf(
             "turret" to setOf("主炮"),
@@ -87,48 +88,50 @@ class CopyFromSectionCompletionTest {
 
     @Test
     fun currentBaseHiddenActionOnlySuggestsHiddenAction() {
-        val names = build(useChinese = true, currentBase = "hiddenaction")
-        assertEquals(listOf("隐藏行动_开火"), names, "当前为隐藏行动时只给 隐藏行动_yyy")
+        val names = build(withBasePrefix = true, currentBase = "hiddenaction")
+        assertEquals(listOf("hiddenAction_开火"), names, "当前为隐藏行动时只给 hiddenAction_yyy")
     }
 
     @Test
     fun currentBaseActionOnlySuggestsAction() {
-        val names = build(useChinese = true, currentBase = "action")
-        assertEquals(listOf("行动_巡逻"), names, "当前为行动时只给 行动_yyy，不含 隐藏行动_开火")
+        val names = build(withBasePrefix = true, currentBase = "action")
+        assertEquals(listOf("action_巡逻"), names, "当前为行动时只给 action_yyy，不含 hiddenAction_开火")
     }
 
     @Test
     fun currentBaseTurretOnlySuggestsTurret() {
-        assertEquals(listOf("炮塔_主炮"), build(useChinese = true, currentBase = "turret"))
+        assertEquals(listOf("turret_主炮"), build(withBasePrefix = true, currentBase = "turret"))
     }
 
     @Test
     fun nullBaseFallsBackToAllNamedSections() {
-        val names = build(useChinese = true, currentBase = null)
+        val names = build(withBasePrefix = true, currentBase = null)
         assertEquals(
-            listOf("抛射体_1", "抛射体_2", "效果_爆炸", "炮塔_主炮", "行动_巡逻", "附属_炮塔座", "隐藏行动_开火"),
+            listOf("action_巡逻", "attachment_炮塔座", "effect_爆炸", "hiddenAction_开火", "projectile_1", "projectile_2", "turret_主炮"),
             names,
-            "非命名节回退全部命名节，排序去重"
+            "非命名节回退全部命名节，基名英文，排序去重"
         )
     }
 
     @Test
-    fun englishPrefixUsedWhenNotChinese() {
-        val names = build(useChinese = false, currentBase = null)
+    fun noBasePrefixWhenCopyFrom() {
+        // 复制与(copyFrom)只补同类节的节后缀名，不带基名前缀
+        assertEquals(listOf("主炮"), build(withBasePrefix = false, currentBase = "turret"), "复制与在当前炮塔节只给后缀名")
+        val names = build(withBasePrefix = false, currentBase = null)
         assertEquals(
-            listOf("action_巡逻", "attachment_炮塔座", "effect_爆炸", "hiddenAction_开火", "projectile_1", "projectile_2", "turret_主炮"),
+            listOf("1", "2", "主炮", "巡逻", "开火", "炮塔座", "爆炸"),
             names,
-            "英文视图用英文基名"
+            "复制与回退全部命名节时只给后缀名，排序去重"
         )
     }
 
     @Test
     fun chainOnlySourcingExcludesMissingBases() {
         // 继承链里没有 动画/贴花/可建造 节 → 不出现对应基名
-        val names = build(useChinese = true, currentBase = null)
-        assertTrue(names.none { it.startsWith("动画_") }, "链内无动画节不应提示")
-        assertTrue(names.none { it.startsWith("贴花_") }, "链内无贴花节不应提示")
-        assertTrue(names.none { it.startsWith("可建造_") }, "链内无可建造节不应提示")
-        assertTrue("附属_炮塔座" in names, "链内附属节名应提示")
+        val names = build(withBasePrefix = true, currentBase = null)
+        assertTrue(names.none { it.startsWith("animation_") }, "链内无动画节不应提示")
+        assertTrue(names.none { it.startsWith("decal_") }, "链内无贴花节不应提示")
+        assertTrue(names.none { it.startsWith("canBuild_") }, "链内无可建造节不应提示")
+        assertTrue("attachment_炮塔座" in names, "链内附属节名应提示")
     }
 }

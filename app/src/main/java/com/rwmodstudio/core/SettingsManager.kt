@@ -2,10 +2,22 @@ package com.rwmodstudio.core
 
 import android.content.Context
 import android.util.Log
+import com.rwmodstudio.util.atomicWriteText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 object SettingsManager {
 
     private const val TAG = "SettingsManager"
+
+    /** 高亮预设列表的 JSON 编解码（宽松：未知字段忽略，损坏时回退空表）。 */
+    private val presetsJson = Json { ignoreUnknownKeys = true }
+
+    /** AI API Key 默认值（首次种子，来自 local.properties 注入的 BuildConfig，避免提交源码泄露） */
+    private val defaultAiApiKey: String
+        get() = com.rwmodstudio.BuildConfig.DEFAULT_AI_API_KEY
 
     val FONT_FAMILIES = setOf("system", "system_mono", "jetbrains_mono", "lxgw_wenkai_regular")
 
@@ -18,7 +30,12 @@ object SettingsManager {
         RwmodPaths.rwmodDir
         VerifyManager.init(context)
         settings = FileSettings.create(context)
-        migrateFileStorage(context)
+        // 文件迁移移入后台 IO：老用户升级时旧文件散落在 RWmod 根/Android/RWmod，
+        // 同步递归复制/删除大量文件会阻塞启动主线程（ANR/白屏风险）。
+        // 迁移只影响「按路径惰性读取」的文件，放到后台完成后行为一致。
+        com.rwmodstudio.RwModApplication.getInstance().applicationScope.launch(Dispatchers.IO) {
+            migrateFileStorage(context)
+        }
         migrateDefaults()
         initLocalFiles()
         pruneRecentFiles()
@@ -207,6 +224,14 @@ object SettingsManager {
                     .apply()
                 Log.d(TAG, "Migrated auto_space to false (one-time)")
             }
+            // 多线程旧版默认 false；本次一次性强制迁移为 true（多线程默认打开）。
+            if (!settings.contains("dev_parallel_preheat_migration_v1")) {
+                settings.edit()
+                    .putBoolean("dev_parallel_preheat", true)
+                    .putBoolean("dev_parallel_preheat_migration_v1", true)
+                    .apply()
+                Log.d(TAG, "Migrated dev_parallel_preheat to true (one-time)")
+            }
         } catch (e: Exception) { Log.w(TAG, "设置/迁移操作失败", e) }
     }
 
@@ -221,7 +246,7 @@ object SettingsManager {
     private fun initLocalFiles() {
         try {
             val customFile = RwmodPaths.customCompletionsFile
-            if (!customFile.exists()) customFile.writeText("{\"native\":[],\"user\":[]}")
+            if (!customFile.exists()) customFile.atomicWriteText("{\"native\":[],\"user\":[]}")
         } catch (e: Exception) {
             Log.e(TAG, "initLocalFiles failed", e)
         }
@@ -358,9 +383,30 @@ object SettingsManager {
     var highlightTheme: String
         get() {
             val raw = settings.getString("highlight_theme", "dark") ?: "dark"
-            return if (raw in setOf("dark", "light", "pure", "custom")) raw else "dark"
+            // 内置主题名直接通过；preset: 前缀需校验预设仍存在（覆盖重启后指向已删预设），否则回退 dark
+            if (raw in setOf("dark", "light", "pure", "custom")) return raw
+            if (raw.startsWith(HighlightThemeManager.PRESET_KEY_PREFIX) &&
+                highlightPresets.any { HighlightThemeManager.PRESET_KEY_PREFIX + it.id == raw }
+            ) {
+                return raw
+            }
+            return "dark"
         }
         set(value) = settings.edit().putString("highlight_theme", value).apply()
+
+    /** 用户高亮预设列表（上限见 [HighlightThemeManager.MAX_PRESETS]，写入时 take 双保险）。 */
+    var highlightPresets: List<HighlightPreset>
+        get() {
+            val raw = settings.getString("highlight_presets", null) ?: return emptyList()
+            return try {
+                presetsJson.decodeFromString<List<HighlightPreset>>(raw)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        set(value) = settings.edit()
+            .putString("highlight_presets", presetsJson.encodeToString(value.take(HighlightThemeManager.MAX_PRESETS)))
+            .apply()
 
     var darkTokenColors: String
         get() {
@@ -592,7 +638,7 @@ object SettingsManager {
                     put(section, org.json.JSONArray(cats.toList()))
                 }
             }
-            sectionFiltersFile.writeText(json.toString(2), Charsets.UTF_8)
+            sectionFiltersFile.atomicWriteText(json.toString(2), Charsets.UTF_8)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save section filters", e)
         }
@@ -760,8 +806,16 @@ object SettingsManager {
         get() = settings.getBoolean("dev_section_parsing", true)
         set(value) = settings.edit().putBoolean("dev_section_parsing", value).apply()
     var devTranslationEngine: Boolean
-        get() = settings.getBoolean("dev_translation_engine", true)
+        get() = if (::settings.isInitialized) settings.getBoolean("dev_translation_engine", true) else true
         set(value) = settings.edit().putBoolean("dev_translation_engine", value).apply()
+    /** 完全匹配翻译（针对自定义补全表）：无符号分割的英文/中文内容视为一个整体，仅整段命中翻译库才翻译（如 priceCredits 不再拆译） */
+    var devFullMatchTranslation: Boolean
+        get() = if (::settings.isInitialized) settings.getBoolean("dev_full_match_translation", true) else true
+        set(value) = settings.edit().putBoolean("dev_full_match_translation", value).apply()
+    /** 多线程：并行处理缓存预热/项目扫描/搜索/版本对比（默认开启） */
+    var devParallelPreheat: Boolean
+        get() = if (::settings.isInitialized) settings.getBoolean("dev_parallel_preheat", true) else true
+        set(value) = settings.edit().putBoolean("dev_parallel_preheat", value).apply()
     var devDebugTaskProgress: Boolean
         get() = settings.getBoolean("dev_debug_task_progress", true)
         set(value) = settings.edit().putBoolean("dev_debug_task_progress", value).apply()
@@ -810,6 +864,100 @@ object SettingsManager {
     var devRecentFiles: Boolean
         get() = settings.getBoolean("dev_recent_files", true)
         set(value) = settings.edit().putBoolean("dev_recent_files", value).apply()
+
+    // === AI 助手（仅用于版本对比生成更新报告） ===
+    /** AI 服务地址（OpenAI 兼容，末尾不含 /chat/completions） */
+    var aiBaseUrl: String
+        get() = settings.getString("ai_base_url", "https://token.sensenova.cn/v1") ?: "https://token.sensenova.cn/v1"
+        set(value) = settings.edit().putString("ai_base_url", value.trimEnd('/')).apply()
+    /** 内置默认密钥锁定的模型（仅自定义密钥后可自由配置模型） */
+    var aiModel: String
+        get() {
+            val stored = settings.getString("ai_model", "sensenova-6.8-flash-lite") ?: "sensenova-6.8-flash-lite"
+            // 使用内置默认密钥时强制锁定默认模型，即使直接改配置文件也无效
+            return if (!isAiApiKeyUserSet()) "sensenova-6.8-flash-lite" else stored
+        }
+        set(value) {
+            // 使用内置默认密钥时忽略模型修改，防止绕过 UI 改配置
+            if (!isAiApiKeyUserSet()) return
+            settings.edit().putString("ai_model", value.trim()).apply()
+        }
+
+    /**
+     * AI API Key（密文存储于 settings.json，运行时解密；旧版明文 ai_api_key 自动迁移）。
+     * Keystore 密钥丢失/数据损坏时回退默认值并清缓存，避免崩溃。
+     */
+    var aiApiKey: String
+        get() {
+            val enc = settings.getString("ai_api_key_enc", null)
+            if (!enc.isNullOrBlank()) {
+                return try {
+                    com.rwmodstudio.util.CryptoUtil.decrypt(enc)
+                } catch (e: Exception) {
+                    settings.edit().remove("ai_api_key_enc").apply()
+                    defaultAiApiKey
+                }
+            }
+            // 迁移旧版明文存储（未发布版兜底）
+            val legacyPlain = settings.getString("ai_api_key", null)
+            if (!legacyPlain.isNullOrBlank()) {
+                val newEnc = try { com.rwmodstudio.util.CryptoUtil.encrypt(legacyPlain) } catch (e: Exception) { null }
+                if (newEnc != null) {
+                    settings.edit().putString("ai_api_key_enc", newEnc).remove("ai_api_key").apply()
+                }
+                return legacyPlain
+            }
+            return defaultAiApiKey
+        }
+        set(value) {
+            val enc = com.rwmodstudio.util.CryptoUtil.encrypt(value.trim())
+            settings.edit().putString("ai_api_key_enc", enc).apply()
+        }
+
+    /**
+     * 用户是否已自定义 API Key。
+     * false=当前使用内置默认密钥（不可查看、不在 UI 中回显）；true=用户已设置自己的 Key。
+     */
+    fun isAiApiKeyUserSet(): Boolean =
+        !settings.getString("ai_api_key_enc", null).isNullOrBlank() ||
+            !settings.getString("ai_api_key", null).isNullOrBlank()
+
+    /** 清除用户自定义 API Key，回退使用内置默认密钥 */
+    fun clearAiApiKey() {
+        settings.edit().remove("ai_api_key_enc").remove("ai_api_key").apply()
+    }
+
+    // === AI 辅助补全（开发者模式开关，编辑器内按需调用） ===
+    var devAiCompletion: Boolean
+        get() = settings.getBoolean("dev_ai_completion", false)
+        set(value) = settings.edit().putBoolean("dev_ai_completion", value).apply()
+
+    // === AI 建议加速（流式 / 预取 / 本地兜底） ===
+
+    /** 流式输出：边生成边显示。模型不支持流式时自动降级为非流式。 */
+    var aiStreaming: Boolean
+        get() = settings.getBoolean("ai_streaming", true)
+        set(value) = settings.edit().putBoolean("ai_streaming", value).apply()
+
+    /** 本地规则兜底：点击瞬间先用本地规则出内容，不等网络。 */
+    var aiLocalFallback: Boolean
+        get() = settings.getBoolean("ai_local_fallback", true)
+        set(value) = settings.edit().putBoolean("ai_local_fallback", value).apply()
+
+    /** 空闲预取：输入停顿后后台静默请求并缓存，点击时命中即 0 延迟。 */
+    var aiPrefetchEnabled: Boolean
+        get() = settings.getBoolean("ai_prefetch_enabled", true)
+        set(value) = settings.edit().putBoolean("ai_prefetch_enabled", value).apply()
+
+    /** 预取最小间隔（毫秒）：距上次实际请求小于此值不发起，避免频繁烧 token。 */
+    var aiPrefetchMinIntervalMs: Long
+        get() = settings.getInt("ai_prefetch_min_interval", 30_000).toLong().coerceIn(3_000L, 300_000L)
+        set(value) = settings.edit().putInt("ai_prefetch_min_interval", value.coerceIn(3_000L, 300_000L).toInt()).apply()
+
+    /** 输出 token 上限：限制建议长度以缩短生成时间；<=0 表示不限制（由模型默认决定）。 */
+    var aiMaxOutputTokens: Int
+        get() = settings.getInt("ai_max_output_tokens", 512).coerceIn(0, 4096)
+        set(value) = settings.edit().putInt("ai_max_output_tokens", value.coerceIn(0, 4096)).apply()
 
     // === 外部文件导入目录 ===
     var replayImportDir: String

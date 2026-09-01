@@ -108,6 +108,33 @@ class ProjectTagScannerScanTest {
     }
 
     @Test
+    fun scanCollectsUnitBuildInfo() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "rwmod_scan_ub_${System.nanoTime()}")
+        dir.mkdirs()
+        try {
+            // a.ini：[core] 后接其他节 → 节尾冲刷 unitData
+            File(dir, "a.ini").writeText(
+                "[core]\nname: Tank\nprice: 500\nbuildSpeed: 0.0011\n" +
+                    "[attack]\nrange: 100\n"
+            )
+            // b.ini：[core] 在文件尾 → 文件尾冲刷；中文键 + 行内注释
+            File(dir, "b.ini").writeText(
+                "[core]\nname: Tower\n价格: 300 # 注释\n建造速度: 0.002\n"
+            )
+            val info = ProjectTagScanner.scan(dir)
+            val tank = info.unitData["Tank"]
+            assertEquals("500", tank?.price, "Tank 价格应从核心节收集")
+            assertEquals("0.0011", tank?.buildSpeed, "Tank 建造速度应从核心节收集")
+            val tower = info.unitData["Tower"]
+            assertEquals("300", tower?.price, "Tower 价格应支持中文键并去除行内注释")
+            assertEquals("0.002", tower?.buildSpeed, "Tower 建造速度应支持中文键")
+            assertTrue("Tank" in info.unitNames && "Tower" in info.unitNames, "单位名仍应收集")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun scanCollectsGlobalAndSectionVariables() {
         val dir = File(System.getProperty("java.io.tmpdir"), "rwmod_scan_var_${System.nanoTime()}")
         dir.mkdirs()

@@ -46,7 +46,10 @@ object ValueDataLoader {
         fileName: String,
         translationDict: TranslationDict? = null
     ): ValueDataFile {
-        val useTranslation = translationDict?.isLoaded == true
+        // 语言总闸：仅当翻译引擎「开关打开且字典已加载」时才做英→中翻译。
+        // 只判 isLoaded 会漏：用户关掉开关但字典仍存活时，value 补全仍会残留中文。
+        val useTranslation = translationDict?.isLoaded == true &&
+            com.rwmodstudio.core.SettingsManager.devTranslationEngine
         val cacheKey = if (useTranslation) "$fileName:zh" else fileName
         val cached = cache[cacheKey]
         if (cached != null) return cached

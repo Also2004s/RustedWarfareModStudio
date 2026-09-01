@@ -25,9 +25,14 @@ android {
         minSdk = 26
         targetSdk = 34
         // 版本号：每次发布新版本必须 +1，且只能增加不能减少
-        versionCode = 26
+        versionCode = 27
         // 版本名称：对外展示给用户看的版本号
-        versionName = "1.3.5"
+        versionName = "1.3.6"
+
+        // 默认 AI API Key：从 local.properties 注入（不提交源码，防公开仓库泄露密钥）
+        // 未配置时为空串，用户需在开发者模式自行填写
+        val defaultAiApiKey = localProperties.getProperty("DEFAULT_AI_API_KEY") ?: ""
+        buildConfigField("String", "DEFAULT_AI_API_KEY", "\"$defaultAiApiKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

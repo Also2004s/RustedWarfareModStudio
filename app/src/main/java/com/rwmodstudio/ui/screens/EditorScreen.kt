@@ -61,15 +61,20 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.rwmodstudio.core.InheritanceResolver
+import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.ProjectTagScanner
+import com.rwmodstudio.core.RecentInputTracker
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.core.ThemeState
+import com.rwmodstudio.util.atomicWriteText
 import com.rwmodstudio.editor.CURSOR_MARKER
 import com.rwmodstudio.editor.EditorToolbarAction
+import com.rwmodstudio.editor.EditorViewState
+import com.rwmodstudio.editor.EditorWorkspaceEntry
 import com.rwmodstudio.editor.ReadOnlyCodeEditor
 import com.rwmodstudio.editor.SoraCodeEditor
 import com.rwmodstudio.editor.centerCursorOnVisible
@@ -88,8 +93,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
@@ -143,18 +149,39 @@ private fun mapEnglishColumnsToChineseImpl(
 @Composable
 fun EditorScreen(
     fileName: String, filePath: String, autoWrap: Boolean = true, smartWrap: Boolean = true,
+    modifier: Modifier = Modifier,
     externalInsertText: String = "",
     externalInsertTick: Int = 0,
     externalReplaceText: String = "",
     externalReplaceTick: Int = 0,
-    cachedText: String = "",
-    onBack: () -> Unit, onSwitchFile: ((String) -> Unit)? = null, projectRoot: String = "",
-    saveAndExit: Boolean = false, onSaveAndExitDone: () -> Unit = {},
+    // 搜索替换写盘后刷新当前文件：该 tick 变化时强制重新从盘加载最新内容（配合工作区缓存失效）
+    externalModifyTick: Int = 0,
+    // 搜索替换写盘前的保存请求：变化时把未保存缓冲落盘并回报结果，供搜索替换等待
+    externalSaveRequest: Int = 0,
+    onExternalSaveDone: ((Boolean) -> Unit)? = null,
+    onBack: (discard: Boolean, saveAll: Boolean) -> Unit, onSwitchFile: ((String) -> Unit)? = null, projectRoot: String = "",
+    // 多实例叠放：本实例是否为当前前台激活文件（隐藏实例不参与交互，仅占位保持存活）
+    active: Boolean = true,
+    // 工作区内全部存活实例的文件路径集合（每个文件一个存活 EditorScreen），顶部 tab 栏据此展示，
+    // 替代旧的「最近打开」全局列表——真正的缓存工作区 tab 只显示仍在内存中的文件。
+    openPaths: List<String> = emptyList(),
+    // 工作区缓存：该文件最近一次离开时的完整缓冲区状态（tab 切换恢复时直接还原，不再重读磁盘/重跑翻译）
+    workspaceEntry: EditorWorkspaceEntry? = null,
+    // 工作区内已有修改的文件路径集合（tab 切换时 onDispose 写入工作区），用于顶部 tab 栏未保存标记
+    modifiedPaths: Set<String> = emptySet(),
+    // 离开当前文件时上报其完整缓冲区状态，由宿主按文件路径缓存进工作区
+    onWorkspaceCache: ((EditorWorkspaceEntry) -> Unit)? = null,
+    // 实例销毁时若有未保存修改则直接落盘（宿主传 saveWorkspaceEntry），不依赖外部 delay 等待，
+    // 确保「逐出/返回目录」等销毁场景的数据安全。
+    onDisposeFlush: ((EditorWorkspaceEntry) -> Unit)? = null,
+    // 保存当前文件后，把工作区内其它有修改的文件一并保存
+    onSaveAllWorkspace: (suspend () -> Unit)? = null,
+    saveAndExit: Boolean = false, onSaveAndExitDone: (Boolean) -> Unit = {},
     onNavigate: (Screen) -> Unit = {},
     onOpenCoordVisual: ((String) -> Unit)? = null,
-    onTextCacheRequest: ((String) -> Unit)? = null,
     onTextChange: ((String) -> Unit)? = null,
     saveTrigger: Int = 0,
+    onSaveTriggerConsumed: () -> Unit = {},
     onShowRecent: (() -> Unit)? = null,
     jumpLine: Int = -1,
     jumpTick: Int = 0,
@@ -162,7 +189,16 @@ fun EditorScreen(
     jumpColumnEnd: Int = -1,
     onExternalInsertConsumed: () -> Unit = {},
     onExternalReplaceConsumed: () -> Unit = {},
-    onSaved: ((Boolean) -> Unit)? = null
+    onSaved: ((Boolean) -> Unit)? = null,
+    searchTrigger: Int = 0,
+    onModifiedChange: ((Boolean) -> Unit)? = null,
+    onSearchTriggerConsumed: () -> Unit = {},
+    bookmarkPanelOpen: Boolean = false,
+    onBookmarkPanelClose: () -> Unit = {},
+    backRequest: Int = 0,
+    onBackRequestConsumed: () -> Unit = {},
+    aiCompletionTrigger: Int = 0,
+    onAiCompletionTriggerConsumed: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -255,7 +291,14 @@ fun EditorScreen(
     var chineseText by remember(filePath) { mutableStateOf("") }
     var showChinese by remember(filePath) { mutableStateOf(true) }
     var switchingLanguage by remember { mutableStateOf(false) }
-    var contentLoaded by remember(filePath) { mutableStateOf(false) }
+    // 全局（不随 filePath 重置）：编辑器视图在 tab 切换时保持存活（最小化而非销毁重载）。
+    // 若随 filePath 重置，切换文件时这里会回到 false → SoraCodeEditor 离开组合 → 编辑器 View 被销毁重建，
+    // 重载后必然回到顶部、无法恢复视图状态。
+    var contentLoaded by remember { mutableStateOf(false) }
+    // 当前文件是否「加载中」（随 filePath 重置）。与 contentLoaded（View 是否已创建）分离：
+    // 切换文件时只置 loading、不销毁 View（contentLoaded 首次 true 后保持不变），
+    // 加载完成后 setText 新内容并重新渲染高亮；saveSync 靠 loading 判断「文件未就绪勿保存」。
+    var loading by remember(filePath) { mutableStateOf(false) }
     var isModified by remember(filePath) { mutableStateOf(false) }
     var isEnglish by remember(filePath) { mutableStateOf(false) }
     var currentSection by remember(filePath) { mutableStateOf<String?>(null) }
@@ -275,6 +318,16 @@ fun EditorScreen(
     var showInheritanceView by remember(filePath) { mutableStateOf(false) }
     var inheritanceText by remember { mutableStateOf("") }
     var showSearch by remember(filePath) { mutableStateOf(false) }
+    // AI 辅助建议：按需调用，弹卡展示结构化建议（插入/替换），可逐条应用或取消
+    var showAiCompletion by remember(filePath) { mutableStateOf(false) }
+    var aiCompletionLoading by remember(filePath) { mutableStateOf(false) }
+    var aiSuggestions by remember(filePath) { mutableStateOf<List<com.rwmodstudio.core.AiService.AiSuggestion>>(emptyList()) }
+    var aiCompletionError by remember(filePath) { mutableStateOf<String?>(null) }
+    var aiCompletionPhase by remember(filePath) { mutableStateOf("") }
+    // 当前展示的建议是否来自本地规则兜底（true=本地，AI 结果还没到）
+    var aiIsLocalFallback by remember(filePath) { mutableStateOf(false) }
+    // ghost 模式：已应用的条数（Tab/点击逐条接受，全部应用完自动收起）
+    var aiAppliedCount by remember(filePath) { mutableIntStateOf(0) }
     // 「方块+」折叠菜单：输入法关闭时显示，点击展开「更多」浮层
     var fabExpanded by remember(filePath) { mutableStateOf(false) }
     var fabShowColorPicker by remember { mutableStateOf(false) }
@@ -351,9 +404,58 @@ fun EditorScreen(
     val context = LocalContext.current
     var insertTextRequest by remember(filePath) { mutableStateOf("") }
     var insertTextTick by remember(filePath) { mutableIntStateOf(0) }
+    // AI 建议「替换」请求：first=目标文本，second=替换后文本；tick 触发，消费后置空
+    var aiReplaceRequest by remember(filePath) { mutableStateOf<Pair<String, String>?>(null) }
+    var aiReplaceTick by remember(filePath) { mutableIntStateOf(0) }
     var resetTextRequest by remember(filePath) { mutableStateOf<Pair<String, Int>?>(null) }
     var resetTextTick by remember(filePath) { mutableIntStateOf(0) }
-    var editorRef by remember(filePath) { mutableStateOf<CodeEditor?>(null) }
+    // 文件加载时待恢复的视图状态（来自工作区缓存 workspaceEntry.viewState），消费后置空，避免中英切换等复用
+    var pendingRestoreViewState by remember(filePath) { mutableStateOf<EditorViewState?>(null) }
+    // 编辑器引用：View 复用（切换文件不销毁 View），editor 对象保持不变，故不随 filePath 重置。
+    var editorRef by remember { mutableStateOf<CodeEditor?>(null) }
+    // 供离开文件时捕获视图状态：不随 filePath 重置。view 由 SoraCodeEditor 复用，
+    // onReady 同步刷新，onDispose 时仍指向离开前的编辑器，可读到真实光标/滚动。
+    val editorViewRef = remember { mutableStateOf<CodeEditor?>(null) }
+    // 实时同步的视图状态：光标/滚动变化时由 SoraCodeEditor 经 onViewStateChanged 更新（普通引用、不触发重组）。
+    // 单活跃实例下切文件会先销毁编辑器 View，onDispose 时读不到有效 View 状态，故切走时优先用这里的缓存值。
+    val liveViewState = remember { object { var state: EditorViewState? = null } }
+
+    // 捕获当前编辑器光标 + 视口滚动偏移（编辑器未就绪时返回 null）
+    fun captureViewState(): EditorViewState? {
+        val ed = editorViewRef.value ?: run {
+            Log.w(TAG, "VIEWSTATE capture FAILED editorViewRef=null")
+            return null
+        }
+        return try {
+            val st = EditorViewState(
+                cursorLine = ed.cursor.leftLine,
+                cursorColumn = ed.cursor.leftColumn,
+                scrollX = ed.getOffsetX(),
+                scrollY = ed.getOffsetY()
+            )
+            Log.d(TAG, "VIEWSTATE capture path=$filePath line=${st.cursorLine} col=${st.cursorColumn} scroll=(${st.scrollX},${st.scrollY}) maxY=${ed.getScrollMaxY()}")
+            st
+        } catch (e: Exception) {
+            Log.w(TAG, "captureViewState failed: ${e.message}")
+            null
+        }
+    }
+
+    // 构建当前文件的工作区缓存条目：显示内容取「最新编辑内容」，与 saveSync 保存口径一致，
+    // 避免直接缓存可能滞后于编辑的 chineseText/englishText 缓冲区。
+    fun buildWorkspaceEntry(): EditorWorkspaceEntry = EditorWorkspaceEntry(
+        path = filePath,
+        displayText = latestEditorText.ifEmpty { text },
+        englishText = englishText,
+        chineseText = chineseText,
+        isEnglish = isEnglish,
+        showChinese = showChinese,
+        isModified = isModified,
+        litLines = litLines,
+        lineOriginalTexts = lineOriginalTexts,
+        // 优先用实时同步的视图状态（View 销毁后仍有效）；未就绪时回退到现场读 View
+        viewState = liveViewState.state ?: captureViewState()
+    )
 
     // 外部触发插入（如调色盘颜色值）
     LaunchedEffect(externalInsertTick) {
@@ -373,6 +475,19 @@ fun EditorScreen(
             resetTextTick++
             resetTextRequest = externalReplaceText to resetTextTick
             onExternalReplaceConsumed()
+        }
+    }
+    // 外部触发保存后，将修改状态上报给宿主（顶部保存按钮据此亮起/熄灭，同撤销重做）
+    LaunchedEffect(filePath, isModified) {
+        onModifiedChange?.invoke(isModified)
+    }
+    // 顶部菜单栏「搜索」按钮触发：打开查找替换面板并收起折叠菜单；处理完后消费触发值，
+    // 避免重新进入文件时 EditorScreen 重建用非 0 触发值重复打开搜索。
+    LaunchedEffect(searchTrigger) {
+        if (searchTrigger > 0) {
+            if (fabExpanded) fabExpanded = false
+            showSearch = true
+            onSearchTriggerConsumed()
         }
     }
     // 从搜索/近期修改跳转：内容加载完成后定位到目标行，若带列范围则选中匹配区域
@@ -484,47 +599,79 @@ fun EditorScreen(
     fun showSaveToast(ok: Boolean) {
         Toast.makeText(ctx, if (ok) "已保存" else "保存失败", Toast.LENGTH_SHORT).show()
     }
-    suspend fun saveSync(caller: String = "unknown"): Boolean = withContext(Dispatchers.IO) {
-        if (!contentLoaded) {
-            Log.w(TAG, "[$caller] Skip save before content loaded: $filePath")
-            withContext(Dispatchers.Main) { onSaved?.invoke(true) }
-            return@withContext false
-        }
-        // 快照化目标路径与内容，避免重组过程中状态被覆盖导致串写
-        val targetPath = filePath
-        // 优先读取编辑器实际内容（onTextChange 同步维护），避免跨线程 runBlocking
-        val currentText = latestEditorText.ifEmpty { text }
-        val contentToSave = try {
-            if (isEnglish && showChinese) engine.translateToEnglish(currentText, autoSpace, litLines)
-            else currentText
-        } catch (e: Exception) {
-            Log.e(TAG, "[$caller] Failed to prepare content for $targetPath", e)
-            withContext(Dispatchers.Main) { showSaveToast(false); onSaved?.invoke(false) }
-            return@withContext false
-        }
-        try {
-            Log.d(TAG, "[$caller] Saving file=$targetPath length=${contentToSave.length}")
-            val targetFile = java.io.File(targetPath)
-            val beforeContent = if (targetFile.exists()) {
-                try { targetFile.readText(Charsets.UTF_8) } catch (_: Exception) { "" }
-            } else ""
-            targetFile.writeText(contentToSave, Charsets.UTF_8)
-            withContext(Dispatchers.Main) {
-                if (targetPath == filePath) {
-                    isModified = false
-                } else {
-                    Log.w(TAG, "[$caller] filePath changed during save: expected=$targetPath actual=$filePath")
-                }
-                showSaveToast(true)
-                onSaved?.invoke(true)
+    // 保存串行锁：所有 saveSync 触发点（点保存/ON_PAUSE/切走/退出确认）共用同一把锁，
+    // 避免并发保存读旧快照、isModified 误清。
+    val saveMutex = remember { Mutex() }
+    suspend fun saveSync(caller: String = "unknown", silent: Boolean = false): Boolean = saveMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (loading) {
+                Log.w(TAG, "[$caller] Skip save before content loaded: $filePath")
+                withContext(Dispatchers.Main) { onSaved?.invoke(true) }
+                return@withContext false
             }
-            SaveHistoryManager.record(ctx, targetPath, beforeContent, contentToSave)
-            Log.d(TAG, "[$caller] Saved successfully: $targetPath")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "[$caller] Failed to save $targetPath", e)
-            withContext(Dispatchers.Main) { showSaveToast(false); onSaved?.invoke(false) }
-            false
+            // 快照化目标路径与内容，避免重组过程中状态被覆盖导致串写
+            val targetPath = filePath
+            // 在保存锁内读取编辑器最新内容（onTextChange 同步维护），
+            // 保证并发保存时每个事务都基于此刻的最新快照，而不是锁外读到的旧值
+            val currentText = latestEditorText.ifEmpty { text }
+            val contentToSave = try {
+                if (isEnglish && showChinese) engine.translateToEnglish(currentText, autoSpace, litLines)
+                else currentText
+            } catch (e: Exception) {
+                Log.e(TAG, "[$caller] Failed to prepare content for $targetPath", e)
+                withContext(Dispatchers.Main) { if (!silent) showSaveToast(false); onSaved?.invoke(false) }
+                return@withContext false
+            }
+            val targetFile = java.io.File(targetPath)
+            // 父目录校验：目录被删/路径非法时提前失败，避免 tmp.writeText 抛 IOException 被误报为「保存失败」
+            if (targetFile.parentFile != null && !targetFile.parentFile.exists()) {
+                Log.w(TAG, "[$caller] Parent dir missing: $targetPath")
+                withContext(Dispatchers.Main) { if (!silent) showSaveToast(false); onSaved?.invoke(false) }
+                return@withContext false
+            }
+            // 空内容保护：磁盘文件非空时禁止空内容覆盖写盘，防止加载异常/竞态缓存导致的空白内容写坏文件
+            if (contentToSave.isEmpty() && targetFile.exists() && targetFile.length() > 0) {
+                Log.w(TAG, "[$caller] Refuse to save empty content over non-empty file: $targetPath")
+                withContext(Dispatchers.Main) {
+                    if (!silent) Toast.makeText(ctx, "内容为空，已取消保存（防止覆盖非空文件）", Toast.LENGTH_SHORT).show()
+                    onSaved?.invoke(false)
+                }
+                return@withContext false
+            }
+            try {
+                Log.d(TAG, "[$caller] Saving file=$targetPath length=${contentToSave.length}")
+                val beforeContent = if (targetFile.exists()) {
+                    try { targetFile.readText(Charsets.UTF_8) } catch (_: Exception) { "" }
+                } else ""
+                targetFile.atomicWriteText(contentToSave, Charsets.UTF_8)
+                SaveHistoryManager.record(ctx, targetPath, beforeContent, contentToSave)
+                Log.d(TAG, "[$caller] Saved successfully: $targetPath")
+                // 主线程同步工作区：captureViewState 读编辑器光标/滚动（View 状态）必须主线程，
+                // updateWorkspace 写 Compose state 也应在主线程。
+                withContext(Dispatchers.Main) {
+                    if (targetPath == filePath) {
+                        // 仅当编辑器当前内容仍等于刚写盘内容时才清 dirty；
+                        // 若写盘期间用户又编辑过，保留 isModified，避免误清导致新改动丢失
+                        val stillUnchanged = (latestEditorText.ifEmpty { text }) == currentText
+                        if (stillUnchanged) isModified = false
+                    } else {
+                        Log.w(TAG, "[$caller] filePath changed during save: expected=$targetPath actual=$filePath")
+                    }
+                    if (!silent) showSaveToast(true)
+                    onSaved?.invoke(true)
+                    // 保存成功：同步工作区（当前文件已落盘、改为未修改）
+                    onWorkspaceCache?.invoke(buildWorkspaceEntry())
+                    // 再把工作区内其它有修改的文件一并保存（内部自行切线程）。
+                    // 必须在本 Main 块内调用：onSaveAllWorkspace → flushInactiveInstances 会写 openPaths state，
+                    // 在 IO 线程调用会跨线程写 Compose state（确定性 bug）。
+                    onSaveAllWorkspace?.invoke()
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "[$caller] Failed to save $targetPath", e)
+                withContext(Dispatchers.Main) { if (!silent) showSaveToast(false); onSaved?.invoke(false) }
+                false
+            }
         }
     }
     fun copyToClip(l: String, v: String) { clipboard.setPrimaryClip(ClipData.newPlainText(l, v)) }
@@ -538,6 +685,217 @@ fun EditorScreen(
             } catch (e: Exception) {
                 Log.e(TAG, "Searcher operation failed", e)
             }
+        }
+    }
+
+    /**
+     * 构建 AI 建议请求上下文（点击触发与空闲预取共用同一份上下文，保证指纹一致）。
+     * 编辑器未就绪时返回 null。
+     */
+    fun buildAiSuggestionRequest(): com.rwmodstudio.core.AiSuggestionPrefetcher.Request? {
+        val ed = editorRef ?: return null
+        val cursorLine = ed.cursor.leftLine
+        val col = ed.cursor.leftColumn
+        // 相对路径
+        val relPath = if (homeDir.isNotEmpty() && filePath.startsWith(homeDir)) {
+            filePath.removePrefix(homeDir).removePrefix("/")
+        } else {
+            filePath.substringAfterLast("/")
+        }
+        // 关联编辑动作来源文件
+        RecentInputTracker.currentFilePath = relPath
+        // 光标上下文：从光标向上找最近的节头 [xxx]，确保节头在上下文内
+        // 取 min(cursorLine, 节头行) 到 cursorLine，最多 10 行
+        var sectionHeaderLine = cursorLine
+        for (i in cursorLine downTo maxOf(0, cursorLine - 30)) {
+            val l = ed.text.getLineString(i).trim()
+            if (l.startsWith("[") && l.endsWith("]")) {
+                sectionHeaderLine = i
+                break
+            }
+        }
+        val startLine = maxOf(sectionHeaderLine, cursorLine - 10).coerceAtLeast(0)
+        val contextSb = StringBuilder()
+        for (i in startLine..cursorLine) {
+            contextSb.append(ed.text.getLineString(i))
+            if (i < cursorLine) contextSb.append('\n')
+        }
+        val currentLineText = ed.text.getLineString(cursorLine)
+        // 当前行光标前部分
+        val currentBeforeCursor = if (col > 0 && col <= currentLineText.length) {
+            currentLineText.substring(0, col)
+        } else currentLineText
+        // 文件结构概览：所有节头列表（帮助 AI 理解文件用途）
+        val fileStructure = runCatching {
+            val fullText = ed.text.toString()
+            val headers = mutableListOf<String>()
+            for (line in fullText.split('\n')) {
+                val t = line.trim()
+                if (t.startsWith("[") && t.endsWith("]")) headers.add(t)
+            }
+            headers.take(20).joinToString(" ")
+        }.getOrDefault("")
+        // 最近输入行（跨文件，由 onTextChange diff 实时追踪，含未保存内容）
+        val recentInput = RecentInputTracker.getRecentLines()
+        // 代码参考表：标准节查代码参考库，隐藏行动节从文件内容提取已用键名
+        val codeTable = com.rwmodstudio.core.AiService.buildCodeTableForSection(currentSection, ed.text.toString())
+        // 当前节是否为隐藏行动（行为节）
+        val secName = currentSection
+        val isHiddenAction = !secName.isNullOrBlank() &&
+            (secName.contains("隐藏行动") || secName.lowercase().contains("hiddenaction"))
+
+        return com.rwmodstudio.core.AiSuggestionPrefetcher.Request(
+            filePath = relPath,
+            sectionName = currentSection,
+            isHiddenAction = isHiddenAction,
+            recentInputLines = recentInput,
+            contextLines = contextSb.toString(),
+            currentLine = currentBeforeCursor,
+            codeTable = codeTable,
+            fileStructure = fileStructure,
+            isChineseView = showChinese
+        )
+    }
+
+    /**
+     * AI 建议：三级提速——
+     * 1. 点击瞬间先出「本地规则建议」（零延迟，不等网络）；
+     * 2. 命中预取缓存则直接换成 AI 结果（0 延迟）；
+     * 3. 都未命中则发流式请求，边生成边刷新（首条建议秒出）。
+     */
+    fun triggerAiCompletion() {
+        val req = buildAiSuggestionRequest() ?: return
+
+        showAiCompletion = true
+        aiCompletionError = null
+        aiSuggestions = emptyList()
+        aiIsLocalFallback = false
+
+        // 1) 本地兜底：点击即出内容
+        val local = if (SettingsManager.aiLocalFallback) {
+            com.rwmodstudio.core.LocalSuggestionProvider.build(
+                sectionName = req.sectionName,
+                contextLines = req.contextLines,
+                fileContent = editorRef?.text?.toString().orEmpty(),
+                isChineseView = req.isChineseView
+            )
+        } else emptyList()
+        aiSuggestions = local
+        aiIsLocalFallback = local.isNotEmpty()
+        aiCompletionLoading = local.isEmpty()
+        aiCompletionPhase = if (local.isEmpty()) "正在连接 AI 服务" else "AI 生成中…"
+
+        // 2) 预取命中：立即替换为 AI 结果
+        val cached = com.rwmodstudio.core.AiSuggestionPrefetcher.peek(req)
+        if (cached != null) {
+            aiSuggestions = cached
+            aiIsLocalFallback = false
+            aiCompletionLoading = false
+            aiCompletionPhase = if (cached.isEmpty()) "AI 无合适建议" else ""
+            return
+        }
+
+        // 3) 流式请求，边生成边刷
+        scope.launch {
+            val result = com.rwmodstudio.core.AiService.suggestCompletion(
+                filePath = req.filePath,
+                sectionName = req.sectionName,
+                isHiddenAction = req.isHiddenAction,
+                recentInputLines = req.recentInputLines,
+                contextLines = req.contextLines,
+                currentLine = req.currentLine,
+                codeTable = req.codeTable,
+                fileStructure = req.fileStructure,
+                isChineseView = req.isChineseView,
+                streaming = true,
+                onPartial = { list ->
+                    // 流式增量（IO 线程回调）：直接写 Compose state，后台线程赋值线程安全
+                    aiSuggestions = list
+                    aiIsLocalFallback = false
+                    aiCompletionLoading = false
+                    aiCompletionPhase = ""
+                },
+                onPhase = { aiCompletionPhase = it }
+            )
+            withContext(Dispatchers.Main) {
+                aiCompletionLoading = false
+                result.onSuccess { list ->
+                    // AI 有结果则以 AI 为准；AI 空结果时保留本地兜底内容
+                    if (list.isNotEmpty() || !aiIsLocalFallback) {
+                        aiSuggestions = list
+                        aiIsLocalFallback = false
+                    }
+                    aiCompletionPhase = if (aiSuggestions.isEmpty()) "AI 无合适建议" else ""
+                    if (aiSuggestions.isEmpty()) {
+                        // ghost 模式：无任何可显示的建议 → 轻提示后收起，不弹卡片
+                        Toast.makeText(ctx, "AI 无合适建议", Toast.LENGTH_SHORT).show()
+                        showAiCompletion = false
+                        aiAppliedCount = 0
+                    } else {
+                        aiAppliedCount = 0
+                    }
+                }.onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) {
+                        // 协程取消（用户关闭/切文件/重新触发）：不是错误，静默收场
+                        aiCompletionLoading = false
+                        return@withContext
+                    }
+                    if (aiSuggestions.isEmpty()) {
+                        aiCompletionError = e.message ?: "未知错误"
+                        aiCompletionPhase = ""
+                        // ghost 模式：失败且无内容可显示 → Toast 提示并收起
+                        Toast.makeText(ctx, "AI 建议失败：${e.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                        showAiCompletion = false
+                        aiAppliedCount = 0
+                    } else {
+                        // 有本地兜底内容可看，不弹错误，继续在光标处预览
+                        aiCompletionPhase = "AI 未响应，以下为本地建议"
+                        aiAppliedCount = 0
+                    }
+                }
+            }
+        }
+    }
+
+    // 应用一条 AI 建议：插入→光标处写入；替换→按目标文本定位并整段替换。
+    // 返回 false 表示未能应用（如替换目标在文件中找不到），由调用方提示。
+    fun applyAiSuggestion(s: com.rwmodstudio.core.AiService.AiSuggestion): Boolean {
+        val ok = when (s.action) {
+            com.rwmodstudio.core.AiService.ACTION_REPLACE -> {
+                val ed = editorRef
+                val target = s.target
+                if (target.isNullOrBlank() || ed == null) false
+                else if (com.rwmodstudio.editor.findTextRangeInEditor(ed, target) == null) {
+                    Toast.makeText(ctx, "未找到要替换的目标行，已跳过该条建议", Toast.LENGTH_SHORT).show()
+                    false
+                } else {
+                    aiReplaceRequest = target to s.code
+                    aiReplaceTick++
+                    true
+                }
+            }
+            else -> {
+                if (s.code.isBlank()) false
+                else {
+                    insertTextRequest = s.code
+                    insertTextTick++
+                    true
+                }
+            }
+        }
+        if (ok) {
+            isModified = true
+            // 内容已变更，旧的预取结果不再对应当前上下文
+            com.rwmodstudio.core.AiSuggestionPrefetcher.invalidate()
+        }
+        return ok
+    }
+
+    // 顶部菜单栏「AI 建议」按钮触发：等编辑器就绪（editorRef 非空）后调用，再消费触发值。
+    LaunchedEffect(aiCompletionTrigger, editorRef) {
+        if (aiCompletionTrigger > 0 && editorRef != null) {
+            triggerAiCompletion()
+            onAiCompletionTriggerConsumed()
         }
     }
 
@@ -621,6 +979,21 @@ fun EditorScreen(
             }
     }
 
+    // AI 建议预取：输入停止后，用当前上下文提前算好建议并按指纹缓存。
+    // 点击「AI 建议」时若指纹命中即 0 延迟出内容；节流与去重由 AiSuggestionPrefetcher 负责。
+    // debounce 取 800ms：既避开逐键噪声，又比 2s 更早触发，提高点击命中率。
+    LaunchedEffect(filePath) {
+        // 切文件：旧文件的缓存与在途请求全部作废
+        com.rwmodstudio.core.AiSuggestionPrefetcher.invalidate()
+        if (!SettingsManager.devAiCompletion || !SettingsManager.aiPrefetchEnabled) return@LaunchedEffect
+        snapshotFlow { text to cursorPos }
+            .debounce(800)
+            .collect {
+                val req = buildAiSuggestionRequest() ?: return@collect
+                com.rwmodstudio.core.AiSuggestionPrefetcher.schedule(req)
+            }
+    }
+
     // 文件符号缓存变化时同步到补全 Provider
     LaunchedEffect(fileSymbols) {
         cp?.fileSymbols = fileSymbols
@@ -629,12 +1002,16 @@ fun EditorScreen(
         cp?.chainSymbols = chainSymbols
     }
 
-    LaunchedEffect(filePath) {
+    // 主加载：filePath 变化加载文件；externalModifyTick 变化（搜索替换写盘）强制重新从盘加载最新内容
+    LaunchedEffect(filePath, externalModifyTick) {
         if (filePath.isEmpty()) return@LaunchedEffect
         if (SettingsManager.devRecentFiles) {
             SettingsManager.addRecentFile(filePath)
         }
-        recentTick++; contentLoaded = false
+        recentTick++; loading = true
+        // 跳转（搜索/近期修改）优先于视图恢复：有待处理跳转时跳过视图恢复，让跳转生效。
+        val jumpPending = jumpTick > 0 && jumpLine >= 0
+        Log.d(TAG, "WORKSPACE load path=$filePath cached=${workspaceEntry != null} jumpTick=$jumpTick jumpLine=$jumpLine")
         showChinese = true
         isModified = false
         text = ""
@@ -644,37 +1021,33 @@ fun EditorScreen(
         currentSection = null
         litLines = emptySet()
         lineOriginalTexts = emptyMap()
-        // 优先恢复缓存内容（从 Settings/翻译库/自定义补全 返回时）
-        if (cachedText.isNotEmpty()) {
-            text = cachedText
+        liveViewState.state = null
+        // 优先恢复工作区缓存（tab 切换/从设置页返回）：直接还原缓冲区语义状态，
+        // 不再重读磁盘、不再重跑翻译，避免行结构重排导致视图/光标漂移。
+        // 空文本工作区（加载中途切走上报的竞态缓存）不恢复，重新从磁盘加载，避免打开空白文件。
+        if (workspaceEntry != null && workspaceEntry.displayText.isNotEmpty()) {
+            isEnglish = workspaceEntry.isEnglish
+            showChinese = workspaceEntry.showChinese
+            isModified = workspaceEntry.isModified
+            litLines = workspaceEntry.litLines
+            lineOriginalTexts = workspaceEntry.lineOriginalTexts
+            text = workspaceEntry.displayText
+            when {
+                !isEnglish -> { englishText = workspaceEntry.displayText; chineseText = workspaceEntry.displayText }
+                showChinese -> { chineseText = workspaceEntry.displayText; englishText = workspaceEntry.englishText }
+                else -> { englishText = workspaceEntry.displayText; chineseText = workspaceEntry.chineseText }
+            }
+            pendingRestoreViewState = if (jumpPending) null else workspaceEntry.viewState
             resetTextTick++
-            resetTextRequest = cachedText to resetTextTick
-            isModified = true
-            if (SettingsManager.devTranslationEngine && !engine.isLoaded) {
-                engine.load(ctx)
-            }
-            if (SettingsManager.devTranslationEngine && engine.isLoaded && engine.isEnglishIni(cachedText)) {
-                englishText = cachedText
-                chineseText = withContext(Dispatchers.Default) { engine.translateToChinese(cachedText, autoSpace) }
-                isEnglish = true
-                showChinese = false
-            } else if (SettingsManager.devTranslationEngine && engine.isLoaded) {
-                chineseText = cachedText
-                englishText = withContext(Dispatchers.Default) { engine.translateToEnglish(cachedText, autoSpace, litLines) }
-                isEnglish = true
-                showChinese = true
-            } else {
-                englishText = cachedText
-                chineseText = cachedText
-                isEnglish = false
-                showChinese = true
-            }
+            resetTextRequest = text to resetTextTick
             contentLoaded = true
-            parseSectionsImmediate(text, 0, "cached:$filePath")
+            loading = false
+            parseSectionsImmediate(text, 0, "workspace:$filePath")
             return@LaunchedEffect
         }
         if (!SettingsManager.devFileLoading) {
             contentLoaded = true
+            loading = false
             return@LaunchedEffect
         }
         try {
@@ -752,9 +1125,11 @@ fun EditorScreen(
             resetTextRequest = text to resetTextTick
         }
         contentLoaded = true
+        loading = false
     }
 
-    BackHandler {
+    // 多实例叠放下，仅前台实例响应系统返回键，避免非前台实例抢返回手势
+    BackHandler(enabled = active) {
         if (fabShowThemes) {
             fabShowThemes = false
             return@BackHandler
@@ -766,15 +1141,57 @@ fun EditorScreen(
         if (isModified) {
             showBackConfirm = true
         } else {
-            onBack()
+            onBack(false, false)
+        }
+    }
+
+    // 离开当前文件时把完整缓冲区状态写入工作区（tab 切换会因 filePath 变化触发 onDispose，
+    // 返回/抽屉/坐标可视化同样覆盖）。编辑器可能尚未就绪（editorViewRef 为空），此时跳过，下次打开按默认位置。
+    DisposableEffect(filePath) {
+        onDispose {
+            val entry = buildWorkspaceEntry()
+            Log.d(TAG, "WORKSPACE dispose path=$filePath mod=${entry.isModified} cn=${entry.showChinese} view=${entry.viewState != null}")
+            onWorkspaceCache?.invoke(entry)
+            // 实例销毁时直接落盘（若未保存修改且未被放弃），同步拿到内容、协程写盘，不依赖 delay 等待
+            onDisposeFlush?.invoke(entry)
+        }
+    }
+
+    // 书签面板「返回」按钮触发同一套返回手势逻辑
+    LaunchedEffect(backRequest) {
+        if (backRequest > 0) {
+            if (fabShowThemes) {
+                fabShowThemes = false
+                return@LaunchedEffect
+            }
+            if (fabExpanded) {
+                fabExpanded = false
+                return@LaunchedEffect
+            }
+            // 先消费触发值，避免编辑器重建后（backRequest 仍非 0）再次误触发返回
+            onBackRequestConsumed()
+            if (isModified) {
+                showBackConfirm = true
+            } else {
+                onBack(false, false)
+            }
         }
     }
 
     // 保存并退出
     LaunchedEffect(saveAndExit) {
         if (saveAndExit) {
-            if (isModified) saveSync("SaveAndExit")
-            onSaveAndExitDone()
+            // try-catch 兜底：saveSync 抛异常也必须回调，否则宿主「等全部实例完成」的计数
+            // 永远凑不齐 → 保存并退出卡死。异常按失败处理（ok=false，留在编辑器可重试）。
+            val ok = try {
+                if (isModified) saveSync("SaveAndExit") else true
+            } catch (e: Exception) {
+                Log.e(TAG, "SaveAndExit failed", e)
+                false
+            }
+            // 保存失败时 ok=false：不退出、留在编辑器让用户重试，避免未保存修改丢失；
+            // 无论成败都回调，让宿主重置 saveAndExit，防止状态卡死无法再次触发。
+            onSaveAndExitDone(ok)
         }
     }
 
@@ -784,13 +1201,24 @@ fun EditorScreen(
     // 外部触发保存（如抽屉导航离开编辑器时的自动保存）
     LaunchedEffect(saveTrigger) {
         if (saveTrigger > 0) {
+            // 先消费触发值，避免切文件后残留的 saveTrigger 误触发新文件保存
+            onSaveTriggerConsumed()
             lifecycleOwner.lifecycleScope.launch { saveSync("DrawerAutoSave") }
         }
     }
 
-    // 编辑器加载完成后把初始文本同步给外部 holder，确保抽屉导航离开时缓存正确
+    // 搜索替换前的保存请求：把未保存缓冲落盘并回报结果，供搜索替换等待后读盘替换
+    LaunchedEffect(externalSaveRequest) {
+        if (externalSaveRequest > 0) {
+            val ok = saveSync("SearchReplacePrepare", silent = true)
+            onExternalSaveDone?.invoke(ok)
+        }
+    }
+
+    // 编辑器加载完成后把初始文本同步给外部 holder，确保抽屉导航离开时缓存正确。
+    // 多实例叠放下仅前台实例上报，避免非前台实例覆盖 holder 的文本。
     LaunchedEffect(contentLoaded, text) {
-        if (contentLoaded && text.isNotEmpty()) {
+        if (active && contentLoaded && text.isNotEmpty()) {
             onTextChange?.invoke(text)
         }
     }
@@ -800,11 +1228,22 @@ fun EditorScreen(
             Log.d(TAG, "Lifecycle event: $event, filePath=$filePath")
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    if (isModified && autoSave && SettingsManager.devSaveOnPause) {
-                        // 非阻塞后台保存，避免 ON_PAUSE 阻塞主线程导致 ANR/死机
+                    if (autoSave && SettingsManager.devSaveOnPause) {
+                        // 非阻塞后台保存，避免 ON_PAUSE 阻塞主线程导致 ANR/死机（不能改同步等待）。
+                        // NonCancellable：确保保存协程即使被生命周期作用域取消也能写完盘（尽力完成，
+                        // 缩小「退后台后进程被杀」窗口；进程被杀本身无法完全避免）。
                         lifecycleOwner.lifecycleScope.launch {
                             try {
-                                saveSync("LifecycleOnPause")
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                                    if (isModified) {
+                                        // 当前文件有改动：saveSync 成功后内部会自动带动工作区其它文件一起保存
+                                        saveSync("LifecycleOnPause")
+                                    } else {
+                                        // 当前文件无改动，但工作区其它文件可能还有未落盘的修改，
+                                        // 直接统一保存，避免「当前文件干净时其它文件改动裸奔」。
+                                        onSaveAllWorkspace?.invoke()
+                                    }
+                                }
                             } catch (e: Exception) {
                                 Log.e(TAG, "LifecycleOnPause save failed", e)
                             }
@@ -826,9 +1265,9 @@ fun EditorScreen(
 
     // 非 edge-to-edge + adjustResize：系统在键盘弹出时顶高窗口即缩小编辑器，不加 imePadding（避免双重削减），
     // sora 感知编辑器尺寸变化自动校正光标，此为本仓库验证过的流畅方案。
-    Column(Modifier.fillMaxSize().background(RustedBackground)) {
-        // Tab bar
-        if (SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
+    Column(modifier.fillMaxSize().background(RustedBackground)) {
+        // Tab bar（仅前台实例显示）
+        if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -846,6 +1285,7 @@ fun EditorScreen(
                 ) {
                     (listOf(filePath) + recent).distinct().forEach { path ->
                     val name = File(path).name; val active = path == filePath
+                    val unsaved = if (active) isModified else path in modifiedPaths
                     if (active) {
                         val siblingFiles = remember(siblingDir) {
                             siblingDir?.listFiles()
@@ -862,7 +1302,7 @@ fun EditorScreen(
                                     siblingDir = File(filePath).parentFile
                                     siblingDirHistory = emptyList()
                                     showSiblingMenu = true
-                                }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = RustedPrimary)) { Text(name, fontSize = 12.sp, maxLines = 1) }
+                                }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = RustedPrimary)) { Text(if (unsaved) "*$name" else name, fontSize = 12.sp, maxLines = 1) }
                                 Box(Modifier.width(24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(RustedPrimary))
                             }
                             DropdownMenu(expanded = showSiblingMenu, onDismissRequest = { showSiblingMenu = false }) {
@@ -902,11 +1342,8 @@ fun EditorScreen(
                                                     }
                                                 } else {
                                                     showSiblingMenu = false
-                                                    if (isModified) {
-                                                        scope.launch { saveSync("TabSwitch"); onSwitchFile(f.absolutePath) }
-                                                    } else {
-                                                        onSwitchFile(f.absolutePath)
-                                                    }
+                                                    // tab 栏工作区内切换：不落盘，交给 onDispose 缓存工作区；有修改也不在此保存
+                                                    onSwitchFile(f.absolutePath)
                                                 }
                                             }
                                             .heightIn(min = 36.dp)
@@ -923,15 +1360,9 @@ fun EditorScreen(
                     } else {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 2.dp)) {
                             TextButton(onClick = {
-                                if (isModified) {
-                                    scope.launch {
-                                        saveSync("TabSwitch")
-                                        onSwitchFile(path)
-                                    }
-                                } else {
-                                    onSwitchFile(path)
-                                }
-                            }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = RustedOnBackground.copy(alpha = 0.45f))) { Text(name, fontSize = 12.sp, maxLines = 1) }
+                                // tab 栏工作区内切换：不落盘，交给 onDispose 缓存工作区
+                                onSwitchFile(path)
+                            }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = RustedOnBackground.copy(alpha = 0.45f))) { Text(if (unsaved) "*$name" else name, fontSize = 12.sp, maxLines = 1) }
                         }
                     }
                 }
@@ -974,7 +1405,7 @@ fun EditorScreen(
                             allSections.forEach { (name, line) ->
                                 Row(
                                     Modifier
-                                        .width(180.dp)
+                                        .width(150.dp)
                                         .clickable {
                                             showSectionMenu = false
                                             editorRef?.let { editor ->
@@ -983,15 +1414,13 @@ fun EditorScreen(
                                             }
                                         }
                                         .padding(horizontal = 12.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
                                         "[$name]", fontSize = 12.sp, color = RustedPrimary,
-                                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
+                                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("行 ${line + 1}", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f))
                                 }
                             }
                         }
@@ -1010,9 +1439,14 @@ fun EditorScreen(
         Box(Modifier.weight(1f)) {
             if (contentLoaded) {
                 Box(Modifier.fillMaxSize()) {
+                    // AI 建议虚影（VS Code 风格）：在光标处灰色预览，Tab/点击逐条接受、Esc 收起。
+                    // 取「未应用的第一条」；全部应用完或失败时由回调收起。
+                    val ghostSuggestion = if (showAiCompletion) aiSuggestions.drop(aiAppliedCount).firstOrNull() else null
                     SoraCodeEditor(
                         text = text,
                         onTextChange = {
+                            // 记录用户实际输入的行（diff 前后文本，提取变化行）
+                            com.rwmodstudio.core.RecentInputTracker.diffAndRecord(latestEditorText, it)
                             text = it
                             latestEditorText = it
                             isModified = true
@@ -1034,13 +1468,19 @@ fun EditorScreen(
                         sectionCompletionEnabled = SettingsManager.devSectionCompletion,
                         insertTextRequest = insertTextRequest,
                         insertTextTick = insertTextTick,
+                        replaceTextRequest = aiReplaceRequest,
+                        replaceTextTick = aiReplaceTick,
                         resetTextRequest = resetTextRequest,
+                        restoreViewStateRequest = pendingRestoreViewState?.let { it to resetTextTick },
+                        onRestoreViewStateConsumed = { pendingRestoreViewState = null },
                         canUndo = canUndo,
                         canRedo = canRedo,
                         showBottomToolbar = editingBarShown,
                         blocklistEnabled = SettingsManager.translationBlockEnabled && SettingsManager.devLightbulbEnabled,
                         blockableStringKeys = blockableStringKeys,
                         onCursorChange = { cursorPos = it },
+                        active = active,
+                        onViewStateChanged = { liveViewState.state = it },
                         onSearchResultUpdate = { count, index ->
                             searchMatchCount = count
                             searchCurrentIndex = index
@@ -1071,7 +1511,7 @@ fun EditorScreen(
                                 lineOriginalTexts = lineOriginalTexts - line
                             }
                         },
-                        onReady = { editor -> editorRef = editor },
+                        onReady = { editor -> editorRef = editor; editorViewRef.value = editor },
                         onToolbarAction = { action ->
                             when (action) {
                                 EditorToolbarAction.EDIT_SYMBOLS -> {
@@ -1128,16 +1568,37 @@ fun EditorScreen(
                             insertTextRequest = value
                             insertTextTick++
                             isModified = true
+                        },
+                        // AI 建议虚影：光标处灰色预览，无卡片无弹窗。
+                        // 接受（Tab/点击）：逐条应用当前建议，全部应用完自动收起；失败（如替换目标找不到）也收起。
+                        ghostText = if (showAiCompletion) ghostSuggestion?.code else null,
+                        ghostAction = if (showAiCompletion) ghostSuggestion?.action else null,
+                        ghostOnAccept = {
+                            val s = aiSuggestions.drop(aiAppliedCount).firstOrNull()
+                            if (s != null && applyAiSuggestion(s)) {
+                                aiAppliedCount++
+                                if (aiAppliedCount >= aiSuggestions.size) {
+                                    showAiCompletion = false
+                                    aiAppliedCount = 0
+                                }
+                            } else {
+                                // 应用失败（Toast 已在 applyAiSuggestion 内提示）→ 收起
+                                showAiCompletion = false
+                                aiAppliedCount = 0
+                            }
+                        },
+                        ghostOnDismiss = {
+                            showAiCompletion = false
+                            aiAppliedCount = 0
                         }
                     )
+                    // AI 建议已改为光标处 ghost 虚影展示，不再弹底部卡片
                     Box(Modifier.align(Alignment.BottomEnd)) {
                         StyledPopupMenu(
                             expanded = showMore,
                             onDismissRequest = { showMore = false },
                             modifier = Modifier.width(240.dp)
                         ) {
-                            PlainMenuItem(icon = Icons.Default.Save, title = "保存", tint = RustedSecondary, onClick = { scope.launch { saveSync("MenuSave") }; showMore = false })
-                            PlainMenuItem(icon = Icons.Default.Search, title = "查找替换", onClick = { showMore = false; showSearch = true })
                             if (isEnglish) {
                                 HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                                 PlainMenuItem(
@@ -1166,6 +1627,9 @@ fun EditorScreen(
                                                 resetTextTick++
                                                 resetTextRequest = text to resetTextTick
                                                 onTextChange?.invoke(text)
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "切换语言失败", e)
+                                                Toast.makeText(ctx, "切换语言失败", Toast.LENGTH_SHORT).show()
                                             } finally {
                                                 switchingLanguage = false
                                             }
@@ -1180,7 +1644,7 @@ fun EditorScreen(
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                             PlainMenuItem(icon = Icons.Default.Settings, title = "设置", onClick = {
                                 showMore = false
-                                onTextCacheRequest?.invoke(text)
+                                onWorkspaceCache?.invoke(buildWorkspaceEntry())
                                 lifecycleOwner.lifecycleScope.launch {
                                     if (autoSave && isModified) saveSync("NavigateAway")
                                     onNavigate(Screen.SETTINGS)
@@ -1188,7 +1652,7 @@ fun EditorScreen(
                             })
                             PlainMenuItem(icon = Icons.Default.Translate, title = "翻译库", onClick = {
                                 showMore = false
-                                onTextCacheRequest?.invoke(text)
+                                onWorkspaceCache?.invoke(buildWorkspaceEntry())
                                 lifecycleOwner.lifecycleScope.launch {
                                     if (autoSave && isModified) saveSync("NavigateAway")
                                     onNavigate(Screen.TRANSLATION)
@@ -1196,13 +1660,26 @@ fun EditorScreen(
                             })
                             PlainMenuItem(icon = Icons.Default.Extension, title = "自定义补全", onClick = {
                                 showMore = false
-                                onTextCacheRequest?.invoke(text)
+                                onWorkspaceCache?.invoke(buildWorkspaceEntry())
                                 lifecycleOwner.lifecycleScope.launch {
                                     if (autoSave && isModified) saveSync("NavigateAway")
                                     onNavigate(Screen.CUSTOM)
                                 }
                             })
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                            if (SettingsManager.devAiCompletion) {
+                                PlainMenuItem(
+                                    icon = Icons.Default.AutoAwesome,
+                                    title = "AI 建议",
+                                    subtitle = "根据光标上下文续写代码",
+                                    tint = RustedSecondary,
+                                    onClick = {
+                                        showMore = false
+                                        triggerAiCompletion()
+                                    }
+                                )
+                                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                            }
                             if (SettingsManager.devInheritanceView) {
                                 PlainMenuItem(icon = Icons.Default.AccountTree, title = "继承链", subtitle = "查看文件继承来源", tint = RustedSecondary, onClick = {
                                     showMore = false
@@ -1266,6 +1743,9 @@ fun EditorScreen(
                                             resetTextTick++
                                             resetTextRequest = text to resetTextTick
                                             onTextChange?.invoke(text)
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "切换语言失败", e)
+                                            Toast.makeText(ctx, "切换语言失败", Toast.LENGTH_SHORT).show()
                                         } finally {
                                             switchingLanguage = false
                                         }
@@ -1274,7 +1754,7 @@ fun EditorScreen(
                             }
                             // 保存缓存后跳转其它页面（与「更多」弹窗同逻辑）
                             val navigateAway: (Screen) -> Unit = { screen ->
-                                onTextCacheRequest?.invoke(text)
+                                onWorkspaceCache?.invoke(buildWorkspaceEntry())
                                 lifecycleOwner.lifecycleScope.launch {
                                     if (autoSave && isModified) saveSync("NavigateAway")
                                     onNavigate(screen)
@@ -1311,8 +1791,13 @@ fun EditorScreen(
                                 ) {
                                     // 高亮主题子菜单（毛笔按钮激活时显示在菜单顶部）
                                     if (fabShowThemes) {
-                                        // 主题子菜单从下到上逐个浮现：底部「括号颜色」最先弹出，顶部「切换为」最后弹出
-                                        FabItemStagger(expanded = fabExpanded, index = 6) {
+                                        // 主题子菜单从下到上逐个浮现（index 越大越晚弹出，整体连续递增无断层）：
+                                        // 「括号颜色」0 →「自定义高亮色」1 →「节行高亮」2 → 主题列表 3..
+                                        // (小→大) →「切换为」最后（themeList.size + 3）
+                                        val themeList = HighlightThemeManager.allThemeEntries()
+                                        // 主题列表做为动态长度一组：其底部项接在「节行高亮」之后（基础 3），顶部项 index = 3 + (size-1)
+                                        val themeBase = 3
+                                        FabItemStagger(expanded = fabExpanded, index = themeList.size + themeBase) {
                                             EditorFabMenuRow(
                                                 title = "切换为${if (ThemeState.isDark) "浅色" else "深色"}",
                                                 // 半日半阴图标：左上半月亮、右下半太阳（Brightness4）
@@ -1323,20 +1808,20 @@ fun EditorScreen(
                                             )
                                         }
                                         Spacer(Modifier.height(8.dp))
-                                        listOf(
-                                            "dark" to ("深色" to Icons.Default.DarkMode),
-                                            "light" to ("浅色" to Icons.Default.LightMode),
-                                            "pure" to ("纯净" to Icons.Default.FilterBAndW),
-                                            "custom" to ("自定义" to Icons.Default.Palette)
-                                        ).forEachIndexed { i, (id, item) ->
-                                            val (label, icon) = item
-                                            // 深色=5、浅色=4、纯净=3、自定义=2（依次向上）
-                                            FabItemStagger(expanded = fabExpanded, index = 5 - i) {
+                                        // 内置主题 + 用户预设（动态）；从下到上连续递增接在「节行高亮」之后
+                                        themeList.forEachIndexed { i, (id, label) ->
+                                            val icon = when (id) {
+                                                "dark" -> Icons.Default.DarkMode
+                                                "light" -> Icons.Default.LightMode
+                                                "pure" -> Icons.Default.FilterBAndW
+                                                "custom" -> Icons.Default.Palette
+                                                else -> Icons.Default.Save
+                                            }
+                                            FabItemStagger(expanded = fabExpanded, index = themeBase + (themeList.size - 1 - i)) {
                                                 EditorFabMenuRow(
                                                     title = label,
                                                     subtitle = if (ThemeState.highlightTheme == id) "当前" else "",
                                                     icon = icon,
-                                                    // 子菜单内点击不收起子菜单
                                                     onLabel = { ThemeState.applyHighlightTheme(id) },
                                                     onIcon = { ThemeState.applyHighlightTheme(id) }
                                                 )
@@ -1345,7 +1830,7 @@ fun EditorScreen(
                                         }
                                         Spacer(Modifier.height(4.dp))
                                         // 节名行高亮：点击标签切换开关，点击图标打开调色盘自定义底色
-                                        FabItemStagger(expanded = fabExpanded, index = 7) {
+                                        FabItemStagger(expanded = fabExpanded, index = 2) {
                                             EditorFabMenuRow(
                                                 title = "节行高亮",
                                                 subtitle = when {
@@ -1392,22 +1877,8 @@ fun EditorScreen(
                                     }
                                     // 展开「高亮主题」子菜单时隐藏其它竖栏项（互斥展示）
                                     if (!fabShowThemes) {
-                                    // 主菜单项（源顺序 = 逻辑从上到下；「保存」在最底部、最靠近 +）
+                                    // 主菜单项（源顺序 = 逻辑从上到下；保存/查找替换已移至顶部菜单栏，此处不再保留）
                                     val mainItems: List<Pair<Boolean, @Composable () -> Unit>> = listOf(
-                                        true to {
-                                            EditorFabMenuRow(
-                                                title = "保存", icon = Icons.Default.Save, iconTint = RustedSecondary,
-                                                onLabel = { scope.launch { saveSync("MenuSave") }; fabExpanded = false },
-                                                onIcon = { scope.launch { saveSync("MenuSave") }; fabExpanded = false }
-                                            )
-                                        },
-                                        true to {
-                                            EditorFabMenuRow(
-                                                title = "查找替换", icon = Icons.Default.Search,
-                                                onLabel = { fabExpanded = false; showSearch = true },
-                                                onIcon = { fabExpanded = false; showSearch = true }
-                                            )
-                                        },
                                         isEnglish to {
                                             EditorFabMenuRow(
                                                 title = "切换为${if (showChinese) "英文" else "中文"}",
@@ -1484,25 +1955,26 @@ fun EditorScreen(
                                 if (fabExpanded) Spacer(Modifier.height(14.dp))
                                 // 底部横栏：小圆按钮在 + 号左侧、与 + 垂直居中；全部跟随 +号 展开态显示
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    AnimatedVisibility(
-                                        visible = fabExpanded,
-                                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
-                                        exit = fadeOut()
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // 逐条从右向左浮现：最靠近 + 号的「背景色」先弹，最左的「设置」最后弹
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        FabRowItemStagger(expanded = fabExpanded, index = 3) {
                                             RoundIconButton(
                                                 icon = Icons.Default.Settings,
                                                 contentDescription = "设置",
                                                 onClick = { fabExpanded = false; navigateAway(Screen.SETTINGS) }
                                             )
-                                            Spacer(Modifier.width(12.dp))
-                                            // 启动游戏（与背景色对调位置后位于第二位）
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        // 启动游戏（与背景色对调位置后位于第二位）
+                                        FabRowItemStagger(expanded = fabExpanded, index = 2) {
                                             RoundIconButton(
                                                 icon = Icons.Default.RocketLaunch,
                                                 contentDescription = "启动游戏",
                                                 onClick = launchGame
                                             )
-                                            Spacer(Modifier.width(12.dp))
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        FabRowItemStagger(expanded = fabExpanded, index = 1) {
                                             RoundIconButton(
                                                 icon = Icons.Default.Brush,
                                                 contentDescription = "高亮主题",
@@ -1510,15 +1982,17 @@ fun EditorScreen(
                                                 // 点击「高亮主题」可开可收（切换）
                                                 onClick = { fabShowThemes = !fabShowThemes }
                                             )
-                                            Spacer(Modifier.width(12.dp))
-                                            // 背景色（调色盘）：跟随 +号 展开显示
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        // 背景色（调色盘）：跟随 +号 展开显示
+                                        FabRowItemStagger(expanded = fabExpanded, index = 0) {
                                             RoundIconButton(
                                                 icon = Icons.Default.Palette,
                                                 contentDescription = "背景色",
                                                 onClick = { fabShowColorPicker = true }
                                             )
-                                            Spacer(Modifier.width(12.dp))
                                         }
+                                        Spacer(Modifier.width(12.dp))
                                     }
                                     // 「方块+」按钮本体：圆角方块，展开时「+」旋转 45°
                                     EditorFabButton(
@@ -1645,8 +2119,24 @@ fun EditorScreen(
                         }
                     }
             }
-        } else if (!contentLoaded) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = RustedPrimary) }
-            else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("文件为空", color = RustedOnBackground.copy(alpha = 0.4f)) }
+            // 切换文件期间（loading）覆盖层：View 复用，覆盖转圈遮罩，避免显示旧内容
+            if (loading) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator(color = RustedPrimary) }
+            }
+        } else {
+            // 首次加载：编辑器 View 尚未创建，显示转圈
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator(color = RustedPrimary) }
+        }
         }
         // 继承链查看对话框
         if (showInheritanceView) {
@@ -1674,15 +2164,16 @@ fun EditorScreen(
                 }
             )
         }
+        // AI 辅助补全虚影预览卡（浮动在编辑器底部，见编辑器 Box 内叠加层）
         // 查找替换栏 - 固定在底部，adjustResize会自动把它推到键盘上方
         if (showSearch) {
             // 查找替换栏
             Surface(Modifier.fillMaxWidth(), color = RustedSurface) {
                 Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(searchQuery, { searchQuery = it }, singleLine = true, modifier = Modifier.weight(1f), placeholder = { Text("查找...", fontSize = 12.sp) }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp), trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }, Modifier.size(20.dp)) { Icon(Icons.Default.Clear, null, Modifier.size(14.dp)) } })
+                    Row(verticalAlignment = Alignment.Top) {
+                        OutlinedTextField(searchQuery, { searchQuery = it }, maxLines = 3, modifier = Modifier.weight(1f), placeholder = { Text("查找...", fontSize = 12.sp) }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp), trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }, Modifier.size(20.dp)) { Icon(Icons.Default.Clear, null, Modifier.size(14.dp)) } })
                         Spacer(Modifier.width(4.dp))
-                        OutlinedTextField(replaceText, { replaceText = it }, singleLine = true, modifier = Modifier.weight(1f), placeholder = { Text("替换...", fontSize = 12.sp) }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+                        OutlinedTextField(replaceText, { replaceText = it }, maxLines = 3, modifier = Modifier.weight(1f), placeholder = { Text("替换...", fontSize = 12.sp) }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2162,15 +2653,17 @@ fun EditorScreen(
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        saveSync("BackConfirm")
-                        showBackConfirm = false
-                        onBack()
+                        // 保存成功才退出；失败保持对话框打开，让用户重试或取消
+                        if (saveSync("BackConfirm")) {
+                            showBackConfirm = false
+                            onBack(false, true)
+                        }
                     }
                 }) { Text("保存") }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { showBackConfirm = false; onBack() }) { Text("不保存", color = RustedError) }
+                    TextButton(onClick = { showBackConfirm = false; onBack(true, false) }) { Text("不保存", color = RustedError) }
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = { showBackConfirm = false }) { Text("取消") }
                 }
@@ -2223,4 +2716,5 @@ private fun editorBgForSection(): Int {
         ?: if (ThemeState.isDark) android.graphics.Color.parseColor("#1E1E1E")
         else android.graphics.Color.parseColor("#F0F0F0")
 }
+
 

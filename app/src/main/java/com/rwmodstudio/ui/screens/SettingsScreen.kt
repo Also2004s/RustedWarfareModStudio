@@ -33,13 +33,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.rwmodstudio.BuildConfig
 import com.rwmodstudio.core.DarkThemeColors
+import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.LocalConfigManager
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.UpdateChecker
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.TranslationBlocklist
 import com.rwmodstudio.core.translation.TranslationEngine
+import com.rwmodstudio.ui.components.ColorWheelHSV
 import com.rwmodstudio.ui.components.ColorWheelPicker
 import com.rwmodstudio.ui.components.DarkTokenColorDialog
 import com.rwmodstudio.ui.components.UpdateStateManager
@@ -55,6 +58,18 @@ import kotlin.math.roundToInt
 
 /** 把字体大小规整到 0.5 的倍数 */
 private fun roundFontSize(size: Float): Float = (size * 2f).roundToInt() / 2f
+
+/**
+ * 屏蔽词列表展示名：翻译引擎开启时把英文 key 翻译为中文展示（不改存储）。
+ * 中文 key 原样返回；未命中的英文 key 保留原样。
+ */
+private fun blockKeyDisplay(key: String): String {
+    if (!CompletionShared.translationEngineEnabled()) return key
+    val dict = TranslationEngine.getInstance().getTranslationDict()
+    if (dict.isChinese(key)) return key
+    val zh = dict.getTranslation(key)
+    return if (zh != key) zh else key
+}
 
 @Composable
 fun SettingsScreen(
@@ -297,7 +312,7 @@ fun SettingsScreen(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("dark" to "深色", "light" to "浅色", "pure" to "纯净", "custom" to "自定义").forEach { (t, l) ->
+                    HighlightThemeManager.allThemeEntries().forEach { (t, l) ->
                         ThemeChip(
                             label = l,
                             selected = hl == t,
@@ -577,12 +592,21 @@ fun SettingsScreen(
             onDismissRequest = { showColorPicker = false },
             title = { Text("背景颜色") },
             text = {
-                ColorWheelPicker(
-                    initialColor = bg,
-                    onColorChanged = { picked = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    wheelSize = 220.dp
-                )
+                if (SettingsManager.devHsvPicker) {
+                    ColorWheelHSV(
+                        initialColor = bg,
+                        onColorChanged = { picked = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        wheelSize = 220.dp
+                    )
+                } else {
+                    ColorWheelPicker(
+                        initialColor = bg,
+                        onColorChanged = { picked = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        wheelSize = 220.dp
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -653,6 +677,12 @@ fun SettingsScreen(
 
     if (showBlockDialog) {
         var showBlockSubDialog by remember { mutableStateOf(false) }
+        var blockEngineReady by remember { mutableStateOf(TranslationEngine.getInstance().isLoaded) }
+        LaunchedEffect(Unit) {
+            val eng = TranslationEngine.getInstance()
+            if (!eng.isLoaded) eng.load(context)
+            blockEngineReady = true
+        }
         AlertDialog(
             onDismissRequest = { showBlockDialog = false },
             title = { Text("翻译屏蔽词") },
@@ -682,6 +712,7 @@ fun SettingsScreen(
                     LazyColumn(Modifier.weight(1f)) {
                         items(localBlockKeys.size) { idx ->
                             val key = localBlockKeys[idx]
+                            val display = if (blockEngineReady) blockKeyDisplay(key) else key
                             Row(
                                 Modifier
                                     .fillMaxWidth()
@@ -691,7 +722,12 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(key, fontSize = 13.sp, color = RustedOnBackground, modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f)) {
+                                    Text(display, fontSize = 13.sp, color = RustedOnBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (display != key) {
+                                        Text(key, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
                                 IconButton(
                                     onClick = {
                                         localBlockKeys = localBlockKeys.toMutableList().apply { removeAt(idx) }
@@ -908,7 +944,10 @@ fun SettingsScreen(
         var zipLoading by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
         LaunchedEffect(Unit) {
-            zipFiles = LocalConfigManager.findConfigZipFiles(context)
+            // 目录扫描放 IO 线程，避免主线程遍历多个下载目录卡 UI
+            zipFiles = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                LocalConfigManager.findConfigZipFiles(context)
+            }
             zipLoading = false
         }
 

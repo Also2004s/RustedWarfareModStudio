@@ -264,9 +264,11 @@ class FunctionParameterCompletionTest {
         assertTrue(isMutuallyExclusiveParam("equalTo"))
         assertTrue(isMutuallyExclusiveParam("empty"))
         assertTrue(isMutuallyExclusiveParam("full"))
+        assertTrue(isMutuallyExclusiveParam("withinRange"), "范围内 与 包含队列中的 互斥（组内已用其一整组不再提示）")
+        assertTrue(isMutuallyExclusiveParam("factoryQueue"), "包含队列中的 与 范围内/包含未完成的 互斥")
+        assertTrue(isMutuallyExclusiveParam("incompleteBuildings"), "包含未完成的 与 包含队列中的 互斥")
         assertFalse(isMutuallyExclusiveParam("withTag"), "需标签 不是互斥条件参数")
         assertFalse(isMutuallyExclusiveParam("withActionTag"))
-        assertFalse(isMutuallyExclusiveParam("withinRange"), "范围内 不是互斥条件参数（可与其他参数组合）")
         assertFalse(isMutuallyExclusiveParam(""))
     }
 
@@ -517,7 +519,7 @@ class FunctionParameterCompletionTest {
 
     @Test
     fun enumParamSuggestionQuotesTranslatedChinese() {
-        // 有活动的路径点(type= 补 '移动'（字典命中），loadInto 保持英文
+        // 自身有活动的路径点(type= 补 '移动'（字典命中），loadInto 保持英文
         val items = buildParamValueSuggestions("enum", listOf("移动", "loadInto"), "")
         assertEquals(listOf("'移动'", "'loadInto'"), items.map { it.insertText }, "enum 值单引号包裹、未命中保持英文")
     }

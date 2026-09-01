@@ -7,6 +7,7 @@ import com.rwmodstudio.core.SettingsManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 资源名补全属性名单。
@@ -91,7 +92,7 @@ data class ResourceNameKeys(
                 val json = JSONObject().apply {
                     put("keys", JSONArray(keys))
                 }
-                file.writeText(json.toString(2), Charsets.UTF_8)
+                file.atomicWriteText(json.toString(2), Charsets.UTF_8)
                 SettingsManager.writeVerifyCode(SettingsManager.VERIFY_RESOURCE_NAME_KEYS, DEFAULT_VERIFY_CODE)
                 true
             } catch (e: Exception) {

@@ -6,16 +6,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +43,7 @@ fun DeveloperModeScreen(
         SettingsCard {
             var completionProvider by remember { mutableStateOf(SettingsManager.devCompletionProvider) }
             var valueCompletion by remember { mutableStateOf(SettingsManager.devValueCompletion) }
+            var valueCompletionExpanded by rememberSaveable { mutableStateOf(false) }
             var nonValueLimited by remember { mutableStateOf(SettingsManager.nonValueCompletionLimited) }
 
             DevSwitchCompact(
@@ -48,13 +54,15 @@ fun DeveloperModeScreen(
                 isFirst = true
             )
             DevDivider()
-            DevSwitchCompact(
+            DevExpandableSwitch(
                 icon = Icons.Default.Checklist,
                 title = "值自动补全",
                 checked = valueCompletion,
-                onCheckedChange = { valueCompletion = it; SettingsManager.devValueCompletion = it }
+                onCheckedChange = { valueCompletion = it; SettingsManager.devValueCompletion = it },
+                expanded = valueCompletionExpanded,
+                onExpandedChange = { valueCompletionExpanded = it }
             )
-            AnimatedVisibility(visible = valueCompletion) {
+            AnimatedVisibility(visible = valueCompletion && valueCompletionExpanded) {
                 Column {
                     DevDivider(startIndent = 40.dp)
                     DevSwitchCompact(
@@ -165,10 +173,26 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.Check,
+                title = "完全匹配翻译",
+                subtitle = "补全表：无符号分割的英文/中文视为整体，仅整段命中才翻译（如 priceCredits 不再拆译）",
+                checked = SettingsManager.devFullMatchTranslation,
+                onCheckedChange = { SettingsManager.devFullMatchTranslation = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.BugReport,
                 title = "Debug 任务进度",
                 checked = SettingsManager.devDebugTaskProgress,
-                onCheckedChange = { SettingsManager.devDebugTaskProgress = it },
+                onCheckedChange = { SettingsManager.devDebugTaskProgress = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.RocketLaunch,
+                title = "多线程",
+                subtitle = "并行：缓存预热/项目扫描/搜索/版本对比",
+                checked = SettingsManager.devParallelPreheat,
+                onCheckedChange = { SettingsManager.devParallelPreheat = it },
                 isLast = true
             )
         }
@@ -238,8 +262,7 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.SubdirectoryArrowRight,
                 title = "软换行提示符",
                 checked = SettingsManager.wrapIndicatorEnabled,
-                onCheckedChange = { SettingsManager.wrapIndicatorEnabled = it },
-                isLast = true
+                onCheckedChange = { SettingsManager.wrapIndicatorEnabled = it }
             )
         }
 
@@ -250,6 +273,7 @@ fun DeveloperModeScreen(
             DevSwitchCompact(
                 icon = Icons.Default.Save,
                 title = "后台暂停保存",
+                subtitle = "关闭后，即使开启自动保存，退到后台也不会自动保存（可能丢最后一次修改）",
                 checked = SettingsManager.devSaveOnPause,
                 onCheckedChange = { SettingsManager.devSaveOnPause = it },
                 isFirst = true,
@@ -278,6 +302,124 @@ fun DeveloperModeScreen(
             )
         }
 
+        Spacer(Modifier.height(16.dp))
+
+        SectionHeader(Icons.Default.SmartToy, "AI 助手")
+        SettingsCard {
+            var aiBaseUrl by remember { mutableStateOf(SettingsManager.aiBaseUrl) }
+            // 仅当用户自定义过 Key 时才回显明文；使用内置默认 Key 时一律隐藏、不可查看
+            var keyIsUserSet by remember { mutableStateOf(SettingsManager.isAiApiKeyUserSet()) }
+            // keyIsUserSet 变化时重新读取模型（默认密钥下 getter 强制返回锁定模型）
+            var aiModel by remember(keyIsUserSet) { mutableStateOf(SettingsManager.aiModel) }
+            var aiApiKey by remember { mutableStateOf(if (keyIsUserSet) SettingsManager.aiApiKey else "") }
+            var showKey by rememberSaveable { mutableStateOf(false) }
+
+            DevTextField(
+                icon = Icons.Default.Link,
+                label = "服务地址",
+                value = aiBaseUrl,
+                onValueChange = { aiBaseUrl = it; SettingsManager.aiBaseUrl = it },
+                placeholder = "https://.../v1",
+                isFirst = true
+            )
+            DevDivider()
+            DevTextField(
+                icon = Icons.Default.ModelTraining,
+                label = "模型",
+                value = aiModel,
+                onValueChange = { aiModel = it; SettingsManager.aiModel = it },
+                placeholder = "sensenova-6.8-flash-lite",
+                enabled = keyIsUserSet
+            )
+            DevDivider()
+            DevTextField(
+                icon = Icons.Default.VpnKey,
+                label = "API Key",
+                value = aiApiKey,
+                onValueChange = {
+                    aiApiKey = it
+                    if (it.isBlank()) {
+                        // 清空 = 清除用户自定义，回退默认 Key
+                        SettingsManager.clearAiApiKey()
+                        keyIsUserSet = false
+                        showKey = false
+                    } else {
+                        SettingsManager.aiApiKey = it
+                        keyIsUserSet = true
+                    }
+                },
+                placeholder = if (keyIsUserSet) "sk-..." else "使用内置默认密钥（不可查看）",
+                isPassword = true,
+                passwordVisible = showKey,
+                trailing = {
+                    if (keyIsUserSet) {
+                        IconButton(
+                            onClick = { showKey = !showKey },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (showKey) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (showKey) "隐藏" else "显示",
+                                tint = RustedOnBackground.copy(alpha = 0.5f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                },
+                isLast = false
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Lock, null, Modifier.size(14.dp),
+                    tint = RustedOnBackground.copy(alpha = 0.4f)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (keyIsUserSet)
+                        "自定义密钥密文存储；填入自定义 Key 后可自由配置模型，清空可恢复默认"
+                    else
+                        "内置默认密钥不可查看，且锁定 sensenova-6.8-flash-lite 模型；填入自定义 Key 后可配置模型",
+                    fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.45f)
+                )
+            }
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.AutoAwesome,
+                title = "AI 辅助补全",
+                subtitle = "编辑器「更多」菜单中按需调用，根据光标上下文续写代码",
+                checked = SettingsManager.devAiCompletion,
+                onCheckedChange = { SettingsManager.devAiCompletion = it }
+            )
+            DevSwitchCompact(
+                icon = Icons.Default.Refresh,
+                title = "流式输出",
+                subtitle = "边生成边显示，首条建议秒出；模型不支持流式时自动降级",
+                checked = SettingsManager.aiStreaming,
+                onCheckedChange = { SettingsManager.aiStreaming = it },
+                isChild = true
+            )
+            DevSwitchCompact(
+                icon = Icons.Default.Star,
+                title = "本地即时建议",
+                subtitle = "点击瞬间先用本地规则出内容（同类节已用键/代码参考库），不等网络",
+                checked = SettingsManager.aiLocalFallback,
+                onCheckedChange = { SettingsManager.aiLocalFallback = it },
+                isChild = true
+            )
+            DevSwitchCompact(
+                icon = Icons.Default.Build,
+                title = "空闲预取",
+                subtitle = "输入停顿 2 秒后后台提前算好建议并缓存，点击即命中（约 30 秒节流）",
+                checked = SettingsManager.aiPrefetchEnabled,
+                onCheckedChange = { SettingsManager.aiPrefetchEnabled = it },
+                isChild = true,
+                isLast = true
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -286,6 +428,7 @@ fun DeveloperModeScreen(
 private fun DevSwitchCompact(
     icon: ImageVector,
     title: String,
+    subtitle: String = "",
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     isChild: Boolean = false,
@@ -326,12 +469,98 @@ private fun DevSwitchCompact(
             modifier = Modifier.size(18.dp)
         )
         Spacer(Modifier.width(10.dp))
-        Text(
-            text = title,
-            fontSize = 13.sp,
-            color = RustedOnBackground,
-            modifier = Modifier.weight(1f)
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                color = RustedOnBackground
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 10.sp,
+                    color = RustedOnBackground.copy(alpha = 0.45f)
+                )
+            }
+        }
+        Switch(
+            checked = currentValue,
+            onCheckedChange = { currentValue = it; onCheckedChange(it) },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = RustedPrimary,
+                checkedTrackColor = RustedPrimary.copy(alpha = 0.3f)
+            )
         )
+    }
+}
+
+/** 可折叠的开发模式开关：右侧折叠箭头与开关独立点击，子项默认收起 */
+@Composable
+private fun DevExpandableSwitch(
+    icon: ImageVector,
+    title: String,
+    subtitle: String = "",
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    isFirst: Boolean = false,
+    isLast: Boolean = false
+) {
+    var currentValue by remember(checked) { mutableStateOf(checked) }
+    val verticalPadding = if (isFirst) 10.dp else if (isLast) 10.dp else 8.dp
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(
+                when {
+                    isFirst && isLast -> RoundedCornerShape(16.dp)
+                    isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                    isLast -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                    else -> RoundedCornerShape(0.dp)
+                }
+            )
+            .clickable { currentValue = !currentValue; onCheckedChange(!currentValue) }
+            .padding(start = 12.dp, end = 12.dp, top = verticalPadding, bottom = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = RustedOnBackground.copy(alpha = 0.65f),
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                color = RustedOnBackground
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 10.sp,
+                    color = RustedOnBackground.copy(alpha = 0.45f)
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { onExpandedChange(!expanded) }
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (expanded) Icons.Default.KeyboardArrowDown
+                else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = RustedOnBackground.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(Modifier.width(4.dp))
         Switch(
             checked = currentValue,
             onCheckedChange = { currentValue = it; onCheckedChange(it) },
@@ -403,6 +632,70 @@ private fun DevActionRow(
             contentDescription = null,
             tint = RustedOnBackground.copy(alpha = 0.4f),
             modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+/** 开发模式文本输入行：图标 + 标签 + OutlinedTextField，圆角与 DevSwitchCompact 对齐 */
+@Composable
+private fun DevTextField(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String = "",
+    isPassword: Boolean = false,
+    passwordVisible: Boolean = false,
+    enabled: Boolean = true,
+    trailing: @Composable (() -> Unit)? = null,
+    isFirst: Boolean = false,
+    isLast: Boolean = false
+) {
+    val verticalPadding = if (isFirst) 10.dp else if (isLast) 10.dp else 6.dp
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(
+                when {
+                    isFirst && isLast -> RoundedCornerShape(16.dp)
+                    isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                    isLast -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                    else -> RoundedCornerShape(0.dp)
+                }
+            )
+            .padding(start = 12.dp, end = 12.dp, top = verticalPadding, bottom = verticalPadding)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = RustedOnBackground.copy(alpha = 0.65f),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(label, fontSize = 13.sp, color = RustedOnBackground)
+        }
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = enabled,
+            placeholder = { Text(placeholder, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.3f)) },
+            textStyle = androidx.compose.ui.text.TextStyle(
+                fontSize = 13.sp,
+                color = RustedOnBackground,
+                fontFamily = AppCodeFontFamily
+            ),
+            visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = if (isPassword) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
+            trailingIcon = trailing?.let { cb -> { cb() } },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = RustedPrimary,
+                unfocusedBorderColor = RustedOnBackground.copy(alpha = 0.2f),
+                cursorColor = RustedPrimary
+            )
         )
     }
 }

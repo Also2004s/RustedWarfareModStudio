@@ -38,6 +38,10 @@ object RainbowColorUtils {
      * 与 [SoraEditorInitializer.applyRainbowBracketColors] 的兜底逻辑保持一致。
      */
     fun defaultBracketColor(themeName: String): Int {
+        // 浅色预设（含导入的浅色主题）用金色，深色用淡紫
+        if (com.rwmodstudio.core.HighlightThemeManager.findPreset(themeName)?.isDark == false) {
+            return 0xFFdeae12.toInt()
+        }
         return if (themeName in setOf("light", "pure")) {
             0xFFdeae12.toInt()
         } else {

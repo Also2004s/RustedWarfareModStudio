@@ -3,6 +3,7 @@ package com.rwmodstudio.core
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.rwmodstudio.util.atomicWriteText
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
@@ -54,6 +55,15 @@ class FileSettings private constructor(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load settings from $file", e)
+                // 文件损坏（非空但解析失败）：备份现场，避免后续 persist 用空内存覆盖掉损坏文件里的数据
+                try {
+                    val bak = File(file.parentFile, file.name + ".corrupt")
+                    if (file.renameTo(bak)) {
+                        Log.w(TAG, "settings.json 损坏，已备份为 ${bak.name}，本次使用默认设置")
+                    }
+                } catch (renameErr: Exception) {
+                    Log.e(TAG, "Failed to backup corrupt settings file", renameErr)
+                }
             }
         }
     }
@@ -77,7 +87,8 @@ class FileSettings private constructor(
                             else -> json.put(k, v.toString())
                         }
                     }
-                    file.writeText(json.toString(2), Charsets.UTF_8)
+                    // 原子写：避免写一半被杀导致 settings.json 损坏、下次启动解析失败全部设置回默认
+                    file.atomicWriteText(json.toString(2), Charsets.UTF_8)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to save settings to $file", e)
                 }

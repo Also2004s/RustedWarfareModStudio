@@ -2,6 +2,7 @@ package com.rwmodstudio.core
 
 import android.util.Log
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * 项目标签/资源/内存扫描器。
@@ -28,10 +29,21 @@ object ProjectTagScanner {
     private const val MAX_FILES = 5000
     private const val MAX_ITEMS_PER_CATEGORY = 2000
 
+    /** 项目扫描并行线程池（daemon 线程，随进程回收；受开发者模式多线程开关控制） */
+    private val scanPool = Executors.newFixedThreadPool(
+        minOf(4, maxOf(1, Runtime.getRuntime().availableProcessors()))
+    ) { r -> Thread(r, "TagScan").apply { isDaemon = true } }
+
     data class TagReference(
         val file: File,
         val line: Int,
         val rawLine: String
+    )
+
+    /** 单位 [core] 节建造信息（价格/建造速度），供单位名补全右侧详情展示 */
+    data class UnitBuildInfo(
+        val price: String = "",
+        val buildSpeed: String = ""
     )
 
     data class ProjectTagInfo(
@@ -56,7 +68,9 @@ object ProjectTagScanner {
         /** 局部变量（@define 变量名）按节归属：节名（小写原始名）→ 变量名集合，供 ${} 引用（仅当前节+继承链可见） */
         val sectionDefines: Map<String, Set<String>> = emptyMap(),
         /** 行动标签：行动/隐藏行动 节内的 tags: 取值（withActionTag 供 队列项目添加/取消、自身队列量 补全） */
-        val actionTags: Set<String> = emptySet()
+        val actionTags: Set<String> = emptySet(),
+        /** 单位 [core] 节建造信息：单位名 → 价格/建造速度（供单位名补全右侧详情展示） */
+        val unitData: Map<String, UnitBuildInfo> = emptyMap()
     ) {
         companion object {
             val EMPTY = ProjectTagInfo(emptySet(), emptySet(), emptySet(), emptySet(), emptySet(), emptySet(), emptySet(), emptyMap(), emptyMap())
@@ -78,29 +92,42 @@ object ProjectTagScanner {
         val globalVariables: MutableSet<String> = linkedSetOf(),
         val sectionDefines: MutableMap<String, MutableSet<String>> = linkedMapOf(),
         /** 行动标签：行动/隐藏行动 节内的 tags: 取值（与单位标签 info.tags 分离，不污染单位标签补全） */
-        val actionTags: MutableSet<String> = linkedSetOf()
+        val actionTags: MutableSet<String> = linkedSetOf(),
+        /** 单位 [core] 节建造信息：单位名 → 价格/建造速度 */
+        val unitData: MutableMap<String, UnitBuildInfo> = linkedMapOf()
     )
 
     /**
      * 同步扫描项目目录。调用方应自行切到 IO 线程。
+     * 多线程开关开启时并行扫描每个文件（分片），再串行合并，保证共享状态线程安全。
      */
     fun scan(root: File): ProjectTagInfo {
         if (!root.exists() || !root.isDirectory) return ProjectTagInfo.EMPTY
 
-        val info = MutableInfo()
-        var scannedFiles = 0
-        try {
+        val files = try {
             root.walkTopDown()
                 .onFail { _, _ -> }
                 .filter { it.isFile && it.extension.lowercase() in INI_EXTENSIONS }
                 .take(MAX_FILES)
-                .forEach { file ->
-                    scannedFiles++
-                    scanFile(file, root, info)
-                }
+                .toList()
         } catch (_: Exception) {
-            // 扫描异常时返回已收集部分
+            emptyList()
         }
+
+        // 每个文件独立解析为分片；多线程开关开启时并行，否则串行
+        val infos = if (SettingsManager.devParallelPreheat && files.size > 1) {
+            val futures = files.map { file ->
+                scanPool.submit<MutableInfo> { scanFileToInfo(file, root) }
+            }
+            futures.mapNotNull { runCatching { it.get() }.getOrNull() }
+        } else {
+            files.map { scanFileToInfo(it, root) }
+        }
+
+        // 串行合并分片（保持 addLimited 上限与 references 追加语义）
+        val info = MutableInfo()
+        infos.forEach { mergeInfo(info, it) }
+
         val result = ProjectTagInfo(
             tags = info.tags.sorted().toSet(),
             globalTags = info.globalTags.sorted().toSet(),
@@ -115,9 +142,10 @@ object ProjectTagScanner {
             memoryTypePairs = info.memoryTypePairs.sortedBy { it.first },
             globalVariables = info.globalVariables.sorted().toSet(),
             sectionDefines = info.sectionDefines.mapValues { it.value.sorted().toSet() },
-            actionTags = info.actionTags.sorted().toSet()
+            actionTags = info.actionTags.sorted().toSet(),
+            unitData = info.unitData.toMap()
         )
-        Log.d(TAG, "Scanned $scannedFiles files: tags=${result.tags.size}, globalTags=${result.globalTags.size}, messageTags=${result.messageTags.size}, actionTags=${result.actionTags.size}, resources=${result.resources.size}, globalResources=${result.globalResources.size}, memories=${result.memories.size}, unitNames=${result.unitNames.size}, globalVariables=${result.globalVariables.size}")
+        Log.d(TAG, "Scanned ${files.size} files: tags=${result.tags.size}, globalTags=${result.globalTags.size}, messageTags=${result.messageTags.size}, actionTags=${result.actionTags.size}, resources=${result.resources.size}, globalResources=${result.globalResources.size}, memories=${result.memories.size}, unitNames=${result.unitNames.size}, globalVariables=${result.globalVariables.size}")
         cachedInfo = result
         scannedRoot = root.absolutePath
         return result
@@ -225,15 +253,21 @@ object ProjectTagScanner {
         }
     }
 
-    private fun scanFile(file: File, root: File, info: MutableInfo) {
+    /** 单文件解析：返回独立分片（线程隔离，多线程安全），供并行/串行扫描共用 */
+    private fun scanFileToInfo(file: File, root: File): MutableInfo {
+        val info = MutableInfo()
         val relPath = try { file.relativeTo(root).path } catch (_: Exception) { file.name }
         // 先完整读取文件，第一遍收集 @define / @global 变量，第二遍解析引用
-        val lines = try { file.readLines() } catch (_: Exception) { return }
+        val lines = try { file.readLines() } catch (_: Exception) { return info }
         val defines = collectDefines(lines)
 
         var inCoreSection = false
         var inActionSection = false
         var currentSection = ""
+        // 当前 [core] 节的单位建造信息（节尾/文件尾冲刷进 info.unitData）
+        var coreUnitName: String? = null
+        var corePrice = ""
+        var coreBuildSpeed = ""
 
         lines.forEachIndexed { index, rawLine ->
             val line = rawLine.trim()
@@ -244,6 +278,13 @@ object ProjectTagScanner {
             val sectionHeader = genericSectionRegex.find(line)
             if (sectionHeader != null) {
                 val sectionName = sectionHeader.groupValues[1].trim().lowercase()
+                // 离开 core 节时冲刷已收集的单位建造信息
+                if (inCoreSection && coreUnitName != null) {
+                    info.unitData[coreUnitName!!] = UnitBuildInfo(corePrice, coreBuildSpeed)
+                    coreUnitName = null
+                    corePrice = ""
+                    coreBuildSpeed = ""
+                }
                 currentSection = sectionName
                 inCoreSection = sectionName == "core"
                 // 行动标签范围：仅 行动/隐藏行动 节内的 tags 值（与编辑端 extractCurrentFileSymbols 一致）
@@ -309,6 +350,17 @@ object ProjectTagScanner {
                             values.forEach { v ->
                                 addLimited(info.unitNames, v, info.references, file, lineNo, rawLine)
                             }
+                            coreUnitName = values.firstOrNull() ?: coreUnitName
+                        }
+                    }
+                    TagKey.PRICE -> {
+                        if (inCoreSection) {
+                            corePrice = rawValue.split('#').first().trim()
+                        }
+                    }
+                    TagKey.BUILD_SPEED -> {
+                        if (inCoreSection) {
+                            coreBuildSpeed = rawValue.split('#').first().trim()
                         }
                     }
                     else -> {}
@@ -336,6 +388,11 @@ object ProjectTagScanner {
                 }
             }
         }
+        // 文件尾冲刷最后一个 [core] 节的单位建造信息
+        if (inCoreSection && coreUnitName != null) {
+            info.unitData[coreUnitName!!] = UnitBuildInfo(corePrice, coreBuildSpeed)
+        }
+        return info
     }
 
     /**
@@ -395,15 +452,59 @@ object ProjectTagScanner {
         }
     }
 
+    /**
+     * 串行合并各文件分片到目标 MutableInfo。
+     * 保持 addLimited 的全局上限语义与 references 引用追加语义（与串行扫描结果一致）。
+     */
+    private fun mergeInfo(dst: MutableInfo, src: MutableInfo) {
+        mergeCategory(dst, src.tags, src.references, dst.tags)
+        mergeCategory(dst, src.globalTags, src.references, dst.globalTags)
+        mergeCategory(dst, src.messageTags, src.references, dst.messageTags)
+        mergeCategory(dst, src.resources, src.references, dst.resources)
+        mergeCategory(dst, src.globalResources, src.references, dst.globalResources)
+        mergeCategory(dst, src.memories, src.references, dst.memories)
+        mergeCategory(dst, src.unitNames, src.references, dst.unitNames)
+        mergeCategory(dst, src.actionTags, src.references, dst.actionTags)
+        // 命名节 / 节内 @define / 内存类型 / 全局变量：无 references 上限，直接合并
+        src.sectionNames.forEach { (base, names) ->
+            dst.sectionNames.getOrPut(base) { linkedSetOf() }.addAll(names)
+        }
+        src.sectionDefines.forEach { (sec, vars) ->
+            dst.sectionDefines.getOrPut(sec) { linkedSetOf() }.addAll(vars)
+        }
+        dst.memoryTypes.putAll(src.memoryTypes)
+        dst.memoryTypePairs.addAll(src.memoryTypePairs)
+        dst.globalVariables.addAll(src.globalVariables)
+        dst.unitData.putAll(src.unitData)
+    }
+
+    /** 合并一个分类集合：受 MAX_ITEMS_PER_CATEGORY 全局上限约束，并把 src 的引用追加到目标 */
+    private fun mergeCategory(
+        dst: MutableInfo,
+        srcSet: Set<String>,
+        srcRefs: Map<String, List<TagReference>>,
+        dstSet: MutableSet<String>
+    ) {
+        for (v in srcSet) {
+            if (dstSet.size >= MAX_ITEMS_PER_CATEGORY && v !in dstSet) continue
+            if (dstSet.add(v)) {
+                dst.references[v] = mutableListOf()
+            }
+            srcRefs[v]?.let { refs ->
+                dst.references.getOrPut(v) { mutableListOf() }.addAll(refs)
+            }
+        }
+    }
+
     private enum class SectionType { RESOURCE, GLOBAL_RESOURCE, OTHER }
-    private enum class TagKey { TAGS, TEMP_TAG_ADD, ADD_GLOBAL_TAG, MESSAGE_TAG, NAME, OTHER }
+    private enum class TagKey { TAGS, TEMP_TAG_ADD, ADD_GLOBAL_TAG, MESSAGE_TAG, NAME, PRICE, BUILD_SPEED, OTHER }
 
     // 通用节头：[xxx] 或 [xxx_yyy]
     private val genericSectionRegex = Regex("""^\[([^\]]+)\]$""")
     // 节名：支持 [资源_xxx]、[resource_xxx]、[全局资源_xxx]、[globalResource_xxx]、[global_resource_xxx]
     private val sectionRegex = Regex("""^\[((?:全局资源|globalResource|global_resource|资源|resource))_([^\]]+)\]$""", RegexOption.IGNORE_CASE)
-    // 键值对：tags / 临时标签添加 / 添加全局标签 / 带标签发送消息 / name（含英文、下划线、复数、队伍变体）
-    private val kvRegex = Regex("""^(\s*(tags|临时标签添加|tempTagAdd|temp_tag_add|添加全局标签|addGlobalTag|add_global_tag|addGlobalTags|add_global_tags|addGlobalTeamTags|add_global_team_tags|带标签发送消息|sendMessageWithTags|name)\s*):\s*(.*)$""", RegexOption.IGNORE_CASE)
+    // 键值对：tags / 临时标签添加 / 添加全局标签 / 带标签发送消息 / name / price / buildSpeed（含英文、下划线、复数、队伍变体、中文）
+    private val kvRegex = Regex("""^(\s*(tags|临时标签添加|tempTagAdd|temp_tag_add|添加全局标签|addGlobalTag|add_global_tag|addGlobalTags|add_global_tags|addGlobalTeamTags|add_global_team_tags|带标签发送消息|sendMessageWithTags|name|price|价格|buildSpeed|建造速度)\s*):\s*(.*)$""", RegexOption.IGNORE_CASE)
     private val memoryRegex = Regex("""@memory\s+(\S+)\s*:""")
     // @memory name:type（类型可选，供 unit 型内存变量链式补全）
     private val memoryTypeRegex = Regex("""@memory\s+(\S+)\s*:\s*(\S+)""", RegexOption.IGNORE_CASE)
@@ -466,6 +567,8 @@ object ProjectTagScanner {
             "添加全局标签", "addglobaltag", "add_global_tag", "addglobaltags", "add_global_tags", "addglobalteamtags", "add_global_team_tags" -> TagKey.ADD_GLOBAL_TAG
             "带标签发送消息", "sendmessagewithtags" -> TagKey.MESSAGE_TAG
             "name" -> TagKey.NAME
+            "price", "价格" -> TagKey.PRICE
+            "buildspeed", "建造速度" -> TagKey.BUILD_SPEED
             else -> TagKey.OTHER
         }
         return key to match.groupValues[3].trim()

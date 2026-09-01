@@ -6,6 +6,7 @@ import com.rwmodstudio.core.RwmodPaths
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 保存历史管理器：记录最近 20 次文件保存的前后内容，供「近期修改」查看差异。
@@ -64,9 +65,13 @@ object SaveHistoryManager {
         init(context)
         // 内容没变化的保存不记录，避免占用缓存
         if (sameContent(beforeContent, afterContent)) return
+        // 去重：同一文件连续记录且 beforeContent 相同，是并发写盘双读旧值的标志（合法链中连续 before 必不同）。
+        // 全局写锁下正常保存不会触发；此守卫防止并发写盘导致的重复记录/历史链断裂。
+        val last = records.firstOrNull { it.filePath == filePath }
+        if (last != null && last.beforeContent == beforeContent) return
         records.add(0, SaveRecord(filePath, System.currentTimeMillis(), beforeContent, afterContent))
-        // 净差异为零的文件（改了一通又改回来）清除其所有记录；全量检查顺带自愈存量数据
-        removeNetZeroRecords()
+        // 只对当前文件做净零检查（改了一通又改回来即清记录），避免每次保存全量 diff 历史大文件拖慢保存
+        removeNetZeroRecordsFor(filePath)
         val limit = maxRecords()
         if (records.size > limit) {
             records = records.take(limit).toMutableList()
@@ -74,8 +79,26 @@ object SaveHistoryManager {
         save(context)
     }
 
-    /** 与差异视图一致的「无差异」判定：逐行比较，容忍行尾符/末尾换行差异 */
-    private fun sameContent(a: String, b: String) = a == b || a.lines() == b.lines()
+    /** 与差异视图一致的「无差异」判定：忽略空白（与 computeLineDiff 相同规则），容忍行尾符/末尾换行差异 */
+    private fun sameContent(a: String, b: String): Boolean {
+        if (a == b) return true
+        // 快速否定：逐行归一化相等 ⇒ 全串去空白后必然相等；故全串去空白后不等时无需再跑 LCS。
+        // 大多数保存都确实改了内容，走这里直接 O(长度) 返回，避免大文件时 computeLineDiff 的 O(m*n) 动态规划。
+        if (a.normalizedForDiff() != b.normalizedForDiff()) return false
+        return computeLineDiff(a.lines(), b.lines()).all { it.type == ' ' }
+    }
+
+    /** 只对指定文件做净零检查：该文件「首次保存前 → 最后修改后」无净差异则清除其所有记录 */
+    private fun removeNetZeroRecordsFor(filePath: String): Boolean {
+        val list = records.filter { it.filePath == filePath }
+        if (list.size < 2) return false
+        val same = sameContent(list.last().beforeContent, list.first().afterContent)
+        if (same) {
+            records.removeAll { it.filePath == filePath }
+            return true
+        }
+        return false
+    }
 
     /** 清除「首次保存前 → 最后修改后」无净差异的文件记录，有移除返回 true */
     private fun removeNetZeroRecords(): Boolean {
@@ -141,7 +164,7 @@ object SaveHistoryManager {
         init(context)
         val earliestBefore = records.filter { it.filePath == filePath }.minByOrNull { it.timestamp }?.beforeContent ?: return false
         return try {
-            File(filePath).writeText(earliestBefore, Charsets.UTF_8)
+            File(filePath).atomicWriteText(earliestBefore, Charsets.UTF_8)
             records.removeAll { it.filePath == filePath }
             save(context)
             true
@@ -165,7 +188,7 @@ object SaveHistoryManager {
                 })
             }
             val json = JSONObject().apply { put("records", array) }
-            file.writeText(json.toString(2), Charsets.UTF_8)
+            file.atomicWriteText(json.toString(2), Charsets.UTF_8)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save save_history.json", e)
         }

@@ -117,10 +117,24 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
 
         // 光标在 '(' 或 ',' 后 → 补未使用的参数名
         val used = usedParamKeysInParens(request.textBeforeCursor, fn.params.flatMap { listOfNotNull(it.key, it.zh) })
+        // 互斥条件参数按组排除：某组内已用其中一个时整组不再提示（如已填「超过」后不再提示「少于/等于/空的/满」，
+        // 已填「包含队列中的」后不再提示「范围内/包含未完成的」），避免重复/矛盾组合
+        val excluded = used.toMutableSet()
+        for (group in MUTUALLY_EXCLUSIVE_GROUPS) {
+            val groupUsed = fn.params.any { p ->
+                p.key.lowercase() in group && (p.key in used || p.zh in used)
+            }
+            if (groupUsed) {
+                fn.params.filter { p -> p.key.lowercase() in group }.forEach {
+                    excluded.add(it.key)
+                    excluded.add(it.zh)
+                }
+            }
+        }
         val prefix = request.valuePrefix
         val hasMutexGroup = fn.params.any { isMutuallyExclusiveParam(it.key) }
         return fn.params
-            .filter { it.key !in used && it.zh !in used }
+            .filter { it.key !in excluded && it.zh !in excluded }
             // 位置参数（读取单位内存/事件数据的 name）不作为参数名补全候选
             .filter { !(fn.params.firstOrNull()?.key == "name" && it.key == "name") }
             .map { it to matchesParamPrefix(it, prefix) }
@@ -128,15 +142,20 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
             .sortedWith(compareByDescending<Pair<ParamDataLoader.ParamItem, Int>> { it.second })
             .map { it.first }
             .map { param ->
-                val insert = "${param.zh}="
+                // 语言总闸：参数键的插入语言跟随翻译引擎开关。开→中文视图参数键（关系=，保存反译回 relation）；
+                // 关→插英文参数键（relationship=），不硬编码中文。
+                val keyLabel = if (com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) param.zh else param.key
+                val insert = "$keyLabel="
                 createValueItem(
                     label = insert,
-                    // 条件 getter 的互斥参数组（超过/少于/等于/空的/满）标注，避免误导组合使用
-                    detail = if (hasMutexGroup && isMutuallyExclusiveParam(param.key)) {
-                        "条件参数（互斥）"
-                    } else {
-                        paramTypeDetail(param.type)
-                    },
+                    // 参数说明优先取自 value_desc.json（data.value.param.<key>，如 超过→数量大于该值时成立）；
+                    // 未配说明时回退：条件 getter 互斥参数组（超过/少于/等于/空的/满）标注互斥，其余标参数类型。
+                    detail = ValueDescriptionRepository.lookup(request.context, "data.value.param.${param.key}")
+                        ?: if (hasMutexGroup && isMutuallyExclusiveParam(param.key)) {
+                            "条件参数（互斥）"
+                        } else {
+                            paramTypeDetail(param.type)
+                        },
                     insertText = insert,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = paramTypeValueType(param.type)
@@ -246,13 +265,32 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
                 memoryNames = request.memoryNames, memoryTypes = request.memoryTypes
             )
         }
-        // enum/type/relation 值经翻译库翻译：字典命中才显示中文（如 move→移动、own→己方），未命中保持英文（如 notOwn）；
+        // enum/type/relation 值经翻译库翻译：字典命中才显示中文（如 move→移动、own→己方），未命中保持英文原样；
         // 不改翻译引擎、不新增字典条目，保存反译依赖字典既有 zhToEn 映射。
         val translated = translateDictValues(values, request.translationDict, param.type in setOf("enum", "type", "relation"))
-        return buildParamValueSuggestions(param.type, translated, afterEq, prefixLength = rawAfterEq.length).map { suggestion ->
+        // 参数枚举值的中文说明：配置了 valueFile（如 addWaypoint_type/relation）时按
+        // data.value.<valueFile>.<英文值> 查 value_desc.json，为每个值附带说明（如 回收/修理），
+        // 未配置 valueFile 或未命中回退参数类型说明。
+        val valueDetails: Map<String, String> = if (param.valueFile.isNotBlank()) {
+            val file = param.valueFile.lowercase()
+            buildMap {
+                for (i in values.indices) {
+                    val en = values[i]
+                    val display = if (i < translated.size) translated[i] else en
+                    ValueDescriptionRepository.lookup(request.context, "data.value.$file.${en.lowercase()}")?.let {
+                        put(display, it)
+                    }
+                }
+            }
+        } else emptyMap()
+        return buildParamValueSuggestions(
+            param.type, translated, afterEq,
+            prefixLength = rawAfterEq.length,
+            details = valueDetails
+        ).map { suggestion ->
             createValueItem(
                 label = suggestion.label,
-                detail = paramTypeDetail(param.type),
+                detail = suggestion.detail ?: paramTypeDetail(param.type),
                 insertText = suggestion.insertText,
                 prefixLength = suggestion.prefixLength,
                 valueType = paramTypeValueType(param.type)
@@ -475,7 +513,8 @@ internal fun usedParamKeysInParens(lineBeforeCursor: String, paramKeys: List<Str
 internal data class ParamValueSuggestion(
     val label: String,
     val insertText: String,
-    val prefixLength: Int
+    val prefixLength: Int,
+    val detail: String? = null
 )
 
 /**
@@ -484,30 +523,44 @@ internal data class ParamValueSuggestion(
  */
 internal fun translateDictValues(values: List<String>, dict: TranslationDict?, translate: Boolean): List<String> {
     if (!translate || dict?.isLoaded != true) return values
+    // 语言总闸：翻译引擎开关关闭（即便字典仍存活）时不翻译，保持英文原样。
+    if (!com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) return values
     return values.map { dict.getValueTranslation(it) }
 }
 
 /**
- * 互斥条件参数组：条件 getter（自身血量/自身队列量/自身运输数量等）的一次调用里只能使用其中一个。
- * 真实 MOD 均为单参数使用（自身血量(少于=1)、自身队列量(空的=true)）；代码表 desc 列出全部参数，补全时标注互斥。
+ * 互斥条件参数组：同组参数在一次调用里只能使用其中一个（经真实项目验证从未共存）。
+ * - 数量阈值组：超过/少于/等于/空的/满（用于 自身血量/自身队列量/弹药量/能量 等 getter）
+ * - 时间组：几秒内/几秒后（用于 受到伤害/存活时间/最近被转换/自定义计时器）
+ * - 队列组：包含队列中的 与 范围内、包含未完成的 两两互斥（队列判定与距离/完成度判定在真实项目中从不混用；
+ *   但 范围内 与 包含未完成的 可共存，如 范围内=460, 包含未完成的=true）
+ * 真实 MOD 均为单参数使用；代码表 desc 列出全部参数，补全时标注互斥、组内已用其一后整组不再提示。
  */
-internal val MUTUALLY_EXCLUSIVE_PARAMS = setOf("greaterthan", "lessthan", "equalto", "empty", "full")
+internal val MUTUALLY_EXCLUSIVE_GROUPS: List<Set<String>> = listOf(
+    setOf("greaterthan", "lessthan", "equalto", "empty", "full"),
+    setOf("withinseconds", "laterthanseconds"),
+    setOf("withinrange", "factoryqueue"),
+    setOf("incompletebuildings", "factoryqueue")
+)
 
-/** 是否为互斥条件参数（超过/少于/等于/空的/满） */
-internal fun isMutuallyExclusiveParam(key: String): Boolean = key.lowercase() in MUTUALLY_EXCLUSIVE_PARAMS
+/** 是否为互斥条件参数（属于任一互斥组：超过/少于/等于/空的/满、几秒内/几秒后、包含队列中的） */
+internal fun isMutuallyExclusiveParam(key: String): Boolean =
+    MUTUALLY_EXCLUSIVE_GROUPS.any { key.lowercase() in it }
 
 /**
  * 构建 param= 后的值建议。
  * [quoteTypes] 中的字符串型参数（tag/messageTag/actionTag/type/relation/enum/memoryName）值需用单引号包裹
  * （代码表写法如 需标签='fish'、队列项目取消(withActionTag="actionFire")、读取单位内存('攻击目标', type='unit')）；
  * 匹配前缀先去除用户已输入的引号（'fi / "fi → fish），prefixLength 保留已输入片段长度以替换掉引号。
+ * [details] 为「显示值 → 中文说明」映射（参数枚举值来自 value_desc.json），命中时附加到补全项副标题。
  */
 internal fun buildParamValueSuggestions(
     paramType: String,
     values: List<String>,
     typedAfterEq: String,
     quoteTypes: Set<String> = setOf("tag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName"),
-    prefixLength: Int = typedAfterEq.length
+    prefixLength: Int = typedAfterEq.length,
+    details: Map<String, String> = emptyMap()
 ): List<ParamValueSuggestion> {
     val quote = paramType in quoteTypes
     val matchPrefix = if (quote) typedAfterEq.trim('\'', '"') else typedAfterEq
@@ -523,6 +576,11 @@ internal fun buildParamValueSuggestions(
         .map { it.first }
         .map { value ->
             val insert = if (quote) "'$value'" else value
-            ParamValueSuggestion(label = insert, insertText = insert, prefixLength = prefixLength)
+            ParamValueSuggestion(
+                label = insert,
+                insertText = insert,
+                prefixLength = prefixLength,
+                detail = details[value]
+            )
         }
 }

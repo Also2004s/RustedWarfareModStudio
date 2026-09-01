@@ -628,6 +628,7 @@
           "key": "type",
           "zh": "type",
           "type": "enum",
+          "valueFile": "addWaypoint_type",
           "values": [
             "move",
             "attackMove",
@@ -778,6 +779,7 @@
           "key": "type",
           "zh": "type",
           "type": "enum",
+          "valueFile": "isOverPassableTile",
           "values": [
             "NONE",
             "LAND",
@@ -792,12 +794,13 @@
       ]
     },
     {
-      "key": "hasActiveWaypoint",
+      "key": "self.hasActiveWaypoint",
       "params": [
         {
           "key": "type",
           "zh": "type",
           "type": "enum",
+          "valueFile": "addWaypoint_type",
           "values": [
             "move",
             "attackMove",
@@ -857,6 +860,7 @@
           "key": "relation",
           "zh": "关系",
           "type": "relation",
+          "valueFile": "relation",
           "values": [
             "own",
             "notOwn",
@@ -881,6 +885,7 @@
           "key": "relation",
           "zh": "关系",
           "type": "relation",
+          "valueFile": "relation",
           "values": [
             "own",
             "notOwn",
@@ -991,6 +996,7 @@
           "key": "type",
           "zh": "type",
           "type": "type",
+          "valueFile": "memory_type",
           "values": [
             "int",
             "float",
@@ -1031,6 +1037,7 @@
           "key": "type",
           "zh": "type",
           "type": "type",
+          "valueFile": "memory_type",
           "values": [
             "int",
             "float",

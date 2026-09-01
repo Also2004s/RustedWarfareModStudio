@@ -5,6 +5,7 @@ import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import org.json.JSONArray
 import org.json.JSONObject
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 补全类型分类仓库（单例）。
@@ -162,7 +163,7 @@ object CompletionTypeRepository {
             overrides.forEach { (name, cat) ->
                 arr.put(JSONObject().apply { put("name", name); put("category", cat) })
             }
-            file.writeText(JSONObject().apply { put("manual", arr) }.toString(2), Charsets.UTF_8)
+            file.atomicWriteText(JSONObject().apply { put("manual", arr) }.toString(2), Charsets.UTF_8)
             SettingsManager.writeVerifyCode(
                 SettingsManager.VERIFY_COMPLETION_TYPES,
                 SettingsManager.COMPLETION_TYPES_VERIFY_CODE

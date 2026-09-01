@@ -435,7 +435,7 @@
 			"添加路径点动作类型:${1:移动}",
 			"$0"
 		],
-		"description": "添加路径点动作类型 [类型: enum] [版本: 1.13.3] [示例: 添加路径点动作类型: 移动] [说明: 添加的路径点类型。值列表：移动，移动攻击，防守，进入载具，主动装载，攻击，回收，维修，靠近目标，建造，跟随，被动。\nmove, attackMove, guard, loadInto, loadUp, attack, reclaim, repair, touchTarget, build, follow，setPassiveTarget]"
+		"description": "添加路径点动作类型 [类型: enum] [版本: 1.13.3] [示例: 添加路径点动作类型: 移动] [说明: 添加的路径点类型。值列表：移动，移动攻击，防守，进入载具，主动装载，攻击，回收，维修，靠近目标，建造，跟随，设置被动目标，卸载至，巡逻，防守至，触发行动，在范围内时触发行动\nmove, attackMove, guard, loadInto, loadUp, attack, reclaim, repair, touchTarget, build, follow, setPassiveTarget, unloadAt, patrol, guardAt, triggerAction, triggerActionWhenInRange]"
 	},
 	"prop_添加路径点单位类型": {
 		"prefix": [
@@ -461,17 +461,17 @@
 		],
 		"description": "复制路径来自"
 	},
-	"prop_有活动的路径点": {
+	"prop_自身有活动的路径点": {
 		"prefix": [
-			"hasActiveWaypoint",
-			"有活动的路径点",
+			"self.hasActiveWaypoint",
+			"自身有活动的路径点",
 			"self.hasActiveWaypoint()"
 		],
 		"body": [
-			"有活动的路径点:${1|真,假|}",
+			"自身有活动的路径点:${1|真,假|}",
 			"$0"
 		],
-		"description": "有活动的路径点"
+		"description": "自身有活动的路径点"
 	},
 	"prop_保持需要移动路径点": {
 		"prefix": [
@@ -13122,12 +13122,12 @@
 		"body": "自身在攻击",
 		"description": "自身在攻击值 [类型: bool] [示例: 设置单位状态: 移动速度=选择(自身在攻击, 4, 2)]"
 	},
-	"value_有活动的路径点": {
+	"value_自身有活动的路径点": {
 		"prefix": [
-			"有活动的路径点"
+			"自身有活动的路径点"
 		],
-		"body": "有活动的路径点",
-		"description": "有活动的路径点值 [类型: bool] [示例: text: Waypoint - %{self.有活动的路径点(type='移动')}]"
+		"body": "自身有活动的路径点",
+		"description": "自身有活动的路径点值 [类型: bool] [示例: text: Waypoint - %{自身有活动的路径点(type='移动')}]"
 	},
 	"value_self.numberOfQueuedWaypoints()": {
 		"prefix": [

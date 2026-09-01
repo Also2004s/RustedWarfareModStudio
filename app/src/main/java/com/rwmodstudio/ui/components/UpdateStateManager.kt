@@ -38,6 +38,8 @@ object UpdateStateManager {
                     } else {
                         UpdateDialogState.NoUpdate
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e // 协程取消必须重新抛出，否则取消被当「检查失败」显示
                 } catch (e: Exception) {
                     UpdateDialogState.Error(
                         message = e.message ?: "未知错误",
@@ -81,10 +83,13 @@ object UpdateStateManager {
                         }
                     )
                 }
-                withContext(Dispatchers.IO) {
+                // 安装调起必须切主线程：Android 12+ 从后台线程 startActivity 会被拦截，部分机型安装界面调不起来
+                withContext(Dispatchers.Main) {
                     UpdateDownloader.installApk(context.applicationContext, downloaded)
                 }
                 state.value = UpdateDialogState.ReadyToInstall(info)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // 下载协程取消（进程级 scope 一般不取消，防御处理）
             } catch (e: Exception) {
                 state.value = UpdateDialogState.Error(
                     message = "下载失败：${e.message ?: "未知错误"}",

@@ -36,6 +36,7 @@ import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.feature.completion.sectionEnToZh
+import com.rwmodstudio.util.atomicWriteText
 
 import com.rwmodstudio.ui.components.CustomCompletionEditorDialog
 import com.rwmodstudio.ui.theme.*
@@ -46,6 +47,28 @@ private enum class CompletionFilter { USER, ALL, NATIVE, EXTRA }
 
 // 防止用户快速连点保存导致多个协程同时写同一个 JSON 文件
 private val completionsSaveMutex = Mutex()
+
+/**
+ * 进程级补全表文件缓存：按文件签名（lastModified + length）判定失效，
+ * 避免多实例/多页面重复读盘解析同一份 JSON（EditorScreen 最多 5 个存活实例）。
+ * 文件由 atomicWriteText 写入，mtime 变化即自动失效；线程安全。
+ */
+private object CompletionsFileCache {
+    private val lock = Any()
+    private val cache = mutableMapOf<String, Pair<Long, List<CustomCompletion>>>()
+
+    fun get(path: String, loader: () -> List<CustomCompletion>): List<CustomCompletion> {
+        val file = java.io.File(path)
+        if (!file.exists()) return emptyList()
+        val signature = file.lastModified() * 31 + file.length()
+        synchronized(lock) {
+            cache[path]?.let { (sig, items) -> if (sig == signature) return items }
+        }
+        val items = loader()
+        synchronized(lock) { cache[path] = signature to items }
+        return items
+    }
+}
 
 /** 空值属性（原「数值属性」）格式分类：补全时只插入「名称:」，不附带默认值，由用户或值补全填写 */
 const val FORMAT_EMPTY_VALUE = "空值属性"
@@ -424,8 +447,8 @@ fun generateNativeItems(engine: TranslationEngine, preserveExisting: Boolean = t
     return items
 }
 
-fun loadNativeItems(): List<CustomCompletion> {
-    return try {
+fun loadNativeItems(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.nativeCompletionsPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.nativeCompletionsPath)
         if (jsonFile.exists()) {
             val content = jsonFile.readText()
@@ -436,8 +459,8 @@ fun loadNativeItems(): List<CustomCompletion> {
     } catch (_: Exception) { emptyList() }
 }
 
-fun loadUserItems(): List<CustomCompletion> {
-    return try {
+fun loadUserItems(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.userCompletionsPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.userCompletionsPath)
         if (jsonFile.exists()) {
             val content = jsonFile.readText()
@@ -490,8 +513,8 @@ suspend fun saveUserCompletions(items: List<CustomCompletion>, engine: Translati
     }
     val dict = engine.getTranslationDict()
     try {
-        java.io.File(SettingsManager.userCompletionsPath).writeText(jsonFormat.encodeToString(items))
-        java.io.File(SettingsManager.userCompletionsEnPath).writeText(
+        java.io.File(SettingsManager.userCompletionsPath).atomicWriteText(jsonFormat.encodeToString(items))
+        java.io.File(SettingsManager.userCompletionsEnPath).atomicWriteText(
             jsonFormat.encodeToString(items.map { toEnglishCompletion(it, dict) })
         )
         true
@@ -503,8 +526,8 @@ suspend fun saveUserCompletions(items: List<CustomCompletion>, engine: Translati
 
 suspend fun saveNativeCompletions(items: List<CustomCompletion>): Boolean = completionsSaveMutex.withLock {
     try {
-        java.io.File(SettingsManager.nativeCompletionsPath).writeText(jsonFormat.encodeToString(items))
-        java.io.File(SettingsManager.nativeCompletionsEnPath).writeText(
+        java.io.File(SettingsManager.nativeCompletionsPath).atomicWriteText(jsonFormat.encodeToString(items))
+        java.io.File(SettingsManager.nativeCompletionsEnPath).atomicWriteText(
             jsonFormat.encodeToString(items.map { toEnglishCompletion(it) })
         )
         true
@@ -514,8 +537,8 @@ suspend fun saveNativeCompletions(items: List<CustomCompletion>): Boolean = comp
     }
 }
 
-fun loadNativeItemsEn(): List<CustomCompletion> {
-    return try {
+fun loadNativeItemsEn(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.nativeCompletionsEnPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.nativeCompletionsEnPath)
         if (jsonFile.exists()) {
             val content = jsonFile.readText()
@@ -524,8 +547,8 @@ fun loadNativeItemsEn(): List<CustomCompletion> {
     } catch (_: Exception) { emptyList() }
 }
 
-fun loadUserItemsEn(): List<CustomCompletion> {
-    return try {
+fun loadUserItemsEn(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.userCompletionsEnPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.userCompletionsEnPath)
         if (jsonFile.exists()) {
             val content = jsonFile.readText()
@@ -534,8 +557,8 @@ fun loadUserItemsEn(): List<CustomCompletion> {
     } catch (_: Exception) { emptyList() }
 }
 
-fun loadExtraItems(): List<CustomCompletion> {
-    return try {
+fun loadExtraItems(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.extraCompletionsPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.extraCompletionsPath)
         if (jsonFile.exists() && jsonFile.length() > 0) {
             val content = jsonFile.readText()
@@ -579,8 +602,8 @@ suspend fun loadExtraItemsVerified(context: Context, engine: TranslationEngine, 
     return items
 }
 
-fun loadExtraItemsEn(): List<CustomCompletion> {
-    return try {
+fun loadExtraItemsEn(): List<CustomCompletion> = CompletionsFileCache.get(SettingsManager.extraCompletionsEnPath) {
+    try {
         val jsonFile = java.io.File(SettingsManager.extraCompletionsEnPath)
         val content = if (jsonFile.exists() && jsonFile.length() > 0) {
             jsonFile.readText()
@@ -591,8 +614,8 @@ fun loadExtraItemsEn(): List<CustomCompletion> {
 
 suspend fun saveExtraCompletions(items: List<CustomCompletion>): Boolean = completionsSaveMutex.withLock {
     try {
-        java.io.File(SettingsManager.extraCompletionsPath).writeText(jsonFormat.encodeToString(items))
-        java.io.File(SettingsManager.extraCompletionsEnPath).writeText(
+        java.io.File(SettingsManager.extraCompletionsPath).atomicWriteText(jsonFormat.encodeToString(items))
+        java.io.File(SettingsManager.extraCompletionsEnPath).atomicWriteText(
             jsonFormat.encodeToString(items.map { toEnglishCompletion(it) })
         )
         true
@@ -658,7 +681,14 @@ internal fun translateAllToChinese(text: String, dict: TranslationDict): String 
     val lookup = buildEnToZhLookup(dict)
     if (lookup.isEmpty() || text.isBlank()) return text
     val escaped = lookup.keys.joinToString("|") { Regex.escape(it) }
-    val pattern = Regex("(?<!\\w)(?:$escaped)(?!\\w)|(?:$escaped)")
+    // 完全匹配：边界只看「本侧脚本字母」（英→中只看英文字母），
+    // 故 priceCredits 整段英文连写不会被拆（price 后接字母 C 视为非边界）；
+    // 而 价格Credits 中 价格 后接英文字母 C 不是中文，是边界，可单独译出。\w 会把中英都当同侧，不能用。
+    val pattern = if (SettingsManager.devFullMatchTranslation) {
+        Regex("(?<![A-Za-z])(?:$escaped)(?![A-Za-z])")
+    } else {
+        Regex("(?<!\\w)(?:$escaped)(?!\\w)|(?:$escaped)")
+    }
     return pattern.replace(text) { match ->
         lookup[match.value] ?: match.value
     }
@@ -667,6 +697,7 @@ internal fun translateAllToChinese(text: String, dict: TranslationDict): String 
 /**
  * 把文本中所有已知中文 key 替换成英文。
  * 中文没有天然分词，使用精确子串匹配（按长度降序已保证长词优先）。
+ * 中→英方向保持可拆（如 价格Credits → priceCredits），不受完全匹配开关影响。
  */
 internal fun translateAllToEnglish(text: String, dict: TranslationDict): String {
     val lookup = buildZhToEnLookup(dict)

@@ -2,6 +2,7 @@ package com.rwmodstudio.feature.completion.value
 
 import android.content.Context
 import android.util.Log
+import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.CompletionTypeRepository
@@ -104,6 +105,7 @@ class ValueCompletionAggregator(
         globalResources: Set<String> = emptySet(),
         unitNames: Set<String> = emptySet(),
         vanillaUnitNames: Set<String> = emptySet(),
+        unitData: Map<String, ProjectTagScanner.UnitBuildInfo> = emptyMap(),
         turretNames: Set<String> = emptySet(),
         projectileNames: Set<String> = emptySet(),
         effectNames: Set<String> = emptySet(),
@@ -139,6 +141,7 @@ class ValueCompletionAggregator(
             globalResources = globalResources,
             unitNames = unitNames,
             vanillaUnitNames = vanillaUnitNames,
+            unitData = unitData,
             turretNames = turretNames,
             projectileNames = projectileNames,
             effectNames = effectNames,
@@ -180,6 +183,7 @@ class ValueCompletionAggregator(
         globalResources: Set<String> = emptySet(),
         unitNames: Set<String> = emptySet(),
         vanillaUnitNames: Set<String> = emptySet(),
+        unitData: Map<String, ProjectTagScanner.UnitBuildInfo> = emptyMap(),
         turretNames: Set<String> = emptySet(),
         projectileNames: Set<String> = emptySet(),
         effectNames: Set<String> = emptySet(),
@@ -217,6 +221,7 @@ class ValueCompletionAggregator(
             globalResources = globalResources,
             unitNames = unitNames,
             vanillaUnitNames = vanillaUnitNames,
+            unitData = unitData,
             turretNames = turretNames,
             projectileNames = projectileNames,
             effectNames = effectNames,

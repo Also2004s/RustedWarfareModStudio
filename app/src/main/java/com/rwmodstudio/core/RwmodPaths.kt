@@ -80,6 +80,12 @@ object RwmodPaths {
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
     val saveHistoryFile: File get() = File(configDir, "save_history.json")
+    val bookmarksFile: File get() = File(configDir, "bookmarks.json")
+    /** 文件浏览器复制/剪切剪贴板（跨页面/项目/重启持久化） */
+    val fileClipboardFile: File get() = File(configDir, "file_clipboard.json")
+
+    /** 文件浏览器异度空间：每个项目缓存一份浏览器空间状态（激活空间 + 两空间位置） */
+    val browserSpacesFile: File get() = File(configDir, "browser_spaces.json")
 
     // ==================== 缓存 ====================
 
@@ -90,6 +96,11 @@ object RwmodPaths {
     val importConfigTempFile: File get() = File(cacheDir, "import_config_temp.zip")
     fun importConfigTempFile(timestamp: Long = System.currentTimeMillis()): File = File(cacheDir, "import_config_${timestamp}.zip")
     val localConfigImportDir: File get() = File(cacheDir, "local_config_import").also { it.mkdirs() }
+
+    /** AI 项目理解缓存目录：扫描新版项目结构（单位名/隐藏行动），缓存供后续报告复用 */
+    val aiCacheDir: File
+        get() = File(cacheDir, "ai").also { it.mkdirs() }
+    val aiUnderstandingCacheFile: File get() = File(aiCacheDir, "understanding.json")
 
     /** 文件翻译缓存目录：存放每个 INI/template 文件的中文翻译副本，供搜索/编辑时免翻译 */
     val fileTranslationCacheDir: File
@@ -116,6 +127,10 @@ object RwmodPaths {
     // ==================== 导出 ====================
 
     val localConfigExportFile: File get() = File(exportsDir, "config_export.zip")
+
+    /** AI 更新报告目录：版本对比后由 AI 生成的更新报告保存于此 */
+    val aiReportsDir: File
+        get() = File(exportsDir, "ai_reports").also { it.mkdirs() }
 
     // ==================== 迁移兜底目录 ====================
 

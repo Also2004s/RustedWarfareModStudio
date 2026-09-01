@@ -1,3 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+    <!-- 排除 SharedPreferences：可能含 AI key 等敏感配置，不随备份带走（Android 12+ 由 data_extraction_rules 约束） -->
+    <exclude domain="sharedpref" path="." />
 </full-backup-content>

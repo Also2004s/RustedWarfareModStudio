@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Environment
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.rwmodstudio.util.atomicWriteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -34,6 +35,9 @@ object LocalConfigManager {
         "user_completions.json",
         "custom_completions.json"
     )
+
+    /** 导入时需要的全部文件白名单：只提取这些，其余 zip 内容视为垃圾不落盘 */
+    private val NEEDED_FILES = (USER_FILES + listOf(MANIFEST_NAME, "prefs.json")).toSet()
 
     private fun resolveUserFile(name: String): File = when (name) {
         "user_translation.json" -> RwmodPaths.userTranslationFile
@@ -110,35 +114,37 @@ object LocalConfigManager {
      * @return 成功返回 true
      */
     suspend fun importFromZip(context: Context, zipFile: File): Boolean = withContext(Dispatchers.IO) {
+        val tempDir = RwmodPaths.localConfigImportDir
         try {
             if (!zipFile.exists() || zipFile.length() == 0L) return@withContext false
 
-            val tempDir = RwmodPaths.localConfigImportDir.apply {
-                deleteRecursively()
-                mkdirs()
-            }
+            tempDir.deleteRecursively()
+            tempDir.mkdirs()
 
-            // 解压到临时目录
+            // 只解压白名单文件（按文件名匹配，扁平化落盘），zip 内其他内容一律不落盘
             ZipInputStream(FileInputStream(zipFile)).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
                     if (!entry.isDirectory) {
-                        val outFile = File(tempDir, entry.name)
-                        outFile.parentFile?.mkdirs()
-                        FileOutputStream(outFile).use { fos ->
-                            zis.copyTo(fos)
+                        val name = File(entry.name).name
+                        if (name in NEEDED_FILES) {
+                            val outFile = File(tempDir, name)
+                            outFile.parentFile?.mkdirs()
+                            FileOutputStream(outFile).use { fos ->
+                                zis.copyTo(fos)
+                            }
                         }
                     }
                     entry = zis.nextEntry
                 }
             }
 
-            // 复制用户文件到 RWmod 子目录
+            // 复制用户文件到 RWmod 子目录（原子写：写一半被杀时旧文件完好，不损坏用户翻译/补全数据）
             USER_FILES.forEach { name ->
                 val src = File(tempDir, name)
                 if (src.exists()) {
                     val dst = resolveUserFile(name)
-                    src.copyTo(dst, overwrite = true)
+                    dst.atomicWriteText(src.readText(Charsets.UTF_8), Charsets.UTF_8)
                 }
             }
 

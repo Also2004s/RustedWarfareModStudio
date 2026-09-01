@@ -1,12 +1,18 @@
 package com.rwmodstudio.core
 
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * 版本对比引擎：比较两个文件夹（或其子文件夹）下的 .ini / .template 文件差异。
  * 使用基于 LCS 的逐行 diff，任何文本差异都会被检测到。
  */
 object VersionComparator {
+
+    /** 版本对比并行线程池（daemon 线程，随进程回收；受开发者模式多线程开关控制） */
+    private val diffPool = Executors.newFixedThreadPool(
+        minOf(4, maxOf(1, Runtime.getRuntime().availableProcessors()))
+    ) { r -> Thread(r, "VersionCompare").apply { isDaemon = true } }
 
     data class FileDiffResult(
         val filePath: String, // 相对路径
@@ -64,7 +70,15 @@ object VersionComparator {
         val rootOnly = (rootFiles - metaFiles).sorted()
         val metaOnly = (metaFiles - rootFiles).sorted()
 
-        val fileDiffs = common.mapNotNull { compareCommonFile(it, rootDir, metaDir) }
+        val fileDiffs = if (SettingsManager.devParallelPreheat && common.size > 1) {
+            // 多线程开关开启时并行 diff：每个文件独立，按提交顺序取回结果保持顺序确定
+            val futures = common.map { rel ->
+                diffPool.submit<FileDiffResult?> { compareCommonFile(rel, rootDir, metaDir) }
+            }
+            futures.map { runCatching { it.get() }.getOrNull() }.filterNotNull()
+        } else {
+            common.mapNotNull { compareCommonFile(it, rootDir, metaDir) }
+        }
 
         return FolderDiffResult(
             rootPath = rootDir.absolutePath,

@@ -2,9 +2,11 @@ package com.rwmodstudio.core.translation
 
 import android.content.Context
 import android.util.Log
+import com.rwmodstudio.RwModApplication
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -13,6 +15,9 @@ class TranslationEngine private constructor() {
 
     companion object {
         private const val TAG = "TranslationEngine"
+        // awaitReady 专职重试加载的最大次数与间隔（毫秒）。未加载成功前绝不返回就绪，防止半就绪状态写缓存。
+        private const val LOAD_RETRY = 3
+        private const val LOAD_RETRY_DELAY = 150L
         private val SECTION_PATTERN = Regex("""^(\s*)\[([^\]]+)\](\s*)$""")
         private val KV_PATTERN = Regex("""^(\s*)([^:=#\[]+?)([:=])(.*?)(\s*)$""")
         private val DEFINE_PATTERN = Regex("""^(\s*)@(define|global)\s+(\S+?)\s*:\s*(.*?)(\s*)$""", RegexOption.IGNORE_CASE)
@@ -64,13 +69,42 @@ class TranslationEngine private constructor() {
             if (isLoaded) return
             withContext(Dispatchers.IO) {
                 appContext = context.applicationContext
-                loadBlocklist(context)
+                // 先载翻译字典再读屏蔽词：屏蔽词加载时会按字典做中英去重，需字典先就绪
                 translationDict.loadFromAssets(context)
+                loadBlocklist(context)
                 ensureCodeReferenceGenerated(context)
                 codeReference.loadFromAssets(context)
                 snippetRepo.load(context)
             }
         }
+    }
+
+    /**
+     * 等待翻译引擎完全加载就绪。
+     *
+     * - 已就绪：立即返回 true。
+     * - 未就绪：阻塞等待/触发 [load]，[load] 幂等 + Mutex 串行可重入，并发调用者会在锁上排队，
+     *   前一个加载完成后统一放行（等而非跳过）。
+     * - 加载失败/仍未就绪：自动重新触发加载重试 [LOAD_RETRY] 次，每次间隔 [LOAD_RETRY_DELAY]。
+     * - 判定依据是 [isLoaded] 真实就绪标志，绝不返回半就绪状态。
+     *
+     * 调用方必须在此返回 true 后才允许执行翻译并写入缓存；返回 false 表示专职重试后仍未就绪，
+     * 调用方只能回退原文、严禁把英文/原文当作缓存写入。
+     */
+    suspend fun awaitReady(): Boolean {
+        if (isLoaded) return true
+        val ctx = appContext ?: RwModApplication.getInstance().applicationContext
+        repeat(LOAD_RETRY) { attempt ->
+            if (isLoaded) return true
+            try {
+                load(ctx)
+            } catch (e: Exception) {
+                Log.w(TAG, "awaitReady load attempt ${attempt + 1}/$LOAD_RETRY failed: ${e.message}")
+            }
+            if (!isLoaded) delay(LOAD_RETRY_DELAY)
+        }
+        Log.e(TAG, "awaitReady: engine NOT ready after $LOAD_RETRY attempts")
+        return false
     }
 
     /**
@@ -562,6 +596,7 @@ class TranslationEngine private constructor() {
         val (protected, placeholders) = blocklist.protectFragments(quoteProtected)
 
         // 使用 translateInText 进行文本内翻译（和Python对齐）
+        // 说明：\b 单词边界本身即可防 priceCredits 这类连写被拆译，无需在此做完全匹配。
         val translated = translationDict.translateInText(protected, enToZh)
 
         // 翻译内嵌的布尔值 token（如 spawnUnits 参数中的 gridAlign=真, skipIfOverlapping=真）

@@ -75,6 +75,10 @@ touchTarget = 靠近目标
 follow = 跟随
 guard = 保护
 guardAt = 防守至
+unloadAt = 卸载至
+patrol = 巡逻
+triggerAction = 触发行动
+triggerActionWhenInRange = 在范围内时触发行动
 
 # --- 事件 ---
 created = 创建
@@ -124,7 +128,7 @@ addWaypoint_triggerActionIfMatched = 添加路径点匹配触发
 addWaypoint_type = 添加路径点动作类型
 addWaypoint_unitType = 添加路径点单位类型
 copyWaypointsFrom = 复制路径来自
-hasActiveWaypoint = 有活动的路径点
+self.hasActiveWaypoint = 自身有活动的路径点
 keepWaypointsNeedingMovement = 保持需要移动路径点
 clearActiveWaypoint = 清除当前路径点
 clearAllWaypoints = 清除所有路径点

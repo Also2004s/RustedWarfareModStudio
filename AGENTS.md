@@ -31,9 +31,9 @@ RustedWarfareModStudio（应用名「铁锈工坊」，包名 `com.rwmodstudio`�
 环境要点（来自 `settings.gradle.kts` / `gradle.properties` / `app/build.gradle.kts`）：
 - 需要 **JDK 17**；仓库自带 `tools/jdk/jdk-17.0.19+10`，本机构建时使用它。
 - `settings.gradle.kts` 配置阿里云镜像（google/central/gradle-plugin/public），保留原始源作备用，**不要移除镜像**。
-- `local.properties` 存放 SDK 路径与 release 签名信息（`.gitignore` 已忽略，**不得提交**）。
+- `local.properties` 存放 SDK 路径、release 签名信息与 `DEFAULT_AI_API_KEY`（默认 AI 密钥，注入 BuildConfig；`.gitignore` 已忽略，**不得提交**，源码内不得出现明文密钥）。
 - `gradle.properties`：`android.overridePathCheck=true`、`android.suppressUnsupportedCompileSdk=36`。
-- 版本号在 `app/build.gradle.kts`：`versionCode = 22`、`versionName = "1.3.2"`（发布时必须递增，只增不减）。
+- 版本号在 `app/build.gradle.kts`：`versionCode = 27`、`versionName = "1.3.6"`（发布时必须递增，只增不减）。
 
 常用命令（PowerShell）：
 ```powershell
@@ -163,7 +163,7 @@ app/src/main/
 - 返回：`backStack` 记录嵌套导航，"从哪个页面打开，就返回哪个页面"（`pushScreen`/`popScreen`/`clearBackStack`）。
 - 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST。
 - 关键状态用 `rememberSaveable`（`selectedFile`、`currentScreen`、`saveAndExit` 等）防止配置变更丢失。
-- 编辑器页返回时有「是否保存修改」确认对话框；抽屉离开编辑器时缓存文本（`editorTextCache`）并可触发保存。
+- 编辑器工作区（`workspace` 内存缓冲，含文本/光标/滚动/修改标记）与存活实例仅在编辑器内存活，离开编辑器按三口径处理（`onBack(discard, saveAll)` + 离场统一效应）：**明确保存**（返回确认框「保存」/保存并退出）→ 全部实例落盘并销毁工作区；**明确不保存** → 丢弃不落盘并销毁；**直接返回**（返回键无修改、抽屉/工具页一切未做选择的离开）→ 自动保存开启时全部落盘并销毁，未开启时暂存（`holdPaths`，不落盘，下次打开恢复）。
 
 ### 8. 主题三件套（彼此独立，不能互相覆盖）
 
@@ -182,15 +182,18 @@ app/src/main/
 
 ## 五、常见陷阱（代码观察）
 
-1. **UI 分类混入 value 类别名**（如 `bool`、`Prices_Resources`、`drawLayer`）：说明误用了 `getAllSectionNames()`，改回 `getRealSectionNames()`。
+0. **调试设备问题先查包名（血泪教训，2026-09-01 踩过）**：App 有两个 applicationId——正式版 `com.rwmodstudio`、debug 变体 `com.rwmodstudio.debug`（`app/build.gradle.kts` 里 `applicationIdSuffix = ".debug"`）。**用户说"装的是测试版"时，指的就是 debug 包**。`adb shell pm list packages | grep rwmod` 会看到两个包；查安装时间/版本时用 `adb shell dumpsys package com.rwmodstudio.debug`，**不要只查正式包**。判断"设备上是不是最新代码"，以 **debug 包的 lastUpdateTime ≥ APK 构建时间** 为准，别拿正式包的时间戳下结论。
+1. **org.json `optString` 双坑（AiService 流式解析，2026-09-01 血泪）**：`optString("content")` 在两种情况都返回字符串 `"null"`——① key 缺失；② key 存在但值为 JSON `null`（`{"content":null}`）。**`has("content")` 只能挡①，挡不住②**：`has()` 对 JSON null 返回 true，`optString` 照样吐出 `"null"` 且非空，会通过 `isNullOrEmpty()` 检查被 append 进输出 → 界面一直显示 null。修复必须三重过滤：`delta.has("content")` + `optString` 结果 `isEmpty()` + `== "null"` 再排除（见 `AiService.postChatCompletionStream`）。同样 `extractMessageContent` 用 `takeIf { it.isNotEmpty() && it != "null" }`。
+2. **UI 分类混入 value 类别名**（如 `bool`、`Prices_Resources`、`drawLayer`）：说明误用了 `getAllSectionNames()`，改回 `getRealSectionNames()`。
 2. **切换文件后节名不更新**：`LaunchedEffect` 忘了用 `filePath` 作 key。
 3. **删除 `assets/tables/`**：675 个 `.bin` 表由 `org.jcodings.util.ArrayReader` 运行时加载，`packaging.resources.excludes` 对 assets 不生效；删表会导致 sora-editor/TextMate 初始化或正则崩溃。
 4. **修改 `applicationId`**：等于发布新应用，已安装用户数据丢失。
 5. **保存丢内容**：异步保存未等待、保存前未快照路径、英文视图保存了过期文本（当前 `saveSync` 已规避，改动时保持）。
 6. **并发写 JSON**（翻译库/补全表）：快速连点可能写坏文件；参考 `TranslationEngine` 的 `Mutex` 写法。
 7. **新增需要强刷的数据不走 `VerifyManager`**：老用户将永远用旧数据。
-8. **当前已知性能风险**（改动时注意）：
-   - `util/IniImageReader.kt`：主线程同步 `readText` + `BitmapFactory.decodeFile`，无 `inSampleSize`，普通 map 缓存（缓存达 200 条即清空）。这是当前唯一遗留的主线程 IO 性能点。
+8. **当前已知性能点**（改动时注意）：
+   - 图片解码已统一走 `IniImageReader.decodeSampled`（先 `inJustDecodeBounds` 算 `inSampleSize`，1024px 上限），在 `Dispatchers.IO` 执行；HomeScreen 首页目录预览也复用此采样解码。**改动时勿再直接 `BitmapFactory.decodeFile` 整图解码大贴图**。
+   - 启动阶段：`SettingsManager.migrateFileStorage`（旧文件递归迁移）已移入 `RwModApplication.applicationScope` 后台 IO 执行，不阻塞启动主线程；但迁移只影响「按路径惰性读取」的文件，改动 `init()` 顺序时注意不要重新引入主线程同步迁移。
    - 说明：HomeScreen 打包/解压 `.rwmod` 已在 `scope.launch(Dispatchers.IO)` 中执行；近期修改的 Diff 计算在 `Dispatchers.Default`、SaveHistoryManager 读写在 IO 线程，均已避免卡主线程。
 
 ## 六、其他文档

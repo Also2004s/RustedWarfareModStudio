@@ -6,6 +6,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -54,6 +56,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import com.rwmodstudio.core.BookmarkManager
+import com.rwmodstudio.core.FileClipboardManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.ui.components.*
 import com.rwmodstudio.ui.theme.*
@@ -63,6 +67,20 @@ import java.util.*
 
 private val INI_EXTENSIONS = setOf("ini", "template", "txt")
 private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
+
+/** 新建 mod-info.txt 的模板内容（可视化页可读回填；空键在保存时会被过滤不写入；无 version 键，版本号习惯写在 title 里） */
+private val MOD_INFO_TEMPLATE = """
+[mod]
+title:
+description:
+tags:
+minVersion:v1.15p11
+thumbnail:
+
+[music]
+sourceFolder:
+whenUsingUnitsFromThisMod_playExclusively:true
+""".trimIndent()
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -76,7 +94,8 @@ fun FileBrowserScreen(
     onShowFileSearch: (String) -> Unit = {},
     onJumpToLine: (String, String, Int) -> Unit = { _, _, _ -> },
     onOpenProjectManager: (() -> Unit)? = null,
-    onStartPathChange: (String) -> Unit = {}
+    onStartPathChange: (String) -> Unit = {},
+    onCreateModInfo: (String, String) -> Unit = { _, _ -> }
 ) {
     val initPath = remember {
         when {
@@ -96,12 +115,22 @@ fun FileBrowserScreen(
     LaunchedEffect(currentPath) {
         onStartPathChange(currentPath)
     }
+
+    // 异度空间：空间状态由 MainApp【顶部菜单栏】按钮管理，切换空间时会修改 startPath(browserStartPath)，
+    // 此处同步 currentPath 以切换第一/第二浏览器位置。
+    // ⚠️ 位置约定：本文件浏览器页面内部（尤其目录栏/面包屑区域）【不得】再放置异度空间切换按钮，
+    //    该入口唯一归属 MainApp 的全局 topBar 最右侧，本文件只负责响应 startPath 变化。
+    LaunchedEffect(startPath) {
+        if (currentPath != startPath) currentPath = startPath
+    }
+
     var showToolMenu by remember { mutableStateOf(false) }
     var sort by remember { mutableIntStateOf(0) }
     var hidden by remember { mutableStateOf(false) }
     var showNewFile by remember { mutableStateOf(false) }
     var showNewFolder by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var newFileExt by remember { mutableStateOf<String?>(null) }
     var viewingImage by remember { mutableStateOf<File?>(null) }
     var browserRefreshTick by remember { mutableIntStateOf(0) }
     var pendingConflict by remember { mutableStateOf<FileConflict?>(null) }
@@ -115,6 +144,12 @@ fun FileBrowserScreen(
         }
 
     Column(Modifier.fillMaxSize().background(RustedBackground).padding(horizontal = 12.dp)) {
+        // 目录栏"上锁"：项目模式下位于项目根目录时，锁定"项目目录"段（末尾段）的点击，
+        // 防止点击它展开同级文件夹菜单/切换到其他项目；进入子目录后该段恢复可点（可跳回项目根）
+        val projectCanonical = remember(projectRoot) {
+            if (projectRoot.isEmpty()) null
+            else try { File(projectRoot).canonicalPath } catch (_: Exception) { null }
+        }
         BackHandler {
             val p = File(currentPath).parentFile
             if (p != null && p.exists()) {
@@ -168,25 +203,39 @@ fun FileBrowserScreen(
 
                         pathParts.forEachIndexed { idx, part ->
                             val isLast = idx == pathParts.size - 1
+                            // 该路径段的绝对路径（rootPath 下的相对前缀拼接）
+                            val segAbs = if (rootPath.isNotEmpty())
+                                rootPath + File.separator + pathParts.take(idx + 1).joinToString(File.separator)
+                            else ""
+                            // 当前是否正位于项目根目录（此时目录栏末尾段即"项目目录"段）
+                            val atProjectRoot = projectCanonical != null && try {
+                                File(currentPath).canonicalPath == projectCanonical
+                            } catch (_: Exception) { false }
+                            // 上锁：位于项目根目录时，末尾段（项目目录段）点击会展开同级菜单/切项目 → 锁定（点击不展开目录）
+                            val segLocked = isLast && atProjectRoot
                             if (idx > 0) Text("›", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.25f))
                             Box {
                                 Surface(
-                                    modifier = Modifier.clickable {
+                                    modifier = Modifier.clickable(enabled = !segLocked) {
                                         if (isLast) {
                                             // 展开同级文件夹
                                             val parentDir = File(currentPath).parentFile
                                             siblingDirs = parentDir?.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()
                                             showSiblingMenu = true
                                         } else if (rootPath.isNotEmpty()) {
-                                            currentPath = rootPath + File.separator + pathParts.take(idx + 1).joinToString(File.separator)
+                                            currentPath = segAbs
                                         }
                                     },
                                     shape = RoundedCornerShape(6.dp),
                                     color = if (isLast) RustedPrimary.copy(alpha = 0.12f) else Color.Transparent
                                 ) {
-                                    Text(part, fontSize = 12.sp,
-                                        fontWeight = if (isLast) FontWeight.Medium else FontWeight.Normal,
-                                        color = if (isLast) RustedPrimary else RustedOnBackground.copy(alpha = 0.65f),
+                                    Text(
+                                        if (part.length > 5) part.take(5) + "…" else part,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isLast && !atProjectRoot) FontWeight.Medium else FontWeight.Normal,
+                                        color = if (isLast && !atProjectRoot) RustedPrimary
+                                        else if (segLocked) RustedOnBackground.copy(alpha = 0.3f)
+                                        else RustedOnBackground.copy(alpha = 0.65f),
                                         fontFamily = AppCodeFontFamily,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
                                 }
@@ -234,8 +283,35 @@ fun FileBrowserScreen(
                         PlainMenuItem(icon = Icons.Default.Sort, title = "${sorts[sort]}", onClick = { sort = (sort + 1) % 3; showToolMenu = false })
                         PlainMenuItem(icon = if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, title = if (hidden) "显示" else "筛选", onClick = { hidden = !hidden; showToolMenu = false })
                         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                        PlainMenuItem(icon = Icons.Default.NoteAdd, title = "新建文件", onClick = { newName = ""; showNewFile = true; showToolMenu = false })
+                        PlainMenuItem(icon = Icons.Default.NoteAdd, title = "新建文件", onClick = { newName = ""; newFileExt = null; showNewFile = true; showToolMenu = false })
                         PlainMenuItem(icon = Icons.Default.CreateNewFolder, title = "新建文件夹", onClick = { newName = ""; showNewFolder = true; showToolMenu = false })
+                        // 仅「项目根目录」（不在子目录内、非项目模式不显示）且还没有 mod-info.txt 时可新建
+                        // （模组元数据文件，新建后进入可视化编辑）
+                        val atProjectRoot = projectRoot.isNotEmpty() && try {
+                            File(currentPath).canonicalPath == File(projectRoot).canonicalPath
+                        } catch (_: Exception) { false }
+                        if (atProjectRoot && !File(currentPath, "mod-info.txt").exists()) {
+                            PlainMenuItem(icon = Icons.Default.Description, title = "新建 mod-info.txt", onClick = {
+                                showToolMenu = false
+                                val target = File(currentPath, "mod-info.txt")
+                                scope.launch(Dispatchers.IO) {
+                                    val ok = try {
+                                        target.parentFile?.mkdirs()
+                                        target.writeText(MOD_INFO_TEMPLATE, Charsets.UTF_8)
+                                        true
+                                    } catch (e: Exception) {
+                                        withContext(Dispatchers.Main) {
+                                            android.widget.Toast.makeText(context, "创建失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                        false
+                                    }
+                                    if (ok) withContext(Dispatchers.Main) {
+                                        browserRefreshTick++
+                                        onCreateModInfo(target.name, target.absolutePath)
+                                    }
+                                }
+                            })
+                        }
                         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                         PlainMenuItem(icon = Icons.Default.Search, title = "查找文件", onClick = { onShowFileSearch(currentPath); showToolMenu = false })
                     }
@@ -260,12 +336,32 @@ fun FileBrowserScreen(
         )
     }
 
-    if (showNewFile) AlertDialog(onDismissRequest = { showNewFile = false }, title = { Text("新建文件") }, text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("文件名.ini") }) }, confirmButton = { TextButton(onClick = {
+    if (showNewFile) AlertDialog(onDismissRequest = { showNewFile = false }, title = { Text("新建文件") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("文件名（可不带扩展名）") })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("ini", "template").forEach { ext ->
+                    val selected = newFileExt == ext
+                    Box(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) RustedPrimary else RustedOnBackground.copy(alpha = 0.06f))
+                            .clickable { newFileExt = ext }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(".$ext", color = if (selected) Color.White else RustedOnBackground, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+        }
+    }, confirmButton = { TextButton(onClick = {
         val error = validateFileName(newName)
         if (error != null) {
             android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
         } else {
-            val target = File(currentPath, newName.trim())
+            val raw = newName.trim()
+            val name = if ('.' in raw) raw else (newFileExt?.let { "$raw.$it" } ?: raw)   // 以手输为准；未选格式则不补扩展名
+            val target = File(currentPath, name)
             if (target.exists()) {
                 android.widget.Toast.makeText(context, "已存在同名文件/文件夹", android.widget.Toast.LENGTH_SHORT).show()
             } else {
@@ -414,25 +510,41 @@ private fun BrowserPanel(
     var rename by remember { mutableStateOf<File?>(null) }
     var del by remember { mutableStateOf<File?>(null) }
     var newName by remember { mutableStateOf("") }
-    var clipMode by remember { mutableStateOf("") }
-    var clipFiles by remember { mutableStateOf(listOf<String>()) }
     var ctxMenuFile by remember { mutableStateOf<File?>(null) }
     var ctxMenuBounds by remember { mutableStateOf<Rect?>(null) }
+    // 多选：向左滑动文件条目进入多选模式，顶部出现批量操作栏
+    var multiSelectMode by remember { mutableStateOf(false) }
+    var selectedFiles by remember { mutableStateOf(setOf<String>()) }
+    var delMulti by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    fun exitMultiSelect() {
+        multiSelectMode = false
+        selectedFiles = emptySet()
+    }
+
+    fun toggleSelect(path: String) {
+        selectedFiles = if (path in selectedFiles) selectedFiles - path else selectedFiles + path
+    }
 
     LaunchedEffect(path, sort, hidden, refreshTick) { files = loadFiles(path, hidden, sort) }
-    LaunchedEffect(path) { SettingsManager.lastPath = path }
+    LaunchedEffect(path) {
+        SettingsManager.lastPath = path
+        // 切换目录时退出多选，避免选中项残留到新目录
+        exitMultiSelect()
+    }
     // 路径或列表刷新时关闭悬浮菜单（文件位置已失效）
     LaunchedEffect(path, refreshTick) { ctxMenuFile = null; ctxMenuBounds = null }
+    // 多选模式下返回键优先退出多选，而不是返回上级目录
+    BackHandler(enabled = multiSelectMode) { exitMultiSelect() }
 
     Column(modifier.background(RustedBackground)) {
-        if (clipFiles.isNotEmpty()) {
+        if (FileClipboardManager.files.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().background(RustedSecondary.copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${clipFiles.size} 项${if (clipMode == "cut") "（剪切）" else "（复制）"}", fontSize = 10.sp, color = RustedSecondary, modifier = Modifier.weight(1f))
+                Text("${FileClipboardManager.files.size} 项${if (FileClipboardManager.mode == "cut") "（剪切）" else "（复制）"}", fontSize = 10.sp, color = RustedSecondary, modifier = Modifier.weight(1f))
                 TextButton(onClick = {
-                    val srcFiles = clipFiles
-                    val mode = clipMode
-                    clipFiles = emptyList()
-                    clipMode = ""
+                    val srcFiles = FileClipboardManager.files
+                    val mode = FileClipboardManager.mode
+                    FileClipboardManager.clear(context)
                     scope.launch(Dispatchers.IO) {
                         var skipped = 0
                         var success = 0
@@ -453,13 +565,37 @@ private fun BrowserPanel(
                                 } else target
                                 if (mode == "cut") {
                                     if (f.isDirectory) {
-                                        finalTarget.deleteRecursively()
-                                        f.copyRecursively(finalTarget, true)
-                                        f.deleteRecursively()
+                                        if (finalTarget.exists()) {
+                                            // 覆盖：先拷到临时目录，成功后再替换目标，避免先删后拷失败丢数据
+                                            val tmpDir = File(finalTarget.parentFile, "${finalTarget.name}.tmp")
+                                            tmpDir.deleteRecursively()
+                                            f.copyRecursively(tmpDir, true)
+                                            finalTarget.deleteRecursively()
+                                            if (!tmpDir.renameTo(finalTarget)) {
+                                                tmpDir.copyRecursively(finalTarget, true)
+                                                tmpDir.deleteRecursively()
+                                            }
+                                            f.deleteRecursively()
+                                        } else {
+                                            f.copyRecursively(finalTarget, true)
+                                            f.deleteRecursively()
+                                        }
                                     } else {
-                                        finalTarget.delete()
-                                        f.copyTo(finalTarget, true)
-                                        f.delete()
+                                        if (finalTarget.exists()) {
+                                            // 覆盖：先拷到临时文件，成功后再替换目标，避免先删后拷失败丢数据
+                                            val tmpFile = File(finalTarget.parentFile, "${finalTarget.name}.tmp")
+                                            tmpFile.delete()
+                                            f.copyTo(tmpFile, true)
+                                            finalTarget.delete()
+                                            if (!tmpFile.renameTo(finalTarget)) {
+                                                tmpFile.copyTo(finalTarget, true)
+                                                tmpFile.delete()
+                                            }
+                                            f.delete()
+                                        } else {
+                                            f.copyTo(finalTarget, true)
+                                            f.delete()
+                                        }
                                     }
                                 } else {
                                     if (f.isDirectory) f.copyRecursively(finalTarget, true)
@@ -482,28 +618,45 @@ private fun BrowserPanel(
                         }
                     }
                 }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("粘贴", fontSize = 10.sp) }
-                TextButton(onClick = { clipFiles = emptyList(); clipMode = "" }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("取消", fontSize = 10.sp) }
+                TextButton(onClick = { FileClipboardManager.clear(context) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("取消", fontSize = 10.sp) }
             }
         }
+        // 多选模式无顶部栏：入口在长按悬浮窗（多选），退出靠返回键或执行操作后自动退出
         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.04f))
 
         if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("空文件夹", color = RustedOnBackground.copy(alpha = 0.35f), fontSize = 13.sp) }
         else LazyColumn(Modifier.fillMaxSize()) { items(files, key = { it.absolutePath }) { f ->
             val ext = f.extension.lowercase()
             val isImage = ext in IMAGE_EXTENSIONS
-            FileEntry(file = f, onClick = {
-                if (f.isDirectory) onPathChange(f.absolutePath)
-                else if (isImage) onImageClick(f)
-                else if (ext in INI_EXTENSIONS) onFileSelected(f.name, f.absolutePath)
-            }, onLongClick = { bounds ->
-                ctxMenuFile = f
-                ctxMenuBounds = bounds
-            }, isSelected = ctxMenuFile == f)
+            FileEntry(
+                file = f,
+                onClick = {
+                    if (multiSelectMode) toggleSelect(f.absolutePath)
+                    else if (f.isDirectory) onPathChange(f.absolutePath)
+                    else if (isImage) onImageClick(f)
+                    else if (ext in INI_EXTENSIONS) onFileSelected(f.name, f.absolutePath)
+                },
+                onLongClick = { bounds ->
+                    // 无论是否多选，长按都弹出同样的操作悬浮窗；多选时操作作用于全部已选项
+                    ctxMenuFile = f
+                    ctxMenuBounds = bounds
+                },
+                isSelected = multiSelectMode && selectedFiles.contains(f.absolutePath),
+                multiSelectMode = multiSelectMode,
+                onSwipeLeft = {
+                    // 左滑条目 → 进入多选模式并选中该条目
+                    multiSelectMode = true
+                    selectedFiles = selectedFiles + f.absolutePath
+                }
+            )
         } }
     }
     // 长按文件弹出的悬浮操作菜单，定位到选中文件右侧
     ctxMenuFile?.let { file ->
         ctxMenuBounds?.let { bounds ->
+            // 多选模式下悬浮窗操作作用于所有已选项；单选时作用于该文件
+            val targets = if (multiSelectMode && selectedFiles.isNotEmpty()) selectedFiles.toList() else listOf(file.absolutePath)
+            val singleTarget = targets.size == 1
             Popup(
                 popupPositionProvider = FileMenuPositionProvider(bounds),
                 onDismissRequest = { ctxMenuFile = null; ctxMenuBounds = null },
@@ -517,21 +670,52 @@ private fun BrowserPanel(
                 ) {
                     Column(Modifier.width(132.dp).padding(vertical = 4.dp)) {
                         FloatingMenuItem(Icons.Outlined.ContentCopy, "复制", onClick = {
-                            clipFiles = listOf(file.absolutePath); clipMode = "copy"
+                            FileClipboardManager.set(context, "copy", targets)
                             ctxMenuFile = null; ctxMenuBounds = null
+                            exitMultiSelect()
                         })
                         FloatingMenuItem(Icons.Outlined.ContentCut, "剪切", onClick = {
-                            clipFiles = listOf(file.absolutePath); clipMode = "cut"
+                            FileClipboardManager.set(context, "cut", targets)
                             ctxMenuFile = null; ctxMenuBounds = null
+                            exitMultiSelect()
                         })
-                        FloatingMenuItem(Icons.Outlined.DriveFileRenameOutline, "重命名", onClick = {
-                            rename = file; newName = file.name
-                            ctxMenuFile = null; ctxMenuBounds = null
-                        })
-                        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                        // 重命名/书签为单文件操作，多选时不显示
+                        if (singleTarget) {
+                            FloatingMenuItem(Icons.Outlined.DriveFileRenameOutline, "重命名", onClick = {
+                                rename = file; newName = file.name
+                                ctxMenuFile = null; ctxMenuBounds = null
+                                exitMultiSelect()
+                            })
+                        }
+                        // 单选模式下的多选入口：进入多选并选中该文件（位于重命名下方）
+                        if (!multiSelectMode) {
+                            FloatingMenuItem(Icons.Outlined.Checklist, "多选", onClick = {
+                                multiSelectMode = true
+                                selectedFiles = setOf(file.absolutePath)
+                                ctxMenuFile = null; ctxMenuBounds = null
+                            })
+                        }
+                        if (singleTarget) {
+                            HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                            // 仅 .ini/.txt/.template 文件可添加书签（文件夹不可）
+                            if (file.isFile && file.extension.lowercase() in setOf("ini", "txt", "template")) {
+                                FloatingMenuItem(
+                                    if (BookmarkManager.isBookmarked(file.absolutePath)) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                    if (BookmarkManager.isBookmarked(file.absolutePath)) "取消书签" else "书签",
+                                    onClick = {
+                                        val added = BookmarkManager.toggle(file.absolutePath, file.name)
+                                        android.widget.Toast.makeText(context, if (added) "已添加书签" else "已取消书签", android.widget.Toast.LENGTH_SHORT).show()
+                                        ctxMenuFile = null; ctxMenuBounds = null
+                                        exitMultiSelect()
+                                    }
+                                )
+                                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                            }
+                        }
                         FloatingMenuItem(Icons.Outlined.DeleteOutline, "删除", tint = RustedError, onClick = {
-                            del = file
+                            if (targets.size > 1) delMulti = targets else del = file
                             ctxMenuFile = null; ctxMenuBounds = null
+                            exitMultiSelect()
                         })
                     }
                 }
@@ -571,11 +755,47 @@ private fun BrowserPanel(
             withContext(Dispatchers.Main) { onRefreshNeeded() }
         }
     }) { Text("删除", color = RustedError) } }, dismissButton = { TextButton(onClick = { del = null }) { Text("取消") } }) }
+    // 批量删除确认
+    if (delMulti.isNotEmpty()) {
+        val targets = delMulti
+        AlertDialog(
+            onDismissRequest = { delMulti = emptyList() },
+            title = { Text("确认删除") },
+            text = { Text("确定删除选中的 ${targets.size} 项？此操作不可撤销。") },
+            confirmButton = { TextButton(onClick = {
+                delMulti = emptyList()
+                scope.launch(Dispatchers.IO) {
+                    var ok = 0; var fail = 0
+                    targets.forEach { p ->
+                        try {
+                            val ff = File(p)
+                            if (ff.isDirectory) ff.deleteRecursively() else ff.delete()
+                            ok++
+                        } catch (_: Exception) { fail++ }
+                    }
+                    withContext(Dispatchers.Main) {
+                        onRefreshNeeded()
+                        android.widget.Toast.makeText(context,
+                            if (fail > 0) "已删除 $ok 项，失败 $fail 项" else "已删除 $ok 项",
+                            android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }) { Text("删除", color = RustedError) } },
+            dismissButton = { TextButton(onClick = { delMulti = emptyList() }) { Text("取消") } }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileEntry(file: File, onClick: () -> Unit, onLongClick: (Rect) -> Unit, isSelected: Boolean = false) {
+private fun FileEntry(
+    file: File,
+    onClick: () -> Unit,
+    onLongClick: (Rect) -> Unit,
+    isSelected: Boolean = false,
+    multiSelectMode: Boolean = false,
+    onSwipeLeft: () -> Unit = {}
+) {
     val isDir = file.isDirectory
     val df = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
     val ext = file.extension.lowercase()
@@ -604,6 +824,16 @@ private fun FileEntry(file: File, onClick: () -> Unit, onLongClick: (Rect) -> Un
 
     val typeInfo = remember(fileType) { FileTypeInfo.forType(fileType) }
 
+    // 文件浏览器固定「小」档位：统一 MT 管理器风格（无边框扁平两行），紧凑
+    val padV = 4.dp
+    val multiSelIcon = 18.dp
+    val multiSelGap = 6.dp
+    val iconBox = 30.dp
+    val icon = 22.dp
+    val img = 22.dp
+    val nameSp = 14.sp
+    val subSp = 9.sp
+
     // 记录当前条目在窗口中的位置，长按时回传给父级用于定位悬浮菜单
     var entryBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -616,43 +846,71 @@ private fun FileEntry(file: File, onClick: () -> Unit, onLongClick: (Rect) -> Un
                 val sz = coords.size
                 entryBounds = Rect(pos, Size(sz.width.toFloat(), sz.height.toFloat()))
             }
+            // 向左滑动条目 → 进入多选（detectHorizontalDragGestures 仅在水平滑动超过阈值时触发，
+            // 不影响列表纵向滚动与点击/长按）
+            .pointerInput(Unit) {
+                var dragTotal = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onDragEnd = {
+                        if (dragTotal < -40.dp.toPx()) onSwipeLeft()
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragTotal += dragAmount
+                    }
+                )
+            }
             .combinedClickable(onClick = onClick, onLongClick = {
                 entryBounds?.let { onLongClick(it) }
             }),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(0.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) RustedPrimary.copy(alpha = 0.08f) else RustedSurface
+            containerColor = if (isSelected) RustedPrimary.copy(alpha = 0.08f) else Color.Transparent
         ),
         border = BorderStroke(
-            if (isSelected) 1.dp else 0.5.dp,
-            if (isSelected) RustedPrimary.copy(alpha = 0.4f) else RustedOnBackground.copy(alpha = 0.10f)
+            if (isSelected) 1.dp else 0.dp,
+            if (isSelected) RustedPrimary.copy(alpha = 0.4f) else Color.Transparent
         )
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (isDir) {
-                Box(Modifier.width(3.dp).height(28.dp).clip(RoundedCornerShape(2.dp)).background(typeInfo.color))
-                Spacer(Modifier.width(8.dp))
+        // 统一 MT 管理器风格两行布局（大/中/小仅尺寸不同）
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
+            if (multiSelectMode) {
+                Icon(
+                    if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    null,
+                    Modifier.size(multiSelIcon),
+                    tint = if (isSelected) RustedPrimary else RustedOnBackground.copy(alpha = 0.3f)
+                )
+                Spacer(Modifier.width(multiSelGap))
             }
             Box(
-                Modifier
-                    .size(30.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(typeInfo.color.copy(alpha = 0.10f)),
+                Modifier.size(iconBox),
                 contentAlignment = Alignment.Center
             ) {
                 imageBitmap?.let {
-                    androidx.compose.foundation.Image(it, null, Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)))
-                } ?: Icon(typeInfo.icon, null, Modifier.size(18.dp), tint = typeInfo.color)
+                    androidx.compose.foundation.Image(it, null, Modifier.size(img).clip(RoundedCornerShape(4.dp)))
+                } ?: Icon(typeInfo.icon, null, Modifier.size(icon), tint = typeInfo.color)
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(file.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = RustedOnBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (isDir) "文件夹" else if (isImage) "图片" else fmtSize(file.length()), fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.45f))
-                    Text("  •  ", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.2f))
-                    Text(df.format(Date(file.lastModified())), fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.45f))
-                }
+                Text(
+                    file.name,
+                    fontSize = nameSp,
+                    fontWeight = FontWeight.Medium,
+                    color = RustedOnBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(1.dp))
+                Text(
+                    text = if (isDir) "文件夹  •  ${df.format(Date(file.lastModified()))}"
+                    else "${fmtSize(file.length())}  •  ${df.format(Date(file.lastModified()))}",
+                    fontSize = subSp,
+                    color = RustedOnBackground.copy(alpha = 0.38f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -666,7 +924,7 @@ private fun MenuBtn(label: String, icon: androidx.compose.ui.graphics.vector.Ima
 /**
  * 悬浮菜单定位器：将菜单固定在选中文件条目的右侧，超出屏幕边界时自动回退。
  */
-private class FileMenuPositionProvider(private val fileBounds: Rect) : PopupPositionProvider {
+internal class FileMenuPositionProvider(private val fileBounds: Rect) : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,
@@ -686,7 +944,7 @@ private class FileMenuPositionProvider(private val fileBounds: Rect) : PopupPosi
  * 悬浮菜单中的单个操作项（图标 + 文字）。
  */
 @Composable
-private fun FloatingMenuItem(
+internal fun FloatingMenuItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     tint: Color = RustedOnBackground,

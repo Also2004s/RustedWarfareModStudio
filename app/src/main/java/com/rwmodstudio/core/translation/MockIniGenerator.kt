@@ -3,6 +3,7 @@ package com.rwmodstudio.core.translation
 import android.content.Context
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.VerifyManager
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 属性分类器：把属性归类到补全类型分类（分类页/模拟 ini 共用）。
@@ -41,7 +42,7 @@ object MockIniGenerator {
             }
             val text = buildDoc(context, classifier)
             file.parentFile?.mkdirs()
-            file.writeText(text, Charsets.UTF_8)
+            file.atomicWriteText(text, Charsets.UTF_8)
             VerifyManager.write(VerifyManager.MOCK_INI, VerifyManager.MOCK_INI_CODE)
             file
         } catch (e: Exception) {

@@ -9,6 +9,7 @@ object ThemeState {
     var bgColor by mutableStateOf(SettingsManager.bgColor)
     var highlightTheme by mutableStateOf(SettingsManager.highlightTheme)
     var darkTokenColors by mutableStateOf(SettingsManager.darkTokenColors.toDarkThemeColors())
+    var highlightPresets by mutableStateOf(SettingsManager.highlightPresets)
     var sectionHighlightEnabled by mutableStateOf(SettingsManager.sectionHighlightEnabled)
     var sectionHighlightColor by mutableStateOf(SettingsManager.sectionHighlightColor)
 
@@ -34,6 +35,12 @@ object ThemeState {
         highlightTheme = theme
         SettingsManager.highlightTheme = theme
         // 背景色不再随高亮主题切换而变更，保持用户独立设置
+    }
+
+    /** 刷新用户高亮预设列表（新增/覆盖/删除后调用）。 */
+    fun applyPresets(presets: List<HighlightPreset>) {
+        highlightPresets = presets
+        SettingsManager.highlightPresets = presets
     }
 
     /** 切换节名行高亮开关。 */

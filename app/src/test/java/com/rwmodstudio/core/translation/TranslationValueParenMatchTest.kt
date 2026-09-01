@@ -43,7 +43,7 @@ class TranslationValueParenMatchTest {
         // 翻译库无 self. 格式，回退裸 XXX 格式
         assertEquals("敌人有此单位数量", dict.getValueTranslation("self.numberOfUnitsInEnemyTeam()"))
         assertEquals("读取单位内存", dict.getValueTranslation("self.readUnitMemory()"))
-        assertEquals("有活动的路径点", dict.getValueTranslation("self.hasActiveWaypoint()"))
+        assertEquals("自身有活动的路径点", dict.getValueTranslation("self.hasActiveWaypoint()"))
         assertEquals("全图中此单位数量", dict.getValueTranslation("self.numberOfUnitsInAllTeams()"))
     }
 
@@ -60,7 +60,7 @@ class TranslationValueParenMatchTest {
         // 反向同样剥 self./()，直接返回库样式（裸英文），不拼回
         assertEquals("numberOfUnitsInEnemyTeam", dict.getValueTranslationBack("self.敌人有此单位数量()"))
         assertEquals("self.ammo", dict.getValueTranslationBack("自身弹药()"))
-        assertEquals("hasActiveWaypoint", dict.getValueTranslationBack("有活动的路径点()"))
+        assertEquals("self.hasActiveWaypoint", dict.getValueTranslationBack("自身有活动的路径点()"))
     }
 
     @Test

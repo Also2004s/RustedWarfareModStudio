@@ -49,6 +49,7 @@ internal val sectionEnToZh = mapOf(
     "turret" to "炮塔",
     "projectile" to "抛射体",
     "leg" to "腿",
+    "arm" to "腿",
     "placementrule" to "放置规则"
 )
 
@@ -66,6 +67,8 @@ class CompletionProvider(
 
     companion object {
         internal val AUTO_COMPLETE_TRIGGER_CHARS = setOf('.', '(', '{', '[', '=', '+', ':', '*', '/', '-', '%', '<', '>', ',', '，', ')', ']')
+        /** 节补全去重：向前/向后扫描节边界时的最大行数上限，避免大文件全量遍历。 */
+        private const val MAX_SECTION_SCAN_LINES = 512
     }
 
     /**
@@ -339,6 +342,7 @@ class CompletionProvider(
                     globalResources = globalResources,
                     unitNames = unitNames,
                     vanillaUnitNames = com.rwmodstudio.feature.completion.value.VanillaUnitsRepository.get(context),
+                    unitData = fallbackSymbols.unitData,
                     turretNames = turretNames,
                     projectileNames = projectileNames,
                     effectNames = effectNames,
@@ -407,8 +411,9 @@ class CompletionProvider(
                 !currentLineFull.trim().startsWith("[") &&
                 sectionCompletionEnabled
         if (isInSectionBody) {
-            val body = getSectionBodyCompletions(sectionForBody!!, sectionFilters)
-            Log.d("RW_SECTION_COMPL", "sectionBody call section=$sectionForBody mapped=${mapSectionName(sectionForBody)} filters=${sectionFilters.keys} result=${body.size}")
+            val existingKeys = existingKeysInSection(textBeforeCursor, textAfterCursor)
+            val body = getSectionBodyCompletions(sectionForBody!!, sectionFilters, existingKeys)
+            Log.d("RW_SECTION_COMPL", "sectionBody call section=$sectionForBody mapped=${mapSectionName(sectionForBody)} filters=${sectionFilters.keys} result=${body.size} existing=${existingKeys.size}")
             return body.withDetail()
         }
 
@@ -505,12 +510,11 @@ class CompletionProvider(
 
     private fun getSectionCompletions(prefix: String): List<CompletionItem> {
         val sections = listOf(
+            "隐藏行动_" to "hiddenAction_", "行动_" to "action_", "全局资源_" to "global_resource_", "资源_" to "resource_",
             "核心" to "core", "图像" to "graphics", "攻击" to "attack",
             "炮塔_" to "turret_", "抛射体_" to "projectile_", "运动" to "movement",
-            "行动_" to "action_", "隐藏行动_" to "hiddenAction_", "效果_" to "effect_",
-            "动画_" to "animation_", "附属_" to "attachment_", "可建造_" to "canBuild_",
-            "贴花" to "decal", "资源_" to "resource_", "全局资源_" to "global_resource_",
-            "leg_" to "leg_", "放置规则_" to "placementRule_"
+            "效果_" to "effect_", "动画_" to "animation_", "附属_" to "attachment_", "贴花" to "decal",
+            "leg_" to "leg_", "arm_" to "arm_", "可建造_" to "canBuild_", "放置规则_" to "placementRule_"
         )
         return sections.mapNotNull { (zh, en) ->
             val level = completionMatchLevel(prefix, zh)
@@ -523,10 +527,12 @@ class CompletionProvider(
 
     /**
      * 节补全：返回当前节允许分类下的所有属性，供空行时直接选择。
+     * 仅列出当前节尚未出现过的属性名（existingKeys 为当前文件当前节已存在的键集合）。
      */
     private fun getSectionBodyCompletions(
         activeSection: String,
-        sectionFilters: Map<String, Set<String>>
+        sectionFilters: Map<String, Set<String>>,
+        existingKeys: Set<String>
     ): List<CompletionItem> {
         val mappedSection = mapSectionName(activeSection)
         val enabledCategories = sectionFilters[mappedSection]
@@ -536,12 +542,89 @@ class CompletionProvider(
         // 节补全只从自定义补全表（native + user）查询
         for (item in mergedCustom) {
             if (enabledCategories != null && !item.category.any { c -> c in enabledCategories }) continue
+            // 当前节已出现的属性名不再提示（仅检测当前文件当前节）
+            if (existingKeys.isNotEmpty() && itemAppearsInSection(item, existingKeys)) continue
             if (item.label in seen) continue
             seen.add(item.label)
             results.add(item.copy(detail = if (showDetail) item.detail else ""))
         }
 
         return sortCompletions(results)
+    }
+
+    /**
+     * 节内已出现的属性名检测：归一化比较补全项的 label/name/nameEn 与当前节已存在键。
+     * 中英文视图均可命中（文件里中文键命中 label/name，英文键命中 nameEn）。
+     */
+    private fun itemAppearsInSection(item: CompletionItem, existingKeys: Set<String>): Boolean {
+        return (item.label.isNotBlank() && normalizeKey(item.label) in existingKeys) ||
+                (item.name.isNotBlank() && normalizeKey(item.name) in existingKeys) ||
+                (item.nameEn.isNotBlank() && normalizeKey(item.nameEn) in existingKeys)
+    }
+
+    private fun normalizeKey(k: String): String = k.trim().lowercase()
+
+    /**
+     * 收集当前节（光标所在节）内已出现的属性键集合，供节补全去重。
+     * 仅检测当前文件当前节：以光标所在行为基准，向前找最近一个 `[节]` 头（上限
+     * MAX_SECTION_SCAN_LINES 行，找不到则返回空集、优雅回退），向后找下一个 `[节]` 头
+     * （找不到视为文件尾）。收集范围内非注释、非节头、非多行值块内容的键（取第一个 `:`
+     * 或 `=` 前的部分，剔除 `@` 指令与含空格行），归一化（trim + 小写）后返回。
+     */
+    private fun existingKeysInSection(textBeforeCursor: String, textAfterCursor: String): Set<String> {
+        val keys = mutableSetOf<String>()
+        val beforeLines = textBeforeCursor.lines()
+        val afterLines = textAfterCursor.lines()
+        val cursorLine = beforeLines.lastIndex // 当前行（textBeforeCursor 末行即光标所在行）
+
+        // 找节起点：光标行及之前最近的 [节] 头
+        var start = -1
+        var i = cursorLine
+        while (i >= 0) {
+            val t = beforeLines[i].trim()
+            if (t.length >= 2 && t.startsWith("[") && t.endsWith("]")) { start = i; break }
+            i--
+            if (cursorLine - i > MAX_SECTION_SCAN_LINES) break
+        }
+        if (start < 0) return keys
+
+        // 找节终点：光标后（afterLines）下一个 [节] 头，找不到视为文件尾（有界扫描）
+        val forwardLimit = afterLines.size.coerceAtMost(MAX_SECTION_SCAN_LINES + 1)
+        var end = forwardLimit
+        var j = 0
+        while (j < afterLines.size && j <= MAX_SECTION_SCAN_LINES) {
+            val t = afterLines[j].trim()
+            if (t.length >= 2 && t.startsWith("[") && t.endsWith("]")) { end = j; break }
+            j++
+        }
+
+        // 收集节内键（start 之后、end 之前；start 行本身是节头不算键）。
+        // 多行值块（key:""" ... """）内的内容行不作为键。
+        var inValueBlock = false
+        fun collectFrom(lines: List<String>, from: Int, to: Int) {
+            for (idx in from until to) {
+                val t = lines[idx].trim()
+                if (t.isEmpty()) continue
+                if (inValueBlock) {
+                    if (t.startsWith("\"\"\"")) inValueBlock = false
+                    continue
+                }
+                if (t.startsWith("[") || t.startsWith(";") || t.startsWith("#") || t.startsWith("//")) continue
+                val sepIdx = t.indexOfFirst { it == ':' || it == '=' }
+                if (sepIdx <= 0) continue
+                val key = t.substring(0, sepIdx).trim()
+                if (key.isEmpty() || key.startsWith("@") || key.contains(' ')) continue
+                keys.add(key.lowercase())
+                // 多行值块开启行（key:"""）；同行闭合（key:"""..."""）不进入块模式
+                val rest = t.substring(sepIdx + 1).trim()
+                if (rest.startsWith("\"\"\"") && rest.substring(3).indexOf("\"\"\"") < 0) inValueBlock = true
+            }
+        }
+
+        // 节内行 = beforeLines[start+1..光标行] + afterLines[0..end)
+        collectFrom(beforeLines, start + 1, beforeLines.size)
+        collectFrom(afterLines, 0, end)
+        return keys
     }
 
     /**
@@ -686,16 +769,28 @@ fun extractCurrentFileSymbols(
     val fileGlobalVariables = linkedSetOf<String>()
     val fileSectionDefines = linkedMapOf<String, MutableSet<String>>()
     val fileActionTags = linkedSetOf<String>()
+    val fileUnitData = linkedMapOf<String, ProjectTagScanner.UnitBuildInfo>()
 
     var inCoreSection = false
     var inActionSection = false
     var currentSection = ""
+    // 当前 [core] 节的单位建造信息（节尾/文件尾冲刷进 fileUnitData）
+    var coreUnitName: String? = null
+    var corePrice = ""
+    var coreBuildSpeed = ""
     fullText.split('\n').forEach { rawLine ->
         val line = rawLine.trim()
         if (line.isEmpty() || line.startsWith("#")) return@forEach
 
         val sectionMatch = sectionHeaderRegex.find(line)
         if (sectionMatch != null) {
+            // 离开 core 节时冲刷已收集的单位建造信息
+            if (inCoreSection && coreUnitName != null) {
+                fileUnitData[coreUnitName!!] = ProjectTagScanner.UnitBuildInfo(corePrice, coreBuildSpeed)
+                coreUnitName = null
+                corePrice = ""
+                coreBuildSpeed = ""
+            }
             currentSection = sectionMatch.groupValues[1].trim().lowercase()
             inCoreSection = sectionToEnglish(sectionMatch.groupValues[1].trim())
                 .equals("core", ignoreCase = true)
@@ -743,15 +838,31 @@ fun extractCurrentFileSymbols(
             splitValues(m.groupValues[1]).forEach { fileMessageTags.add(it) }
         }
         if (inCoreSection) {
-            // 单位名键：name（或其翻译后的中文，如「名称」），经 keyToEnglish 归一化后比较，不硬编码中文
+            // 单位核心属性：name（单位名）/ price（价格）/ buildSpeed（建造速度），
+            // 键名经 keyToEnglish 归一化后比较（中文「名称/价格/建造速度」走翻译库反查），不硬编码中文
             val colonIdx = line.indexOf(':')
             if (colonIdx > 0) {
                 val key = line.substring(0, colonIdx).trim()
-                if (keyToEnglish(key).equals("name", ignoreCase = true)) {
-                    splitValues(line.substring(colonIdx + 1)).forEach { fileUnitNames.add(it) }
+                val keyEn = keyToEnglish(key)
+                val value = line.substring(colonIdx + 1).trim()
+                when {
+                    keyEn.equals("name", ignoreCase = true) -> {
+                        val names = splitValues(value)
+                        fileUnitNames.addAll(names)
+                        coreUnitName = names.firstOrNull() ?: coreUnitName
+                    }
+                    keyEn.equals("price", ignoreCase = true) ->
+                        corePrice = value.substringBefore('#').trim()
+                    keyEn.equals("buildspeed", ignoreCase = true) ->
+                        coreBuildSpeed = value.substringBefore('#').trim()
                 }
             }
         }
+    }
+
+    // 文件尾冲刷最后一个 [core] 节的单位建造信息
+    if (inCoreSection && coreUnitName != null) {
+        fileUnitData[coreUnitName!!] = ProjectTagScanner.UnitBuildInfo(corePrice, coreBuildSpeed)
     }
 
     return ProjectTagScanner.ProjectTagInfo(
@@ -767,7 +878,8 @@ fun extractCurrentFileSymbols(
         memoryTypes = memoryTypes,
         globalVariables = fileGlobalVariables,
         sectionDefines = fileSectionDefines.mapValues { it.value.toSet() },
-        actionTags = fileActionTags
+        actionTags = fileActionTags,
+        unitData = fileUnitData
     )
 }
 
@@ -789,7 +901,8 @@ fun mergeCompletionSymbols(
         memoryTypes = current.memoryTypes + chain.memoryTypes,
         globalVariables = current.globalVariables + chain.globalVariables,
         sectionDefines = mergeSectionDefines(current.sectionDefines, chain.sectionDefines),
-        actionTags = current.actionTags + chain.actionTags
+        actionTags = current.actionTags + chain.actionTags,
+        unitData = current.unitData + chain.unitData
     )
 }
 
@@ -834,7 +947,8 @@ fun extractFileSymbols(
         messageTags = (cached?.messageTags ?: emptySet()) + current.messageTags,
         unitNames = (cached?.unitNames ?: emptySet()) + current.unitNames,
         memoryTypes = current.memoryTypes + (cached?.memoryTypes ?: emptyMap()),
-        globalVariables = (cached?.globalVariables ?: emptySet()) + current.globalVariables
+        globalVariables = (cached?.globalVariables ?: emptySet()) + current.globalVariables,
+        unitData = current.unitData + (cached?.unitData ?: emptyMap())
     )
 }
 

@@ -191,7 +191,14 @@ internal fun lastOperandAfterOperator(segment: String): Pair<String, Int>? {
  */
 internal fun dotFallbackFilter(prefix: String): String? {
     if (isSpecialDotPrefix(prefix)) return null
-    val idx = prefix.lastIndexOf('.')
+    // 小数点（如 1.2、0.5）的 `.` 不是成员访问点：`.` 前/后是数字时跳过，继续向前找真正的链分隔点。
+    // 否则 `存活时间(几秒后=1.2)` 的 valuePrefix 残留 `几秒后=1.2)` 会把小数点点当链分隔、误弹逻辑值补全。
+    var idx = prefix.lastIndexOf('.')
+    while (idx >= 0 &&
+        ((idx > 0 && prefix[idx - 1].isDigit()) || (idx < prefix.lastIndex && prefix[idx + 1].isDigit()))
+    ) {
+        idx = prefix.lastIndexOf('.', idx - 1)
+    }
     return if (idx >= 0) prefix.substring(idx + 1) else null
 }
 
@@ -223,15 +230,26 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         val prop = request.findProperty()
         // 既有：逻辑类型属性
         if (prop != null && (isLogicBooleanValueType(prop.type) || isLogicNumberValueType(prop.type))) return true
-        // dynamic resources 的 RHS（用逻辑设置资源:资源名=之后，含括号内 valuePrefix 丢失 = 的场景）→ 逻辑表达式补全
-        if (prop != null && isDynamicResourcesValueType(prop.type) && currentSegmentRhs(request.textBeforeCursor) != null) return true
-        // key value pairs 的 RHS（设置单位内存:变量名=之后 / 更新单位内存）→ 逻辑表达式补全
-        if (prop != null && isKeyValuePairsType(prop.type) && currentSegmentRhs(request.textBeforeCursor) != null) return true
-        // fields values 的 RHS（设置单位状态 setUnitStats:单位属性=之后，支持 =/+=/-= 动态数学/逻辑）→ 数值逻辑表达式补全
-        if (prop != null && isFieldsValuesValueType(prop.type) && currentSegmentRhs(request.textBeforeCursor) != null) return true
+        // dynamic resources 的 RHS（用逻辑设置资源:资源名=之后，含多行值块续行 资源名= 与括号内 valuePrefix 丢失 = 的场景）→ 逻辑表达式补全
+        if (prop != null && isDynamicResourcesValueType(prop.type) && isDynamicLikeRhsLine(request.textBeforeCursor)) return true
+        // key value pairs 的 RHS（设置单位内存:变量名=之后 / 更新单位内存，含多行值块续行）→ 逻辑表达式补全
+        if (prop != null && isKeyValuePairsType(prop.type) && isDynamicLikeRhsLine(request.textBeforeCursor)) return true
+        // fields values 的 RHS（设置单位状态 setUnitStats:单位属性=之后，支持 =/+=/-= 动态数学/逻辑，含多行值块续行）→ 数值逻辑表达式补全
+        if (prop != null && isFieldsValuesValueType(prop.type) && isDynamicLikeRhsLine(request.textBeforeCursor)) return true
         // 新增：字符串属性内 %{ 逻辑插值（未闭合）→ 逻辑表达式补全
         if (interpolationFilter(request.valuePrefix.trim()) != null) return true
         return false
+    }
+
+    /**
+     * 判断光标所在行是否已进入「资源名=表达式」形态的 RHS（dynamic resources / kvp / fields values 共用）。
+     * - 单行（用逻辑设置资源:资源名=表达式）：按 `:` 后段顶层 `=` 判定（[currentSegmentRhs]）；
+     * - 多行值块续行（用逻辑设置资源:""" ... 资源名=表达式）：续行无 `:`，直接按行内顶层 `=` 判定
+     *   （LHS 已补全 `=` 之后即视为 RHS；括号内命名参数 `=` 不算，topLevelEq 已排除）。
+     */
+    private fun isDynamicLikeRhsLine(textBeforeCursor: String): Boolean {
+        if (currentSegmentRhs(textBeforeCursor) != null) return true
+        return !textBeforeCursor.contains(':') && topLevelEq(textBeforeCursor) >= 0
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
@@ -428,7 +446,11 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                     // 已由上方统一分发（与数值源一致），此处复用。
                     val trimmed = exprText.trim()
                     val lastChar = trimmed.lastOrNull()
-                    val typingOperand = operandPrefix.isNotEmpty()
+                    // 正在输入半截操作词：光标前是闭合括号/插值/空白（如 `if not 存活时间(几秒后=1.2)` 的 `)` 后）时，
+                    // 前一个函数已闭合、操作数已完成，不视为正在输入——否则 `:` 后的 valuePrefix 会把 `(` 内的残留
+                    // `几秒后=1.2)` 切成 `1.2)` 当作当前操作词，在表达式末尾误弹整组操作数集（含 间距/距离 等数值函数）
+                    val typingOperand = operandPrefix.isNotEmpty() &&
+                        rawLastGlobal != ')' && rawLastGlobal != '}' && !rawLastGlobal.isWhitespace()
                     // 子式起点（刚输入 ( 或 , ）/ 运算符后：给完整操作数集（数值/文本/单位标记/布尔函数），
                     // 不含 and/or/not/真/假/if/运算符（由 excludeTokens 剔除，not 由下方状态机按片段注入）。
                     val operands = booleanLogicValueItems(
@@ -486,6 +508,10 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                         lastWord == "not" -> operands
                         // 布尔字面量后：不弹 and/or
                         lastWord in setOf("true", "false", "真", "假") -> emptyList()
+                        // 闭合括号/插值后无空格（如 `if not 存活时间(几秒后=1.2)` 的 `)` 后）：
+                        // 函数调用已完整闭合，用户未输入空格/运算符表示不再续接表达式，既不弹操作数也不弹 and/or；
+                        // 需要续接时用户输入空格（rawLastGlobal.isWhitespace() 分支）或运算符（trailingOp 分支）才会弹。
+                        rawLastGlobal == ')' || rawLastGlobal == '}' -> emptyList()
                         // 操作数完成：只弹 and/or 连接符
                         else -> listOf(andItem, orItem)
                     }

@@ -16,9 +16,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.rwmodstudio.core.FileClipboardManager
 import com.rwmodstudio.core.InheritanceCache
 import com.rwmodstudio.core.LocalConfigManager
 import com.rwmodstudio.core.RwmodPaths
@@ -42,8 +46,12 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     companion object {
-        /** 外部传入的待打开文件（文件名, 绝对路径），由 MainApp 消费 */
-        var pendingOpenFile: Pair<String, String>? = null
+        /**
+         * 外部传入的待打开文件（文件名, 绝对路径），由 MainApp 消费。
+         * 用 Compose 状态承载：App 已在前台时 onNewIntent 再次赋值，能驱动 MainApp 的 LaunchedEffect 重新消费，
+         * 修复「singleTask + LaunchedEffect(Unit) 只跑一次 → 二次外部打开静默丢失」的问题。
+         */
+        var pendingOpenFile by mutableStateOf<Pair<String, String>?>(null)
         private const val TAG = "MainActivity"
     }
 
@@ -61,6 +69,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 保持 HEAD 原顺序：loadBlocklist 必须在主线程同步执行——
+        // TranslationEngine.load 内部（loadMutex 内）也会调 loadBlocklist，
+        // 若挪到后台协程会与之并发竞态（屏蔽词加载依赖翻译字典先就绪），导致首次启动初始化异常。
         SettingsManager.init(applicationContext)
         TranslationEngine.getInstance().loadBlocklist(applicationContext)
         ArrayReader.init(applicationContext)
@@ -209,24 +220,39 @@ class MainActivity : ComponentActivity() {
     private fun importReplay(uri: Uri, name: String) {
         if (!ensureStoragePermission()) return
         lifecycleScope.launch {
-            val dir = File(SettingsManager.replayImportDir)
-            FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            try {
+                val dir = File(SettingsManager.replayImportDir)
+                FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            } catch (e: Exception) {
+                Log.e(TAG, "importReplay failed", e)
+                Toast.makeText(this@MainActivity, "导入回放失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private fun importRwmod(uri: Uri, name: String) {
         if (!ensureStoragePermission()) return
         lifecycleScope.launch {
-            val dir = File(SettingsManager.rwmodImportDir)
-            FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            try {
+                val dir = File(SettingsManager.rwmodImportDir)
+                FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            } catch (e: Exception) {
+                Log.e(TAG, "importRwmod failed", e)
+                Toast.makeText(this@MainActivity, "导入模组失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private fun importMap(uri: Uri, name: String) {
         if (!ensureStoragePermission()) return
         lifecycleScope.launch {
-            val dir = File(SettingsManager.mapImportDir)
-            FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            try {
+                val dir = File(SettingsManager.mapImportDir)
+                FileImportHelper.importFromUri(this@MainActivity, uri, dir)
+            } catch (e: Exception) {
+                Log.e(TAG, "importMap failed", e)
+                Toast.makeText(this@MainActivity, "导入地图失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

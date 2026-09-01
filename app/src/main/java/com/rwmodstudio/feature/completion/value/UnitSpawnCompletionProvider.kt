@@ -79,11 +79,12 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
                         items.add(
                             createValueItem(
                                 label = name,
-                                // 生成单位的原版单位名查中文说明（heavyTank→重型坦克）；项目单位名用户自定义回退「单位名」
+                                // 生成单位的原版单位名查中文说明（heavyTank→重型坦克）；
+                                // 项目单位名用户自定义：核心节建造信息（建造速度换算为秒 + 价格），无数据回退 nameDetail
                                 detail = if (!isProjectile && name in request.vanillaUnitNames && name !in request.unitNames) {
                                     ValueDescriptionRepository.lookup(request.context, "data.value.vanillaunit.$name") ?: nameDetail
                                 } else {
-                                    nameDetail
+                                    unitBuildDetail(request.unitData[name], nameDetail)
                                 },
                                 insertText = name,
                                 prefixLength = request.rawValuePrefixLength,

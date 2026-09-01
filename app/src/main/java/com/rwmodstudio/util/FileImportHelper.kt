@@ -35,7 +35,9 @@ object FileImportHelper {
             }
 
             if (!targetDir.exists()) targetDir.mkdirs()
-            val targetFile = File(targetDir, fileName)
+            // 文件名清洗：只取 basename，拒绝提供方返回的路径分隔符/..，防拼出目标目录外的路径
+            val safeName = File(fileName).name.ifBlank { "import_${System.currentTimeMillis()}" }
+            val targetFile = File(targetDir, safeName)
             onConflict(targetFile)
 
             resolver.openInputStream(uri)?.use { input ->

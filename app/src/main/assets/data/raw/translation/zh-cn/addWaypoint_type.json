@@ -10,5 +10,10 @@
   "data.value.addwaypoint_type.touchtarget": "接触目标",
   "data.value.addwaypoint_type.build": "建造",
   "data.value.addwaypoint_type.follow": "跟随",
-  "data.value.addwaypoint_type.setpassivetarget": "设置被动目标"
+  "data.value.addwaypoint_type.setpassivetarget": "设置被动目标",
+  "data.value.addwaypoint_type.unloadat": "卸载至",
+  "data.value.addwaypoint_type.patrol": "巡逻",
+  "data.value.addwaypoint_type.guardat": "防守至",
+  "data.value.addwaypoint_type.triggeraction": "触发行动",
+  "data.value.addwaypoint_type.triggeractionwheninrange": "在范围内时触发行动"
 }

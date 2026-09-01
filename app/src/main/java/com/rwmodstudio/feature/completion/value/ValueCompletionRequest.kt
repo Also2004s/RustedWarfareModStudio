@@ -1,6 +1,7 @@
 package com.rwmodstudio.feature.completion.value
 
 import android.content.Context
+import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.TranslationDict
 
@@ -35,6 +36,8 @@ data class ValueCompletionRequest(
     val unitNames: Set<String> = emptySet(),
     /** 原版单位名（内置 assets/vanilla_units.json，rw_analysis 逆向的全部原版单位），独立于项目单位 unitNames */
     val vanillaUnitNames: Set<String> = emptySet(),
+    /** 单位 [core] 节建造信息：单位名 → 价格/建造速度（供单位名补全右侧详情展示） */
+    val unitData: Map<String, ProjectTagScanner.UnitBuildInfo> = emptyMap(),
     val turretNames: Set<String> = emptySet(),
     val projectileNames: Set<String> = emptySet(),
     val effectNames: Set<String> = emptySet(),

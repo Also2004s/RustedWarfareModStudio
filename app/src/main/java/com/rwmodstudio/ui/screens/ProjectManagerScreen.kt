@@ -67,11 +67,11 @@ fun ProjectManagerScreen(
         Modifier
             .fillMaxSize()
             .background(RustedBackground)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 12.dp)
     ) {
         ElevatedCard(
-            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
-            shape = RoundedCornerShape(18.dp),
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.elevatedCardColors(containerColor = RustedSurface),
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
         ) {
@@ -120,24 +120,23 @@ fun ProjectManagerScreen(
             } else {
                 LazyColumn(
                     Modifier.fillMaxSize(),
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    state = listState
                 ) {
                     items(items, key = { "${category.name}:$it" }) { value ->
                         val expanded = selectedValue == value
+                        // 统一 MT 管理器扁平列表风格：无边框、无圆角、透明底，仅选中时淡色高亮
                         Card(
                             Modifier
                                 .fillMaxWidth()
+                                .padding(vertical = 2.dp)
                                 .clickable { onSelectedValueChange(if (expanded) null else value) },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.elevatedCardColors(containerColor = RustedSurface),
-                            elevation = CardDefaults.elevatedCardElevation(
-                                defaultElevation = if (expanded) 2.dp else 1.dp,
-                                pressedElevation = 4.dp
+                            shape = RoundedCornerShape(0.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (expanded) RustedPrimary.copy(alpha = 0.08f) else Color.Transparent
                             ),
-                            border = if (expanded) BorderStroke(1.dp, RustedPrimary.copy(alpha = 0.45f)) else null
+                            border = if (expanded) BorderStroke(1.dp, RustedPrimary.copy(alpha = 0.4f)) else null
                         ) {
-                            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         value,

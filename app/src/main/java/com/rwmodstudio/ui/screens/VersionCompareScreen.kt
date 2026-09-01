@@ -5,8 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,20 +17,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rwmodstudio.core.AiService
+import com.rwmodstudio.core.ProjectUnderstanding
 import com.rwmodstudio.core.DiffOp
+import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.VersionComparator
 import com.rwmodstudio.core.computeLineDiff
 import com.rwmodstudio.ui.theme.*
+import com.rwmodstudio.util.atomicWriteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun VersionCompareScreen(
@@ -43,6 +54,20 @@ fun VersionCompareScreen(
     var result by remember { mutableStateOf<VersionComparator.FolderDiffResult?>(null) }
     var selectedFileDiff by remember { mutableStateOf<VersionComparator.FileDiffResult?>(null) }
     var showFolderPicker by remember { mutableStateOf(false) }
+    // AI 更新报告
+    var aiReport by remember { mutableStateOf<String?>(null) }
+    var aiGenerating by remember { mutableStateOf(false) }
+    var aiError by remember { mutableStateOf<String?>(null) }
+    var showReportDialog by remember { mutableStateOf(false) }
+    // 生成阶段提示 + 流式输出累积文本
+    var aiPhase by remember { mutableStateOf("") }
+    var aiStreamText by remember { mutableStateOf("") }
+    // 项目理解（新版）：对比完成后读取缓存展示，可手动让 AI 生成，可随时查看
+    var understandingText by remember { mutableStateOf<String?>(null) }
+    var understandingLoading by remember { mutableStateOf(false) }
+    var understandingExpanded by remember { mutableStateOf(false) }
+    var dialogTitle by remember { mutableStateOf("AI 更新报告") }
+    val clipboardManager = LocalClipboardManager.current
 
     Column(Modifier.fillMaxSize().background(RustedBackground)) {
         // 路径选择区：在一个树形弹窗中同时选择源文件夹和目标文件夹
@@ -52,9 +77,9 @@ fun VersionCompareScreen(
             shape = RoundedCornerShape(12.dp)
         ) {
             Column(Modifier.padding(14.dp)) {
-                Text("源文件夹", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                Text("旧版文件夹（源）", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                 Text(
-                    if (rootDir.isEmpty()) "点击选择源文件夹" else rootDir,
+                    if (rootDir.isEmpty()) "点击选择旧版文件夹" else rootDir,
                     fontSize = 13.sp,
                     color = if (rootDir.isEmpty()) RustedOnBackground.copy(alpha = 0.3f) else RustedOnBackground,
                     maxLines = 1,
@@ -62,9 +87,9 @@ fun VersionCompareScreen(
                     fontFamily = AppCodeFontFamily
                 )
                 Spacer(Modifier.height(10.dp))
-                Text("目标文件夹", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                Text("新版文件夹（目标）", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                 Text(
-                    if (metaDir.isEmpty()) "点击选择目标文件夹" else metaDir,
+                    if (metaDir.isEmpty()) "点击选择新版文件夹" else metaDir,
                     fontSize = 13.sp,
                     color = if (metaDir.isEmpty()) RustedOnBackground.copy(alpha = 0.3f) else RustedOnBackground,
                     maxLines = 1,
@@ -80,7 +105,7 @@ fun VersionCompareScreen(
                 ) {
                     Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("选择源文件夹和目标文件夹", fontSize = 13.sp)
+                    Text("选择旧版和新版文件夹", fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(
@@ -111,6 +136,17 @@ fun VersionCompareScreen(
 
         // 结果区
         result?.let { res ->
+            // 对比完成后读取缓存的 AI 项目理解（不触发 AI 调用），有则直接展示
+            LaunchedEffect(res, metaDir) {
+                if (metaDir.isNotEmpty()) {
+                    understandingLoading = true
+                    val cached = withContext(Dispatchers.IO) {
+                        ProjectUnderstanding.getCached(File(metaDir))
+                    }
+                    understandingLoading = false
+                    understandingText = cached
+                }
+            }
             if (res.commonFiles.isEmpty() && res.rootOnlyFiles.isEmpty() && res.metaOnlyFiles.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     Text("两个文件夹内容一致", fontSize = 13.sp, color = RustedOnBackground.copy(alpha = 0.4f))
@@ -121,22 +157,204 @@ fun VersionCompareScreen(
                     item {
                         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                             StatBadge("共同差异", res.commonFiles.size, RustedPrimary)
-                            StatBadge("源独有", res.rootOnlyFiles.size, RustedSecondary)
-                            StatBadge("目标独有", res.metaOnlyFiles.size, RustedAccent)
+                            StatBadge("旧版独有", res.rootOnlyFiles.size, RustedSecondary)
+                            StatBadge("新版独有", res.metaOnlyFiles.size, RustedAccent)
+                        }
+                    }
+                    // 项目理解（新版）：AI 生成新版隐藏行动节的项目理解，展示在下方供查看，更新报告复用
+                    item {
+                        SectionHeader("项目理解（新版）")
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = RustedSurface),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                when {
+                                    understandingLoading -> Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(vertical = 10.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            Modifier.size(14.dp), color = RustedPrimary, strokeWidth = 2.dp
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "正在读取项目理解…",
+                                            fontSize = 12.sp,
+                                            color = RustedOnBackground.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                    understandingText == null -> Column(
+                                        Modifier.padding(vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            "尚未生成项目理解。AI 将扫描新版文件夹中的隐藏行动节，" +
+                                                "归纳各文件/单位的行为逻辑，生成结果展示于此，并在更新报告中复用。",
+                                            fontSize = 11.sp,
+                                            color = RustedOnBackground.copy(alpha = 0.55f)
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Button(
+                                            onClick = {
+                                                aiGenerating = true
+                                                aiError = null
+                                                aiReport = null
+                                                aiStreamText = ""
+                                                aiPhase = "正在扫描新版项目文件"
+                                                dialogTitle = "AI 项目理解"
+                                                showReportDialog = true
+                                                scope.launch {
+                                                    // 流式增量节流：onChunk 高频触发（每 token 一次），若每 chunk 都 scope.launch
+                                                    // 切主线程会堆积大量 Main 消息导致 UI 卡顿。改为 100ms 合并一批批量更新。
+                                                    val pending = StringBuilder()
+                                                    var lastFlushAt = 0L
+                                                    fun flushPending() {
+                                                        val batch = pending.toString()
+                                                        pending.setLength(0)
+                                                        if (batch.isNotEmpty()) scope.launch { aiStreamText += batch }
+                                                    }
+                                                    val r = ProjectUnderstanding.getOrBuild(
+                                                        File(metaDir),
+                                                        // onPhase/onChunk 在 IO 线程触发，切主线程更新 Compose state
+                                                        onPhase = { p -> scope.launch { aiPhase = p } },
+                                                        onChunk = { c ->
+                                                            synchronized(pending) {
+                                                                pending.append(c)
+                                                                val now = System.currentTimeMillis()
+                                                                if (now - lastFlushAt >= 100) {
+                                                                    lastFlushAt = now
+                                                                    flushPending()
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                    // 收尾：flush 最后一批不足 100ms 的残留增量
+                                                    synchronized(pending) { flushPending() }
+                                                    withContext(Dispatchers.Main) {
+                                                        aiGenerating = false
+                                                        aiPhase = ""
+                                                        r.fold(
+                                                            onSuccess = {
+                                                                understandingText = it
+                                                                aiReport = it
+                                                                aiError = null
+                                                            },
+                                                            onFailure = { aiError = it.message ?: "生成失败" }
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            enabled = !aiGenerating,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.buttonColors(containerColor = RustedSecondary)
+                                        ) {
+                                            Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                if (aiGenerating) "AI 正在构建项目理解…" else "AI 生成项目理解",
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    else -> {
+                                        SelectionContainer {
+                                            Text(
+                                                understandingText!!,
+                                                fontSize = 11.sp,
+                                                color = RustedOnBackground.copy(alpha = 0.85f),
+                                                fontFamily = AppCodeFontFamily,
+                                                maxLines = if (understandingExpanded) Int.MAX_VALUE else 8,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = { understandingExpanded = !understandingExpanded },
+                                            modifier = Modifier.align(Alignment.End)
+                                        ) {
+                                            Text(
+                                                if (understandingExpanded) "收起" else "展开全部",
+                                                fontSize = 11.sp,
+                                                color = RustedPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // AI 生成更新报告
+                    item {
+                        Button(
+                            onClick = {
+                                aiGenerating = true
+                                aiError = null
+                                aiReport = null
+                                aiStreamText = ""
+                                aiPhase = if (understandingText == null) "AI 正在构建项目理解" else "正在准备 AI 生成"
+                                dialogTitle = "AI 更新报告"
+                                showReportDialog = true
+                                scope.launch {
+                                    // 复用已生成的项目理解；未生成时先让 AI 构建理解（同步展示在下方），再生成报告
+                                    val understanding = understandingText ?: ProjectUnderstanding.getOrBuild(
+                                        File(metaDir),
+                                        onPhase = { p -> aiPhase = p },
+                                        onChunk = { c -> aiStreamText += c }
+                                    ).getOrElse { e ->
+                                        withContext(Dispatchers.Main) {
+                                            aiGenerating = false
+                                            aiPhase = ""
+                                            aiError = e.message ?: "生成失败"
+                                        }
+                                        return@launch
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        understandingText = understanding
+                                        aiStreamText = ""
+                                    }
+                                    val r = AiService.streamGenerateUpdateReport(
+                                        diff = res,
+                                        understanding = understanding,
+                                        onPhase = { p -> aiPhase = p },
+                                        onChunk = { c -> aiStreamText += c }
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        aiGenerating = false
+                                        aiPhase = ""
+                                        r.fold(
+                                            onSuccess = { aiReport = it; aiError = null },
+                                            onFailure = { aiError = it.message ?: "生成失败" }
+                                        )
+                                    }
+                                }
+                            },
+                            enabled = !aiGenerating,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = RustedSecondary)
+                        ) {
+                            if (aiGenerating) {
+                                CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(if (aiGenerating) "AI 正在生成更新报告…" else "AI 生成更新报告", fontSize = 13.sp)
                         }
                     }
                     // 源独有文件
                     if (res.rootOnlyFiles.isNotEmpty()) {
-                        item { SectionHeader("源文件夹独有文件") }
+                        item { SectionHeader("旧版独有文件") }
                         items(res.rootOnlyFiles) { path ->
-                            DiffFileItem(name = path, type = '+', badge = "源独有", onClick = {})
+                            DiffFileItem(name = path, type = '+', badge = "旧版独有", onClick = {})
                         }
                     }
-                    // 目标独有文件
+                    // 新版独有文件
                     if (res.metaOnlyFiles.isNotEmpty()) {
-                        item { SectionHeader("目标文件夹独有文件") }
+                        item { SectionHeader("新版独有文件") }
                         items(res.metaOnlyFiles) { path ->
-                            DiffFileItem(name = path, type = '-', badge = "目标独有", onClick = {})
+                            DiffFileItem(name = path, type = '-', badge = "新版独有", onClick = {})
                         }
                     }
                     // 共同文件差异
@@ -172,6 +390,19 @@ fun VersionCompareScreen(
     // 文件差异详情
     selectedFileDiff?.let { diff ->
         FileDiffDetailDialog(diff = diff, onDismiss = { selectedFileDiff = null })
+    }
+
+    // AI 更新报告对话框
+    if (showReportDialog) {
+        AiReportDialog(
+            title = dialogTitle,
+            report = aiReport,
+            error = aiError,
+            phase = aiPhase,
+            streamText = aiStreamText,
+            streaming = aiGenerating,
+            onDismiss = { showReportDialog = false }
+        )
     }
 }
 
@@ -457,5 +688,138 @@ private fun FileDiffDetailDialog(diff: VersionComparator.FileDiffResult, onDismi
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
+}
+
+/**
+ * AI 更新报告对话框：生成中显示阶段提示 + 流式实时输出，完成后展示完整报告，
+ * 支持复制 / 保存到 RWmod/exports/ai_reports/。
+ */
+@Composable
+private fun AiReportDialog(
+    title: String,
+    report: String?,
+    error: String?,
+    phase: String,
+    streamText: String,
+    streaming: Boolean,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    var saveMsg by remember { mutableStateOf<String?>(null) }
+    val scrollState = rememberScrollState()
+    // 流式输出时自动滚到底部
+    LaunchedEffect(streamText) {
+        if (streamText.isNotEmpty()) {
+            scrollState.animateScrollTo(Int.MAX_VALUE)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp), tint = RustedPrimary)
+                Spacer(Modifier.width(8.dp))
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                when {
+                    error != null -> Text(
+                        "生成失败：$error",
+                        fontSize = 12.sp, color = RustedError
+                    )
+                    report != null -> Column(
+                        Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                report,
+                                fontSize = 12.sp,
+                                color = RustedOnBackground,
+                                fontFamily = AppCodeFontFamily
+                            )
+                        }
+                    }
+                    streamText.isNotEmpty() -> Column(
+                        Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(scrollState)
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                streamText,
+                                fontSize = 12.sp,
+                                color = RustedOnBackground,
+                                fontFamily = AppCodeFontFamily
+                            )
+                        }
+                    }
+                    else -> Column(Modifier.fillMaxWidth()) {
+                        if (phase.isNotEmpty()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    Modifier.size(14.dp),
+                                    color = RustedPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(phase, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
+                            }
+                        } else {
+                            Text("正在生成…", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                        }
+                    }
+                }
+                // 生成中的阶段提示（有流式内容时放在顶部）
+                if (streaming && streamText.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            Modifier.size(12.dp),
+                            color = RustedPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            phase.ifBlank { "AI 正在生成…" },
+                            fontSize = 11.sp,
+                            color = RustedPrimary.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+                saveMsg?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, fontSize = 11.sp, color = RustedPrimary.copy(alpha = 0.85f))
+                }
+            }
+        },
+        confirmButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (report != null) {
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(report))
+                        saveMsg = "已复制到剪贴板"
+                    }) { Text("复制", fontSize = 12.sp) }
+                    Spacer(Modifier.width(2.dp))
+                    TextButton(onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
+                                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                val file = File(RwmodPaths.aiReportsDir, "update_report_$ts.md")
+                                file.atomicWriteText(report)
+                                file
+                            }.fold(
+                                onSuccess = { withContext(Dispatchers.Main) { saveMsg = "已保存：${it.name}" } },
+                                onFailure = { withContext(Dispatchers.Main) { saveMsg = "保存失败：${it.message}" } }
+                            )
+                        }
+                    }) { Text("保存", fontSize = 12.sp) }
+                    Spacer(Modifier.width(2.dp))
+                }
+                TextButton(onClick = onDismiss) { Text("关闭", fontSize = 12.sp) }
+            }
+        }
     )
 }

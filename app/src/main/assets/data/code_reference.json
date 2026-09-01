@@ -9692,6 +9692,41 @@
           "description": "data.value.addwaypoint_type.setpassivetarget",
           "version": "1.13.3-1.15p9",
           "example": "添加路径点动作类型: setPassiveTarget"
+        },
+        {
+          "name": "卸载至",
+          "description": "data.value.addwaypoint_type.unloadat",
+          "version": "1.13.3-1.15p9",
+          "example": "添加路径点动作类型: 卸载至",
+          "name_en": "unloadAt"
+        },
+        {
+          "name": "巡逻",
+          "description": "data.value.addwaypoint_type.patrol",
+          "version": "1.13.3-1.15p9",
+          "example": "添加路径点动作类型: 巡逻",
+          "name_en": "patrol"
+        },
+        {
+          "name": "防守至",
+          "description": "data.value.addwaypoint_type.guardat",
+          "version": "1.13.3-1.15p9",
+          "example": "添加路径点动作类型: 防守至",
+          "name_en": "guardAt"
+        },
+        {
+          "name": "触发行动",
+          "description": "data.value.addwaypoint_type.triggeraction",
+          "version": "1.13.3-1.15p9",
+          "example": "添加路径点动作类型: 触发行动",
+          "name_en": "triggerAction"
+        },
+        {
+          "name": "在范围内时触发行动",
+          "description": "data.value.addwaypoint_type.triggeractionwheninrange",
+          "version": "1.13.3-1.15p9",
+          "example": "添加路径点动作类型: 在范围内时触发行动",
+          "name_en": "triggerActionWhenInRange"
         }
       ]
     },
@@ -10985,14 +11020,14 @@
           "default": "自身在攻击"
         },
         {
-          "name": "有活动的路径点",
+          "name": "自身有活动的路径点",
           "type": "bool",
           "description": "data.value.logicboolean.self.hasActiveWaypoint",
           "version": "1.13",
-          "example": "text: Waypoint - %{self.有活动的路径点(type='移动')}",
+          "example": "text: Waypoint - %{自身有活动的路径点(type='移动')}",
           "name_en": "self.hasActiveWaypoint()",
           "desc_zh": "单位当前活动的路径点为此类型。类型=路径点类型。（[type = WAYPOINT_TYPE]）",
-          "default": "有活动的路径点("
+          "default": "自身有活动的路径点("
         },
         {
           "name": "self.numberOfQueuedWaypoints()",
@@ -12961,6 +12996,11 @@
     "data.value.addwaypoint_type.build": "建造",
     "data.value.addwaypoint_type.follow": "跟随",
     "data.value.addwaypoint_type.setpassivetarget": "设置被动目标",
+    "data.value.addwaypoint_type.unloadat": "卸载至",
+    "data.value.addwaypoint_type.patrol": "巡逻",
+    "data.value.addwaypoint_type.guardat": "防守至",
+    "data.value.addwaypoint_type.triggeraction": "触发行动",
+    "data.value.addwaypoint_type.triggeractionwheninrange": "在范围内时触发行动",
     "data.sections.ai.useAsBuilder": "用作建造者",
     "data.sections.ai.useAsTransport": "用作运输",
     "data.sections.ai.useAsHarvester": "用作采集器",

@@ -6,6 +6,7 @@ import com.rwmodstudio.core.RwmodPaths
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.rwmodstudio.util.atomicWriteText
 
 /**
  * 行为验证码管理器。
@@ -56,7 +57,9 @@ object BehaviorVerifier {
 
     /**
      * 标记某种行为已验证。
+     * @Synchronized：读改写（读整个文件→加一条→整体写回）必须串行，否则并发确认两个危险操作时后写覆盖先写丢记录。
      */
+    @Synchronized
     fun markVerified(context: Context, type: String): Boolean {
         return try {
             val file = getFile(context)
@@ -71,7 +74,7 @@ object BehaviorVerifier {
                     }
                 }))
             }
-            file.writeText(json.toString(2), Charsets.UTF_8)
+            file.atomicWriteText(json.toString(2), Charsets.UTF_8)
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save verified behavior", e)

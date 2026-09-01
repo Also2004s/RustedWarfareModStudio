@@ -73,6 +73,36 @@
       "description": "data.value.addwaypoint_type.setpassivetarget",
       "version": "1.13.3-1.15p9",
       "example": "addWaypoint_type: setPassiveTarget"
+    },
+    {
+      "name": "unloadAt",
+      "description": "data.value.addwaypoint_type.unloadat",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_type: unloadAt"
+    },
+    {
+      "name": "patrol",
+      "description": "data.value.addwaypoint_type.patrol",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_type: patrol"
+    },
+    {
+      "name": "guardAt",
+      "description": "data.value.addwaypoint_type.guardat",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_type: guardAt"
+    },
+    {
+      "name": "triggerAction",
+      "description": "data.value.addwaypoint_type.triggeraction",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_type: triggerAction"
+    },
+    {
+      "name": "triggerActionWhenInRange",
+      "description": "data.value.addwaypoint_type.triggeractionwheninrange",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_type: triggerActionWhenInRange"
     }
   ]
 }
