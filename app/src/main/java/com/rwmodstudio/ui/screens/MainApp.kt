@@ -283,7 +283,6 @@ fun MainApp() {
     var editorSaveTrigger by remember { mutableIntStateOf(0) }
     // 顶部菜单栏「搜索」「保存」触发状态
     var editorSearchTrigger by remember { mutableIntStateOf(0) }
-    var aiCompletionTrigger by remember { mutableIntStateOf(0) }
     // 存活实例的实时未保存状态（按路径）：每个 EditorScreen 的 isModified 变化都会上报到这里，
     // 供 tab 栏星号与保存按钮统一判断「哪个文件未保存」。editorModified 由此派生（当前前台文件是否未保存）。
     var liveModifiedPaths by remember { mutableStateOf(setOf<String>()) }
@@ -305,6 +304,8 @@ fun MainApp() {
     // 最近页面状态持久化
     var recentShowModified by rememberSaveable { mutableStateOf(SettingsManager.lastRecentDialogTab) }
     var recentSelectedHistoryPath by rememberSaveable { mutableStateOf<String?>(null) }
+    // 近期弹窗「智能助理」标签：默认关闭，仅开发者模式开启后显示入口
+    var recentAssistantTab by rememberSaveable { mutableStateOf(false) }
     val recentListState = rememberLazyListState()
     // 搜索/最近作为全局底部弹窗，记录来源页面以便打开文件后返回
     var showHomeSearchSheet by rememberSaveable { mutableStateOf(false) }
@@ -799,19 +800,7 @@ fun MainApp() {
                                 tint = if (currentIsBookmarked) RustedSecondary else contentColor.copy(alpha = 0.7f)
                             )
                         }
-                        // AI 建议：开发者模式开启时显示，放在近期按钮左侧
-                        if (SettingsManager.devAiCompletion) {
-                            IconButton(
-                                onClick = { aiCompletionTrigger++ },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.AutoAwesome, "AI 建议",
-                                    Modifier.size(18.dp),
-                                    tint = RustedSecondary
-                                )
-                            }
-                        }
+                        // 最近：打开近期修改历史
                         IconButton(onClick = {
                             editorSaveTrigger++
                             showRecentSheet = true
@@ -968,7 +957,30 @@ fun MainApp() {
                                     currentScreen = popScreen(Screen.BROWSER)
                                 },
                                 onModifiedChange = { modInfoModified = it },
-                                saveTrigger = modInfoSaveTrigger
+                                saveTrigger = modInfoSaveTrigger,
+                                // 版本号项目同步替换前：先把「打开着且未保存」的编辑器工作区落盘，避免覆盖未保存修改
+                                onSaveWorkspaceBeforeReplace = { paths ->
+                                    if (paths.isNotEmpty()) {
+                                        workspace.values.filter { it.path in paths && it.path !in openPaths && it.isModified }
+                                            .forEach { saveWorkspaceEntry(it) }
+                                        val openModified = openPaths.filter { it in paths && it in liveModifiedPaths }
+                                        if (openModified.isNotEmpty()) {
+                                            val deferreds = openModified.associateWith { kotlinx.coroutines.CompletableDeferred<Boolean>() }
+                                            externalSaveDeferreds = deferreds
+                                            externalSaveRequests = externalSaveRequests + openModified.associateWith { (externalSaveRequests[it] ?: 0) + 1 }
+                                            val results = deferreds.values.map { it.await() }
+                                            if (results.any { !it }) throw RuntimeException("版本同步前保存工作区失败")
+                                        }
+                                    }
+                                },
+                                // 替换写盘成功：失效工作区缓存并让打开实例重新从盘加载最新内容
+                                onFilesModified = { paths ->
+                                    if (paths.isNotEmpty()) {
+                                        workspace = workspace - paths
+                                        liveModifiedPaths = liveModifiedPaths - paths
+                                        searchModifyTicks = searchModifyTicks + paths.associateWith { (searchModifyTicks[it] ?: 0) + 1 }
+                                    }
+                                }
                             )
                         }
                     }
@@ -1124,8 +1136,6 @@ fun MainApp() {
                                                 liveModifiedPaths = if (modified) liveModifiedPaths + path else liveModifiedPaths - path
                                             },
                                             onSearchTriggerConsumed = { editorSearchTrigger = 0 },
-                                            aiCompletionTrigger = if (path == activePath) aiCompletionTrigger else 0,
-                                            onAiCompletionTriggerConsumed = { aiCompletionTrigger = 0 },
                                             backRequest = if (path == activePath) bookmarkBackRequest else 0,
                                                         onBackRequestConsumed = { bookmarkBackRequest = 0 }
                                         )
@@ -1391,6 +1401,8 @@ fun MainApp() {
             onShowModifiedChange = { recentShowModified = it },
             selectedHistoryPath = recentSelectedHistoryPath,
             onSelectedHistoryPathChange = { recentSelectedHistoryPath = it },
+            assistantTab = recentAssistantTab,
+            onAssistantTabChange = { recentAssistantTab = it },
             listState = recentListState,
             onSaveCurrent = { editorSaveTrigger++ },
             onCloseEditorFile = { closeWorkspaceFile(it) },
@@ -1516,6 +1528,8 @@ private fun RecentFilesScreen(
     onShowModifiedChange: (Boolean) -> Unit,
     selectedHistoryPath: String?,
     onSelectedHistoryPathChange: (String?) -> Unit,
+    assistantTab: Boolean = false,
+    onAssistantTabChange: (Boolean) -> Unit = {},
     listState: androidx.compose.foundation.lazy.LazyListState,
     onSaveCurrent: () -> Unit,
     onOpenFile: (String, String) -> Unit,
@@ -1544,23 +1558,35 @@ private fun RecentFilesScreen(
         if (selectedHistoryPath == null) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = !showModified,
+                        selected = !showModified && !assistantTab,
                         onClick = {
                             onShowModifiedChange(false)
                             SettingsManager.lastRecentDialogTab = false
+                            onAssistantTabChange(false)
                             onSelectedHistoryPathChange(null)
                         },
                         label = { Text("最近打开", fontSize = 12.sp) }
                     )
                     FilterChip(
-                        selected = showModified,
+                        selected = showModified && !assistantTab,
                         onClick = {
                             onShowModifiedChange(true)
                             SettingsManager.lastRecentDialogTab = true
+                            onAssistantTabChange(false)
                             onSelectedHistoryPathChange(null)
                         },
                         label = { Text("近期修改", fontSize = 12.sp) }
                     )
+                    if (SettingsManager.devAiAssistant) {
+                        FilterChip(
+                            selected = assistantTab,
+                            onClick = {
+                                onAssistantTabChange(true)
+                                onSelectedHistoryPathChange(null)
+                            },
+                            label = { Text("智能助理", fontSize = 12.sp) }
+                        )
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -1577,6 +1603,11 @@ private fun RecentFilesScreen(
                 }
             }
             when {
+                assistantTab -> AssistantChatTab(
+                    projectRoot = projectRoot,
+                    onOpenFile = onOpenFile,
+                    modifier = Modifier.weight(1f)
+                )
                 path != null -> {
                     var history by remember(path) { mutableStateOf<List<SaveHistoryManager.SaveRecord>>(emptyList()) }
                     var historyLoading by remember(path) { mutableStateOf(true) }

@@ -534,7 +534,7 @@ fun SettingsScreen(
             Info("QQ群", "1093529136")
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "声明：代码取自 VS Code xingwangzhe 的 RustedWarfareModSupport 插件与群聊 319198864 的 NDT-v1.15 代码表",
+                text = "声明：代码取自 VS Code xingwangzhe 的 ‘RustedWarfareModSupport’ 插件与群聊 319198864 的‘NDT-v1.15 代码表’，高亮取自 王某人 的‘MT-RW语法文件’，本应用仅为个人学习与研究使用，禁止用于商业用途。",
                 fontSize = 10.sp,
                 color = RustedOnBackground.copy(alpha = 0.5f),
                 lineHeight = 14.sp,

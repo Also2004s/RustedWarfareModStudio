@@ -2,9 +2,6 @@ package com.rwmodstudio.editor
 
 import android.content.Context
 import android.graphics.Matrix
-import android.text.SpannableString
-import android.text.SpannableStringBuilder
-import android.text.Spanned
 import android.util.Log
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -13,10 +10,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
-import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -191,10 +186,6 @@ fun SoraCodeEditor(
     sectionCompletionEnabled: Boolean = false,
     insertTextRequest: String = "",
     insertTextTick: Int = 0,
-    // AI 建议「替换」请求：first=被替换的目标文本（文件中原有行原文），second=替换后的文本。
-    // 通过 tick 触发，消费后由宿主置空。
-    replaceTextRequest: Pair<String, String>? = null,
-    replaceTextTick: Int = 0,
     resetTextRequest: Pair<String, Int>? = null,
     // 仅当「文件级整篇替换」（tab 切换/重新加载）时携带上次保存的视图状态，恢复光标与视角；中英切换等不触发。
     restoreViewStateRequest: Pair<EditorViewState, Int>? = null,
@@ -219,14 +210,7 @@ fun SoraCodeEditor(
     onToolbarAction: ((EditorToolbarAction) -> Unit)? = null,
     onSymbolInsert: ((String) -> Unit)? = null,
     rainbowSettingsTick: Int = 0,
-    sectionHighlightTick: Int = 0,
-    // AI 建议虚影（VS Code 风格）：非空时在光标处绘制灰色预览文本，Tab 接受 / 点击接受 / Esc 关闭。
-    // 宿主只在「有可显示的建议」时传值；null 表示不显示。
-    // ghostAction 用来区分建议类型做差异标色（"插入"=追加绿，其余视为"替换"=琥珀），null 时统一用追加色。
-    ghostText: String? = null,
-    ghostAction: String? = null,
-    ghostOnAccept: (() -> Unit)? = null,
-    ghostOnDismiss: (() -> Unit)? = null
+    sectionHighlightTick: Int = 0
 ) {
     val context = LocalContext.current
     val editorRef = remember { mutableStateOf<CodeEditor?>(null) }
@@ -234,7 +218,6 @@ fun SoraCodeEditor(
     val symbolBarRef = remember { mutableStateOf<LinearLayout?>(null) }
     val toolbarRef = remember { mutableStateOf<LinearLayout?>(null) }
     val bottomBarRef = remember { mutableStateOf<LinearLayout?>(null) }
-    val ghostViewRef = remember { mutableStateOf<TextView?>(null) }
     val litLines = remember { mutableStateOf(setOf<Int>()) }
     // 灯泡图标只需加载一次，避免每次 refreshLineStyles 都重新 createLightbulbDrawable
     val bulbDrawables = remember(context) {
@@ -642,108 +625,6 @@ fun SoraCodeEditor(
         editorRef.value?.let { refreshLineStyles(it) }
     }
 
-    // AI 建议虚影：刷新文本与光标位置。
-    // 用 rememberUpdatedState 持有最新回调，供 View 事件（点击/Tab）调用，避免闭包捕获过期值。
-    val currentGhostText by rememberUpdatedState(ghostText)
-    val currentGhostAction by rememberUpdatedState(ghostAction)
-    val currentGhostOnAccept by rememberUpdatedState(ghostOnAccept)
-    val currentGhostOnDismiss by rememberUpdatedState(ghostOnDismiss)
-    val currentFontSize by rememberUpdatedState(fontSize)
-    val currentIsDark by rememberUpdatedState(isDarkTheme)
-
-    fun updateGhostView() {
-        val ed = editorRef.value
-        val ghost = ghostViewRef.value
-        if (ed == null || ghost == null) return
-        val text = currentGhostText
-        if (text.isNullOrEmpty()) {
-            ghost.visibility = android.view.View.GONE
-            return
-        }
-        try {
-            val line = ed.cursor.leftLine
-            val column = ed.cursor.leftColumn
-            val scrollX = ed.getOffsetX()
-            val scrollY = ed.getOffsetY()
-            // 首选：用布局引擎的 getCharLayoutOffset 取精确像素（含软换行），避免估算列宽导致错位。
-            // dest[0]=该视觉行的行底(content 空间)、dest[1]=光标所在列 x(content 空间，不含行号栏与 padding)。
-            val dest = FloatArray(2)
-            val exact = try {
-                ed.getLayout().getCharLayoutOffset(line, column, dest)
-                dest[0] > 0f || dest[1] > 0f
-            } catch (_: Exception) {
-                false
-            }
-            // 差异标色：追加（插入）=绿、替换=琥珀，按 action 用 Spannable 标色（新增=绿 / 替换=琥珀）。
-            val insertColor = if (currentIsDark) 0xFF6A9955.toInt() else 0xFF4E7A3A.toInt()
-            val replaceColor = if (currentIsDark) 0xFFD19A66.toInt() else 0xFF9A6A20.toInt()
-            val isReplace = currentGhostAction == "替换"
-            val color = if (isReplace) replaceColor else insertColor
-            // 替换建议在行首加一条短竖线强调"替换"，视觉上更像 diff 的变更标记
-            val sb = SpannableStringBuilder()
-            if (isReplace) sb.append("▎")
-            sb.append(text)
-            sb.setSpan(
-                android.text.style.ForegroundColorSpan(color),
-                0, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-            ghost.text = SpannableString(sb)
-
-            ghost.setTextSize(currentFontSize)
-            ghost.setTypeface(editorTypeface(context))
-            ghost.includeFontPadding = false
-            ghost.setSingleLine(true)
-            ghost.maxLines = 1
-            ghost.ellipsize = android.text.TextUtils.TruncateAt.END
-            ghost.textDirection = android.view.View.TEXT_DIRECTION_LTR
-            ghost.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
-
-            val lp = ghost.layoutParams as FrameLayout.LayoutParams
-            if (exact) {
-                // 内容空间 → 视图空间：加 padding、减滚动偏移。行顶 = 行底 - 行高。
-                val rowHeight = ed.rowHeight.coerceAtLeast(1)
-                lp.leftMargin = (ed.paddingLeft + dest[1] - scrollX).toInt()
-                lp.topMargin = (ed.paddingTop + (dest[0] - rowHeight) - scrollY).toInt()
-            } else {
-                // 布局未就绪兜底（沿用旧估算，仅避免零坐标导致乱跳）
-                val rowPx = try {
-                    CodeEditor::class.java.getMethod("getRowHeight").invoke(ed) as Int
-                } catch (_: Exception) { 48 }
-                val charPx = rowPx * 0.55f
-                lp.leftMargin = (ed.paddingLeft + column * charPx - scrollX).toInt()
-                lp.topMargin = (ed.paddingTop + line * rowPx - scrollY).toInt()
-            }
-            // 给虚影留一点底部内边距，作为点击接受的热区
-            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
-            ghost.layoutParams = lp
-            ghost.visibility = android.view.View.VISIBLE
-            ghost.bringToFront()
-        } catch (e: Exception) {
-            Log.w(TAG, "ghost update failed: ${e.message}")
-            ghost.visibility = android.view.View.GONE
-        }
-    }
-
-    // Tab 接受 / Esc 关闭：编辑器按键事件（软键盘或物理键盘）。
-    LaunchedEffect(editorRef.value) {
-        val editor = editorRef.value ?: return@LaunchedEffect
-        editor.subscribeEvent(EditorKeyEvent::class.java) { event, _ ->
-            if (event.eventType != EditorKeyEvent.Type.DOWN) return@subscribeEvent
-            if (currentGhostText.isNullOrEmpty()) return@subscribeEvent
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_TAB -> {
-                    event.markAsConsumed() // 拦截 Tab，不插入制表符
-                    currentGhostOnAccept?.invoke()
-                }
-                KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_BACK -> {
-                    event.markAsConsumed()
-                    currentGhostOnDismiss?.invoke()
-                }
-            }
-        }
-    }
-
     // 节名行高亮开关/颜色变化时刷新行样式
     LaunchedEffect(sectionHighlightTick) {
         if (sectionHighlightTick > 0) {
@@ -782,28 +663,6 @@ fun SoraCodeEditor(
             } else {
                 // 默认把光标停在插入内容的末尾
                 editorRef.value?.insertText(s, s.length)
-            }
-        }
-    }
-
-    // AI 建议「替换」：按目标文本定位文件中的行范围，delete + insert 完成替换。
-    // 走 Content 事件通道，可撤销、会同步宿主文本状态（与 insertText 一致）。
-    LaunchedEffect(replaceTextTick) {
-        val req = replaceTextRequest
-        if (replaceTextTick > 0 && req != null) {
-            val (target, replacement) = req
-            val ed = editorRef.value
-            if (ed != null && target.isNotBlank()) {
-                val range = findTextRangeInEditor(ed, target)
-                if (range == null) {
-                    Log.w(TAG, "ai-replace: target not found, len=${target.length}")
-                } else {
-                    val content = ed.text
-                    val (sl, sc) = charIndexToLineCol(content, range.first)
-                    val (el, ec) = charIndexToLineCol(content, range.second)
-                    if (sl != el || sc != ec) content.delete(sl, sc, el, ec)
-                    if (replacement.isNotEmpty()) content.insert(sl, sc, replacement)
-                }
             }
         }
     }
@@ -949,8 +808,6 @@ fun SoraCodeEditor(
                 }
                 subscribeEvent(ScrollEvent::class.java) { event, _ ->
                     reportViewState(event.editor)
-                    // AI 虚影随滚动重定位
-                    updateGhostView()
                 }
                 subscribeEvent(ContentChangeEvent::class.java) { event, _ ->
                     // 程序 setText 触发的事件只刷新按钮状态，不同步 text，避免宿主 isModified 被误标
@@ -1006,8 +863,6 @@ fun SoraCodeEditor(
                 subscribeEvent(SelectionChangeEvent::class.java) { event, _ ->
                     onCursorChange?.invoke(event.editor.cursor.left)
                     reportViewState(event.editor)
-                    // AI 虚影随光标移动重定位
-                    updateGhostView()
                     val editor = event.editor
                     val line = editor.cursor.leftLine
                     val column = editor.cursor.leftColumn
@@ -1117,10 +972,6 @@ fun SoraCodeEditor(
                     // 光标定位由内置 LN_ACTION_PLACE_SELECTION_HOME 处理（自动换行时落到被点击视觉行的行首）
                     if (event.motionRegion == ClickEvent.REGION_LINE_NUMBER && hasLightbulbForLine(event.editor, event.line)) {
                         toggleLightbulb(event.editor, event.line, event)
-                    }
-                    // AI 虚影：点击编辑器正文任意位置 → 收起（VS Code 行为，ghost 自身区域点击由 ghostView 消费）
-                    if (!currentGhostText.isNullOrEmpty()) {
-                        currentGhostOnDismiss?.invoke()
                     }
                 }
 
@@ -1239,39 +1090,8 @@ fun SoraCodeEditor(
                 bottomBarRef.value = this
             }
 
-            // AI 建议虚影层：与 editor 同层叠加（FrameLayout），绝对定位在光标处，不参与布局流。
-            // 宿主通过 ghostText 传入预览文本；位置随光标/滚动实时刷新；Tab/点击接受、Esc 关闭。
-            val editorFrame = FrameLayout(ctx)
-            editorFrame.addView(
-                editor,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            )
-            val ghostView = TextView(ctx).apply {
-                // 必须 enabled 才能收到点击（disabled 的 View 不派发点击事件）；用 focusable=false
-                // 保证不抢输入焦点、不干扰编辑器按键流。
-                isEnabled = true
-                isClickable = true
-                setOnClickListener { currentGhostOnAccept?.invoke() }
-                typeface = editorTypeface(ctx)
-                setTextColor(if (isDarkTheme) 0xFF6A9955.toInt() else 0xFF5A7D4A.toInt())
-                visibility = android.view.View.GONE
-                isFocusable = false
-                isFocusableInTouchMode = false
-            }
-            editorFrame.addView(
-                ghostView,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            )
-            ghostViewRef.value = ghostView
-
             container.addView(
-                editorFrame,
+                editor,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
                 )
@@ -1316,71 +1136,15 @@ fun SoraCodeEditor(
                     toolbar.findViewWithTag<ImageButton>(action.name)?.setColorFilter(color)
                 }
             }
-            // AI 建议虚影：跟随光标定位 + 内容刷新（ghostText 变化或光标/滚动变化都会进 update）
-            updateGhostView()
         },
         onRelease = { container ->
             iconRefreshToken.runnable?.let { iconRefreshHandler.removeCallbacks(it) }
             iconRefreshToken.runnable = null
             probeToken.runnable?.let { probeHandler.removeCallbacks(it) }
             probeToken.runnable = null
-            (container as? LinearLayout)?.let { layout ->
-                // editor 现包在 FrameLayout（0 号子 view）内，需先取 FrameLayout 再取 editor
-                val frame = layout.getChildAt(0)
-                val codeEditor = if (frame is FrameLayout) {
-                    frame.getChildAt(0) as? CodeEditor
-                } else {
-                    frame as? CodeEditor
-                }
-                codeEditor?.release()
-            }
+            (container as? LinearLayout)?.getChildAt(0)?.let { it as? CodeEditor }?.release()
         }
     )
-}
-
-/**
- * 在编辑器文本中定位目标文本（AI 建议「替换」的目标）：
- * 优先逐字匹配；失败时按行 trim 匹配（AI 可能丢失行首缩进）。
- * 返回 [start, end) 字符区间，找不到返回 null。
- */
-internal fun findTextRangeInEditor(editor: CodeEditor, target: String): Pair<Int, Int>? {
-    val full = editor.text.toString()
-    val idx = full.indexOf(target)
-    if (idx >= 0) return idx to (idx + target.length)
-    // 逐行 trim 匹配：目标按行拆分后与编辑器文本行做连续匹配
-    val targetLines = target.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
-    if (targetLines.isEmpty()) return null
-    val lineCount = editor.text.lineCount
-    var li = 0
-    while (li + targetLines.size <= lineCount) {
-        var matched = true
-        for (j in targetLines.indices) {
-            if (editor.text.getLineString(li + j).trim() != targetLines[j]) { matched = false; break }
-        }
-        if (matched) {
-            val startIdx = editor.text.getCharIndex(li, 0)
-            val endLine = li + targetLines.size - 1
-            val endIdx = editor.text.getCharIndex(endLine, editor.text.getColumnCount(endLine))
-            return startIdx to endIdx
-        }
-        li++
-    }
-    return null
-}
-
-/** 字符绝对下标 → (行, 列)。超出末尾时收敛到最后一行末尾。 */
-private fun charIndexToLineCol(content: Content, index: Int): Pair<Int, Int> {
-    var rem = index
-    var line = 0
-    val lineCount = content.lineCount
-    while (line < lineCount) {
-        val lineLen = content.getColumnCount(line) + 1 // 含换行符
-        if (rem < lineLen) return line to rem.coerceAtMost(content.getColumnCount(line))
-        rem -= lineLen
-        line++
-    }
-    val last = lineCount - 1
-    return last to content.getColumnCount(last)
 }
 
 internal fun applyEditorTheme(

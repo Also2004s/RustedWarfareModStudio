@@ -37,7 +37,8 @@ class ValueCompletionAggregator(
         val projectRefEnabled: Boolean = true,
         val copyFromSectionEnabled: Boolean = true,
         val defineVariableEnabled: Boolean = true,
-        val crossSectionRefEnabled: Boolean = true
+        val crossSectionRefEnabled: Boolean = true,
+        val classEnabled: Boolean = true
     )
 
     private val providers = mutableListOf<BaseValueCompletionProvider>()
@@ -62,6 +63,7 @@ class ValueCompletionAggregator(
         if (options.copyFromSectionEnabled) providers.add(CopyFromSectionValueCompletionProvider())
         if (options.defineVariableEnabled) providers.add(DefineVariableValueCompletionProvider())
         if (options.crossSectionRefEnabled) providers.add(CrossSectionRefValueCompletionProvider())
+        if (options.classEnabled) providers.add(ClassValueCompletionProvider())
     }
 
     /**
@@ -364,6 +366,7 @@ class ValueCompletionAggregator(
             is UnitRefValueCompletionProvider -> CompletionTypeRepository.CAT_UNIT_MARKER
             is ProjectRefValueCompletionProvider -> CompletionTypeRepository.CAT_PROJECT_REF
             is CopyFromSectionValueCompletionProvider -> CompletionTypeRepository.CAT_COPY_SECTION
+            is ClassValueCompletionProvider -> CompletionTypeRepository.CAT_TEXT
             else -> CompletionTypeRepository.CAT_TEXT
         }
     }
@@ -388,6 +391,7 @@ class ValueCompletionAggregator(
             "CopyFromSectionValueCompletionProvider" -> "复制节"
             "DefineVariableValueCompletionProvider" -> "变量定义"
             "CrossSectionRefValueCompletionProvider" -> "跨节引用"
+            "ClassValueCompletionProvider" -> "类别"
             else -> provider.javaClass.simpleName
         }
     }

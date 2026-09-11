@@ -13,15 +13,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * AI 助手服务：调用 OpenAI 兼容的 chat/completions 接口。
+ * AI 助手服务：调用 OpenAI 兼容的 chat/completions 接口（非流式）。
  *
- * 两种取回方式：
- * - **流式（默认，[SettingsManager.aiStreaming]）**：SSE 增量读取，边生成边回调 [onPartial]，
- *   首条建议秒出；若模型/网关不支持流式（首 token 前失败，或直接返回整段 JSON），
- *   自动降级为非流式，不会卡住。
- * - **非流式**：一次性取回全文，兼容所有模型，但需等整段生成完毕。
- *
- * 作用域：版本对比后的「项目理解」归纳与「更新报告」生成；编辑器内的「AI 建议」。
+ * 作用域：版本对比后的「项目理解」归纳与「更新报告」生成。
  */
 object AiService {
 
@@ -29,10 +23,8 @@ object AiService {
 
     /** 连接超时 */
     private const val CONNECT_TIMEOUT_MS = 15_000
-    /** 读取超时（单次 read；流式下为相邻 chunk 的最大间隔） */
+    /** 读取超时（单次 read） */
     private const val READ_TIMEOUT_MS = 90_000
-    /** 流式增量回调的最小间隔，避免每个 token 都触发一次 UI 重组 */
-    private const val PARTIAL_EMIT_INTERVAL_MS = 100L
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -41,7 +33,7 @@ object AiService {
     }
 
     @Serializable
-    private data class ChatMessage(val role: String, val content: String)
+    data class ChatMessage(val role: String, val content: String)
 
     @Serializable
     private data class ChatRequest(
@@ -61,11 +53,18 @@ object AiService {
         val max_tokens: Int
     )
 
-    /** 按是否限制输出长度编码请求体 */
-    private fun encodeRequest(model: String, messages: List<ChatMessage>, stream: Boolean): String {
-        val limit = SettingsManager.aiMaxOutputTokens
-        return if (limit > 0) {
-            json.encodeToString(ChatRequestLimited.serializer(), ChatRequestLimited(model, messages, stream, 0.2, limit))
+    /** 智能助理单次回复的输出 token 上限（比默认更高，避免长回复被截断） */
+    private const val ASSISTANT_MAX_TOKENS = 2048
+
+    /** 按是否限制输出长度编码请求体（maxTokens<=0 表示不限制） */
+    private fun encodeRequest(
+        model: String,
+        messages: List<ChatMessage>,
+        stream: Boolean,
+        maxTokens: Int = SettingsManager.aiMaxOutputTokens
+    ): String {
+        return if (maxTokens > 0) {
+            json.encodeToString(ChatRequestLimited.serializer(), ChatRequestLimited(model, messages, stream, 0.2, maxTokens))
         } else {
             json.encodeToString(ChatRequest.serializer(), ChatRequest(model, messages, stream))
         }
@@ -167,6 +166,110 @@ object AiService {
         }
     }
 
+    /**
+     * 智能助理多轮对话：以项目 diff 与待办为上下文，流式回复，可输出待办操作协议块。
+     *
+     * @param system 系统提示词（含项目上下文与待办协议；调用方在 [ASSISTANT_SYSTEM_PROMPT] 基础上拼接上下文）
+     * @param messages 历史对话（不含 system，最后一条须为 user）
+     * @param onChunk 流式增量回调（IO 线程触发，调用方自行切主线程）
+     * @param onPhase 阶段提示回调（IO 线程触发）
+     */
+    suspend fun streamAssistantChat(
+        system: String,
+        messages: List<ChatMessage>,
+        onChunk: (String) -> Unit,
+        onPhase: (String) -> Unit,
+        onReasoning: ((String) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val startedAt = System.currentTimeMillis()
+        runCatching {
+            val (endpoint, model, apiKey) = resolveConfig()
+            val full = listOf(ChatMessage("system", system)) + messages
+            onPhase("正在连接 AI 服务")
+
+            // 流式优先：首 token 前失败（或网关直接返回整段 JSON）自动降级，不会卡死
+            val buffer = StringBuilder()
+            var received = false
+            var thinking = false
+            var firstTokenAt = 0L
+            val streamResult = try {
+                postChatCompletionStream(
+                    endpoint, model, apiKey, full,
+                    onDelta = { delta ->
+                        if (!received) {
+                            received = true
+                            firstTokenAt = System.currentTimeMillis()
+                            onPhase("AI 正在回复")
+                        }
+                        buffer.append(delta)
+                        onChunk(delta)
+                    },
+                    onReasoning = { r ->
+                        // 推理模型先输出思考：仅用于展示进度，不混入正文
+                        if (!thinking) {
+                            thinking = true
+                            onPhase("AI 正在思考…")
+                        }
+                        onReasoning?.invoke(r)
+                    },
+                    isCancelled = { !coroutineContext.isActive },
+                    maxTokens = ASSISTANT_MAX_TOKENS
+                )
+                Result.success(buffer.toString())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // 协程取消必须向上传播，不能当成流式失败降级
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+
+            if (received) {
+                // 已拿到内容：即使中途断开也按已生成部分返回，不再重复请求
+                val raw = streamResult.getOrNull() ?: buffer.toString()
+                Log.d(TAG, "assistant(stream) ok: chars=${raw.length}, ttftMs=${firstTokenAt - startedAt}, costMs=${System.currentTimeMillis() - startedAt}")
+                raw
+            } else {
+                Log.w(TAG, "assistant stream unusable, fallback to non-stream: ${streamResult.exceptionOrNull()?.let { it::class.java.simpleName + ": " + it.message }}")
+                onPhase("流式不可用，切换普通模式")
+                val result = postCompletion(
+                    endpoint = endpoint, model = model, apiKey = apiKey,
+                    messages = full,
+                    generatingPhase = "AI 正在回复",
+                    onPhase = onPhase,
+                    maxTokens = ASSISTANT_MAX_TOKENS
+                )
+                onChunk(result)
+                result
+            }
+        }.onFailure { e ->
+            Log.e(TAG, "assistant failed: ${e::class.java.simpleName}: ${e.message}, costMs=${System.currentTimeMillis() - startedAt}")
+        }
+    }
+
+    /** 智能助理系统提示词：以项目 diff + 待办 + 项目理解 + 文件结构为上下文对话，并通过结构化块维护待办。 */
+    const val ASSISTANT_SYSTEM_PROMPT =
+        "你是《铁锈战争》(Rusted Warfare) MOD 开发者的「智能助理」，作为用户的外置辅助大脑，帮助把握项目开发方向、规划下一步。\n" +
+        "你会收到【项目上下文】：最近保存的差异 diff（代表「已经做到哪一步」）、当前待办列表（代表「接下来要发展/优化什么」）、项目文件结构，以及【项目理解】（对 MOD 行为体系的整体认知：标签/条件网络、指挥调度、隐藏行动分层、文件间协作）。\n" +
+        "三类信息的定位（务必分清）：\n" +
+        "- diff 是过去的事实，只用于了解进展、判断现状，不要拿它去「验证/核对待办」；\n" +
+        "- 待办是未来的计划，是接下来需要发展和优化的内容，由你协助用户梳理与维护；\n" +
+        "- 项目理解与文件结构，用来把思路落到具体机制与文件。\n" +
+        "行为准则：\n" +
+        "- 基于项目理解、diff、待办回答，给出有逻辑深度的分析与建议；不编造 diff 未体现的内容；\n" +
+        "- 全中文，简洁直接，不寒暄；\n" +
+        "- 用户让你整理/更新待办，或你判断待办需随项目进展调整时，除正常回复外，必须在回复末尾按「待办操作协议」输出，让应用据此修改待办；\n" +
+        "- 维护待办必须「向前看」：待办 = 接下来要做的发展/优化工作（如：强化某条人机对抗逻辑、新增或调整行为机制、平衡数值、优化指挥调度），基于【项目理解】与 MOD 目标方向去想；\n" +
+        "- 严禁把最近改动复述成「验证/检查/确认这些更改」之类的待办——diff 是已经做完的事，永远不该作为待办；验证是写完之后的自然步骤，不单独建待办；\n" +
+        "- diff 只用于两种判断：某待办内容已基本做成 → complete 收尾；某改动已覆盖某个方向 → 不重复建待办；\n" +
+        "- 若不清楚 MOD 总体目标/方向，先向用户确认，不要硬按 diff 生成待办；每条待办都要能落到具体机制/文件，不凭空虚构；\n" +
+        "- 列出/新建待办时，结合【项目文件结构】与【项目理解】为每项定位最相关的 1-3 个文件，用 [[file]]相对路径[[/file]] 标记（相对路径必须来自【项目文件结构】，不要自造）；\n" +
+        "- 修改思路必须讲清**行为逻辑**：如何通过标签/条件把行为串成链、隐藏行动如何分层与衔接、系统之间如何协作、需要新增或调整哪些行为环节；严禁只给「加强防御、调整数值方向」这类表面话；\n" +
+        "- 仅在确有待办变更时输出协议块，不要输出空块。\n" +
+        "待办操作协议（JSON 块，可含多条 op）：\n" +
+        "[[todo]]{\"ops\":[{\"op\":\"add\",\"title\":\"...\",\"priority\":0,\"note\":\"\"},{\"op\":\"complete\",\"title\":\"...\"},{\"op\":\"delete\",\"title\":\"...\"},{\"op\":\"update\",\"title\":\"旧标题\",\"newTitle\":\"新标题\",\"done\":false}]}[[/todo]]\n" +
+        "- op 取值：add（新增，priority 0=普通/1=重要/2=紧急）、complete（标为完成）、delete（删除）、update（改标题/完成态）；\n" +
+        "- 待办按标题匹配，请尽量使用待办列表中已有的准确标题；\n" +
+        "- 没有待办变更时不要输出该块。"
+
     private const val SYSTEM_PROMPT =
         "你是《铁锈战争》(Rusted Warfare) MOD 资深开发与版本审阅助手。\n" +
         "用户会提供：\n" +
@@ -223,120 +326,91 @@ object AiService {
         return sb.toString()
     }
 
-    // ==================== AI 建议 ====================
+    // ==================== 网络 ====================
 
-    /** AI 建议动作类型 */
-    const val ACTION_INSERT = "插入"
-    const val ACTION_REPLACE = "替换"
-
-    /**
-     * 单条 AI 建议：
-     * - [action] 为 [ACTION_INSERT]：把 [code] 插入光标处；
-     * - [action] 为 [ACTION_REPLACE]：在文件中定位 [target]（原有行原文），整段替换为 [code]。
-     */
-    data class AiSuggestion(
-        val action: String,
-        val target: String?,
-        val code: String
-    )
+    /** 解析并校验 AI 配置，返回 (endpoint, model, apiKey) */
+    private fun resolveConfig(): Triple<String, String, String> {
+        val baseUrl = SettingsManager.aiBaseUrl.trimEnd('/')
+        val model = SettingsManager.aiModel.trim()
+        val apiKey = SettingsManager.aiApiKey.trim()
+        if (baseUrl.isEmpty() || model.isEmpty() || apiKey.isEmpty()) {
+            throw IOException("AI 配置不完整：请先在开发者模式 → AI 助手中填写服务地址、模型与 API Key")
+        }
+        val endpoint = if (baseUrl.endsWith("/chat/completions")) baseUrl else "$baseUrl/chat/completions"
+        return Triple(endpoint, model, apiKey)
+    }
 
     /**
-     * 按需 AI 代码建议：分析用户最近的编辑动作，推断其编辑意图，
-     * 给出「插入」或「替换」两类编辑操作（不再是单纯续写）。
-     *
-     * @param filePath 当前文件相对路径（用于让 AI 理解模块层级）
-     * @param sectionName 当前节名（如「隐藏行动_合并进攻」「核心」），可空
-     * @param isHiddenAction 当前节是否为隐藏行动（行为节），决定续写风格
-     * @param contextLines 光标前若干行文本（已含节头与上下文）
-     * @param currentLine 光标所在行内容
-     * @param isChineseView 当前是否中文视图（决定输出用中文键名还是英文）
-     * @param streaming 是否走流式（true 时首 token 前失败会自动降级为非流式）
-     * @param onPartial 流式增量回调（已解析出的建议列表，随生成过程不断增长/变化）
-     * @param onPhase 阶段提示回调
+     * 非流式请求入口：设置生成中阶段提示后发出请求。
+     * 默认非流式，兼容不支持流式的模型（如 sensenova 系列），避免挂起/转圈。
      */
-    suspend fun suggestCompletion(
-        filePath: String,
-        sectionName: String?,
-        isHiddenAction: Boolean,
-        recentInputLines: String,
-        contextLines: String,
-        currentLine: String,
-        codeTable: String,
-        fileStructure: String = "",
-        isChineseView: Boolean,
-        streaming: Boolean = true,
-        onPartial: ((List<AiSuggestion>) -> Unit)? = null,
-        onPhase: (String) -> Unit
-    ): Result<List<AiSuggestion>> = withContext(Dispatchers.IO) {
-        val startedAt = System.currentTimeMillis()
+    private fun postCompletion(
+        endpoint: String,
+        model: String,
+        apiKey: String,
+        messages: List<ChatMessage>,
+        generatingPhase: String,
+        onPhase: (String) -> Unit,
+        maxTokens: Int = SettingsManager.aiMaxOutputTokens
+    ): String {
+        onPhase(generatingPhase)
+        return postChatCompletionNonStream(endpoint, model, apiKey, messages, maxTokens)
+    }
+
+    /** 非流式 POST：完整响应解析 choices[0].message.content */
+    private fun postChatCompletionNonStream(
+        endpoint: String,
+        model: String,
+        apiKey: String,
+        messages: List<ChatMessage>,
+        maxTokens: Int = SettingsManager.aiMaxOutputTokens
+    ): String {
+        val body = encodeRequest(model, messages, stream = false, maxTokens = maxTokens)
+        val conn = openConnection(endpoint, apiKey)
+        conn.readTimeout = READ_TIMEOUT_MS
         try {
-            val (endpoint, model, apiKey) = resolveConfig()
-            val prompt = buildCompletionPrompt(filePath, sectionName, isHiddenAction, recentInputLines, contextLines, currentLine, codeTable, fileStructure, isChineseView)
-            val messages = listOf(
-                ChatMessage("system", COMPLETION_PROMPT),
-                ChatMessage("user", prompt)
-            )
-            onPhase("正在连接 AI 服务")
-
-            // 流式优先：首 token 前失败（或网关直接返回整段 JSON）自动降级，不会卡死
-            if (streaming && SettingsManager.aiStreaming) {
-                val buffer = StringBuilder()
-                var received = false
-                var lastEmit = 0L
-                var firstTokenAt = 0L
-                val streamResult = try {
-                    // 注意：withContext 块内没有 CoroutineScope receiver，isActive 需经 coroutineContext 读取
-                    postChatCompletionStream(
-                        endpoint, model, apiKey, messages,
-                        onDelta = { delta ->
-                            if (!received) {
-                                received = true
-                                firstTokenAt = System.currentTimeMillis()
-                                onPhase("AI 正在生成建议")
-                            }
-                            buffer.append(delta)
-                            val now = System.currentTimeMillis()
-                            if (now - lastEmit >= PARTIAL_EMIT_INTERVAL_MS) {
-                                lastEmit = now
-                                val parsed = parseSuggestions(cleanPartial(buffer.toString()))
-                                if (parsed.isNotEmpty()) onPartial?.invoke(parsed)
-                            }
-                        },
-                        isCancelled = { !coroutineContext.isActive }
-                    )
-                    Result.success(buffer.toString())
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e // 协程取消必须向上传播，不能当成流式失败降级
-                } catch (e: Exception) {
-                    Result.failure(e)
-                }
-                if (received) {
-                    // 已拿到内容：即使中途断开也按已生成部分返回，不再重复请求
-                    val raw = streamResult.getOrNull() ?: buffer.toString()
-                    val suggestions = parseSuggestions(cleanCompletionResult(raw))
-                    Log.d(TAG, "suggestions(stream) ok: count=${suggestions.size}, ttftMs=${firstTokenAt - startedAt}, costMs=${System.currentTimeMillis() - startedAt}")
-                    return@withContext Result.success(suggestions)
-                }
-                Log.w(TAG, "stream unusable, fallback to non-stream: ${streamResult.exceptionOrNull()?.let { it::class.java.simpleName + ": " + it.message }}")
-                onPhase("流式不可用，切换普通模式")
+            writeBody(conn, body)
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+            if (code !in 200..299) {
+                throw IOException("AI 请求失败 (HTTP $code)：${parseErrorMessage(raw, code)}")
             }
+            val content = runCatching {
+                val obj = JSONObject(raw)
+                val choices = obj.optJSONArray("choices")
+                if (choices != null && choices.length() > 0) {
+                    val choice = choices.getJSONObject(0)
+                    choice.optJSONObject("message")?.optString("content")
+                        ?.takeIf { it.isNotEmpty() && it != "null" } // optString 缺失时返回 "null" 字符串
+                        ?: choice.optString("text").takeIf { it.isNotEmpty() }
+                } else {
+                    obj.optString("content").takeIf { it.isNotEmpty() && it != "null" }
+                }
+            }.getOrNull()
+                ?: throw IOException(describeEmptyAiResponse(raw))
+            Log.d(TAG, "non-stream ok: url=$endpoint, chars=${content.length}")
+            return content
+        } finally {
+            conn.disconnect()
+        }
+    }
 
-            val result = postCompletion(
-                endpoint = endpoint, model = model, apiKey = apiKey,
-                messages = messages,
-                generatingPhase = "AI 正在生成代码建议",
-                onPhase = onPhase
-            )
-            // 清理：去掉 AI 可能加的 markdown 代码围栏与前后说明，再解析为结构化建议
-            val cleaned = cleanCompletionResult(result)
-            val suggestions = parseSuggestions(cleaned)
-            Log.d(TAG, "suggestions ok: count=${suggestions.size}, costMs=${System.currentTimeMillis() - startedAt}")
-            Result.success(suggestions)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e // 协程取消不是失败：必须向上传播，避免 UI 误报错误
-        } catch (e: Exception) {
-            Log.e(TAG, "suggestions failed: ${e::class.java.simpleName}: ${e.message}, costMs=${System.currentTimeMillis() - startedAt}")
-            Result.failure(e)
+    /**
+     * 生成「AI 返回内容为空」的可读提示（不把原始响应 JSON 甩给用户）。
+     * 推理模型（含 reasoning_content）在输出上限不足时可能只产出思考、正文 content 为空。
+     */
+    private fun describeEmptyAiResponse(raw: String): String {
+        val hasReasoning = runCatching {
+            val obj = JSONObject(raw)
+            val choice = obj.optJSONArray("choices")?.optJSONObject(0)
+            val reasoning = choice?.optJSONObject("message")?.optString("reasoning_content", "")
+            !reasoning.isNullOrEmpty()
+        }.getOrDefault(false)
+        return if (hasReasoning) {
+            "AI 只生成了推理过程、未返回正文。可能是输出上限不足，可在开发者模式 → AI 助手调高「输出上限」后重试"
+        } else {
+            "AI 返回内容为空或格式异常，请重试"
         }
     }
 
@@ -353,9 +427,11 @@ object AiService {
         apiKey: String,
         messages: List<ChatMessage>,
         onDelta: (String) -> Unit,
-        isCancelled: () -> Boolean = { false }
+        isCancelled: () -> Boolean = { false },
+        maxTokens: Int = SettingsManager.aiMaxOutputTokens,
+        onReasoning: ((String) -> Unit)? = null
     ): String {
-        val body = encodeRequest(model, messages, stream = true)
+        val body = encodeRequest(model, messages, stream = true, maxTokens = maxTokens)
         val conn = openConnection(endpoint, apiKey)
         conn.readTimeout = READ_TIMEOUT_MS
         conn.setRequestProperty("Accept", "text/event-stream")
@@ -371,7 +447,7 @@ object AiService {
             conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (true) {
                     // 协程取消检查：阻塞读不会被取消打断，取消时必须主动断开连接终止读取，
-                    // 否则关闭 AI 面板/切文件后仍读完整个响应，白烧 token
+                    // 否则关闭面板后仍读完整个响应，白烧 token
                     if (isCancelled()) {
                         conn.disconnect()
                         throw kotlinx.coroutines.CancellationException("AI stream cancelled")
@@ -380,7 +456,7 @@ object AiService {
                     if (line.startsWith("data:")) {
                         val payload = line.removePrefix("data:").trim()
                         if (payload.isEmpty() || payload == "[DONE]") continue
-                        // 注意：org.json 的 optString 在 key 缺失时返回字符串 "null"！
+                        // 注意：org.json 的 optString 在 key 缺失时返回字符串 "null"；
                         // 且 content 字段存在但值为 JSON null 时，optString 同样返回字符串 "null"，
                         // has("content") 会放行 —— 必须再过滤一次字符串 "null"
                         val deltaContent = runCatching {
@@ -395,6 +471,19 @@ object AiService {
                         if (!deltaContent.isNullOrEmpty()) {
                             sb.append(deltaContent)
                             onDelta(deltaContent)
+                        }
+                        // 推理增量（reasoning_content）：仅透出供展示思考进度，不混入正文
+                        if (onReasoning != null) {
+                            val deltaReasoning = runCatching {
+                                val choices = JSONObject(payload).optJSONArray("choices") ?: return@runCatching null
+                                if (choices.length() == 0) return@runCatching null
+                                val delta = choices.getJSONObject(0).optJSONObject("delta") ?: return@runCatching null
+                                if (!delta.has("reasoning_content")) return@runCatching null
+                                val r = delta.optString("reasoning_content")
+                                if (r.isEmpty() || r == "null") return@runCatching null
+                                r
+                            }.getOrNull()
+                            if (!deltaReasoning.isNullOrEmpty()) onReasoning.invoke(deltaReasoning)
                         }
                     } else if (line.isNotBlank() && line.trimStart().startsWith("{")) {
                         // 网关忽略了 stream 参数：整段 JSON 一次返回，直接按非流式解析
@@ -422,387 +511,6 @@ object AiService {
         }
         content?.takeIf { it.isNotEmpty() && it != "null" } // optString 缺失时返回字符串 "null"，需排除
     }.getOrNull()
-
-    /**
-     * 流式过程中的部分文本清理：只处理「已出现但可能未闭合」的代码围栏，
-     * 让 parseSuggestions 能在生成途中解析出已完成的块。
-     */
-    private fun cleanPartial(raw: String): String {
-        var text = raw.trimStart()
-        if (text.startsWith("```")) {
-            // 去掉围栏起始行（含可能的语言标识）
-            val nl = text.indexOf('\n')
-            text = if (nl >= 0) text.substring(nl + 1) else ""
-        }
-        if (text.trimEnd().endsWith("```")) {
-            text = text.trimEnd().removeSuffix("```")
-        }
-        return text.trim('\n')
-    }
-
-    /**
-     * 解析 AI 输出为结构化建议列表。
-     * 支持的块格式（可多条，顺序保留）：
-     * ```
-     * # 动作: 插入
-     * 代码行...
-     *
-     * # 动作: 替换
-     * # 目标: 被替换的原有行原文（多行目标则连续多条 # 目标: 行）
-     * 替换后的代码行...
-     * ```
-     * `# 推断` 意图说明行忽略；无任何 `# 动作:` 标记时，整体视为一条插入建议（兼容旧行为）。
-     */
-    fun parseSuggestions(raw: String): List<AiSuggestion> {
-        val text = raw.trim()
-        if (text.isEmpty() || text.startsWith("# 意图不明确")) return emptyList()
-        if (!text.contains("# 动作:")) {
-            // 兼容：AI 未按格式输出，整体作为一条插入建议（剔除意图说明行）
-            val code = text.lines()
-                .filter { !it.trimStart().startsWith("# 推断") }
-                .joinToString("\n").trim()
-            return if (code.isNotBlank()) listOf(AiSuggestion(ACTION_INSERT, null, code)) else emptyList()
-        }
-        val suggestions = mutableListOf<AiSuggestion>()
-        var action: String? = null
-        val targets = mutableListOf<String>()
-        val codeLines = mutableListOf<String>()
-        fun flush() {
-            val a = action ?: return
-            // 仅去掉首尾空行，保留代码内部的空行与换行结构
-            val code = codeLines.joinToString("\n").trim('\n')
-            if (code.isNotBlank()) {
-                suggestions.add(
-                    AiSuggestion(
-                        action = a,
-                        target = if (a == ACTION_REPLACE) targets.joinToString("\n").trim().ifBlank { null } else null,
-                        code = code
-                    )
-                )
-            }
-            action = null; targets.clear(); codeLines.clear()
-        }
-        for (line in text.lines()) {
-            val t = line.trim()
-            when {
-                t.startsWith("# 动作:") -> { flush(); action = t.removePrefix("# 动作:").trim() }
-                t.startsWith("# 目标:") -> targets.add(t.removePrefix("# 目标:").trim())
-                t.startsWith("# 推断") || t.startsWith("# 意图") -> { /* 意图说明行，忽略 */ }
-                else -> if (action != null) codeLines.add(line)
-            }
-        }
-        flush()
-        return suggestions
-    }
-
-    /**
-     * 构建当前节的代码参考表（精简版），供 AI 生成合法代码。
-     * - 标准节：从代码参考库查询，按「上下文中已出现的键优先」排序，限 30 条
-     * - 隐藏行动节：从文件内容提取已用键名，限 15 条
-     * - 格式：仅键名（一行一个），前 5 条附 example 值示例
-     */
-    fun buildCodeTableForSection(sectionName: String?, fileContent: String? = null): String {
-        if (sectionName.isNullOrBlank()) return ""
-        val mappedName = mapSectionName(sectionName)
-
-        // 标准节：查询代码参考库
-        if (mappedName.isNotEmpty()) {
-            runCatching {
-                val engine = com.rwmodstudio.core.translation.TranslationEngine.getInstance()
-                val ref = engine.getCodeReference()
-                val props = ref.getPropertiesForSection(mappedName)
-                if (props.isNotEmpty()) {
-                    // 上下文中已出现的键优先
-                    val contextKeys = mutableSetOf<String>()
-                    if (fileContent != null) {
-                        extractUsedKeysFromSection(fileContent, sectionName).split('\n')
-                            .forEach { contextKeys.add(it.trim()) }
-                    }
-                    val (used, unused) = props.partition { it.name in contextKeys }
-                    val sorted = (used + unused).take(30)
-                    val sb = StringBuilder()
-                    sorted.forEachIndexed { i, p ->
-                        if (i < 5 && p.example.isNotBlank()) {
-                            sb.append("${p.name}  例: ${p.example.take(60)}\n")
-                        } else {
-                            sb.append("${p.name}\n")
-                        }
-                    }
-                    return sb.toString().trim()
-                }
-            }
-        }
-
-        // 隐藏行动等非标准节：从文件内容提取
-        if (fileContent != null) {
-            val raw = extractUsedKeysFromSection(fileContent, sectionName)
-            // 精简：只保留键名，去掉 :（键名）后缀，限 15 条
-            return raw.split('\n')
-                .map { it.substringBefore(':').trim() }
-                .filter { it.isNotBlank() }
-                .take(15)
-                .joinToString("\n")
-        }
-        return ""
-    }
-
-    /** 从文件内容中提取指定节内已出现的键名列表（一行一个） */
-    private fun extractUsedKeysFromSection(content: String, sectionName: String): String {
-        val lines = content.split('\n')
-        val sectionLower = sectionName.trim().lowercase()
-        val foundKeys = LinkedHashSet<String>()
-        var inSection = false
-        for (rawLine in lines) {
-            val line = rawLine.trim()
-            if (line.startsWith("[")) {
-                val currentSection = line.removePrefix("[").removeSuffix("]")
-                val currentLower = currentSection.trim().lowercase()
-                if (currentLower == sectionLower) inSection = true
-                else if (inSection) break
-                continue
-            }
-            if (inSection) {
-                val colonIdx = line.indexOf(':')
-                val eqIdx = line.indexOf('=')
-                if (colonIdx > 0 && (eqIdx < 0 || colonIdx < eqIdx)) {
-                    val key = line.substring(0, colonIdx).trim()
-                    if (key.isNotBlank() && key.length <= 40) foundKeys.add(key)
-                } else if (eqIdx > 0) {
-                    val key = line.substring(0, eqIdx).trim()
-                    if (key.isNotBlank() && key.length <= 40) foundKeys.add(key)
-                }
-            }
-        }
-        return foundKeys.joinToString("\n")
-    }
-
-    /** 节名 → 代码参考库键名（中文下划线/英文空格 → 中文分类名） */
-    fun mapSectionName(name: String): String {
-        val trimmed = name.trim()
-        val lower = trimmed.lowercase()
-        val noSpace = lower.replace(" ", "").replace("_", "")
-
-        // 1) 中文分类匹配（隐藏行动_xxx / 隐藏行动 / 核心_1 / 核心 / ai / graphics 等）
-        val zhSections = mapOf(
-            "隐藏行动" to "隐藏行动", "hiddenaction" to "隐藏行动",
-            "核心" to "核心", "core" to "核心",
-            "图像" to "图像", "graphics" to "图像",
-            "攻击" to "攻击", "attack" to "攻击",
-            "运动" to "运动", "movement" to "运动",
-            "行动" to "行动", "action" to "行动",
-            "ai" to "ai",
-            "动画" to "动画", "animation" to "animation",
-            "附属" to "附属", "attached" to "attached",
-            "可建造" to "可建造", "buildable" to "buildable",
-            "贴花" to "贴花", "decals" to "decals",
-            "资源" to "资源", "resources" to "resources",
-            "全局资源" to "全局资源", "globalresource" to "全局资源",
-            "炮塔" to "炮塔", "turret" to "turret",
-            "抛射体" to "抛射体", "projectile" to "projectile",
-            "腿" to "腿", "legs" to "legs",
-            "放置规则" to "放置规则", "placementrules" to "放置规则"
-        )
-        for ((key, zh) in zhSections) {
-            if (noSpace.contains(key.lowercase())) return zh
-        }
-        // 2) 直接匹配（可能已经是中文分类名）
-        return trimmed.removeSuffix("_").removePrefix("[").removeSuffix("]")
-            .substringBefore(' ').trim()
-    }
-
-    private const val COMPLETION_PROMPT =
-        "你是铁锈战争(Rusted Warfare) MOD 的资深 INI 编写助手，擅长从用户的编辑行为中推断意图。\n" +
-        "领域认知：MOD 单位/系统间的行为关系靠「标签+条件」驱动——单位在满足条件时添加/删除标签、发送带标签消息、产生单位、转换形态；" +
-        "其他单位通过条件（需标签/有全局标签/自身有标签/队伍中该单位数量等）检测标签并触发行为。\n" +
-        "你的核心任务不是续写语法，而是「意图推断」并给出**编辑操作建议**：\n" +
-        "1. 分析【最近编辑动作】序列，识别用户正在执行的批量操作模式（如：跨文件给多个单位添加同一标签条件、批量调整某数值、在同类单位间复制条件集、删除一组相关行）；\n" +
-        "2. 推断用户当前执行的任务与接下来最可能的操作；\n" +
-        "3. 结合【光标上下文】判断当前光标位置是否处于该任务的链路中：在链路上→给出该处的编辑操作；不在→沿用上下文风格给最合理的一个操作，或输出空。\n" +
-        "你给出的建议是「编辑操作」，分两类，用块格式输出（可多条块，每块一种操作）：\n" +
-        "- 插入：把新代码写入光标处。块格式：第一行「# 动作: 插入」，其后直接跟代码行；\n" +
-        "- 替换：把文件中已有的一行或多行替换为新代码。块格式：第一行「# 动作: 替换」，随后每行「# 目标: <被替换的原有行原文，必须逐字取自【光标上下文】>」（多行目标用连续多条 # 目标: 行），目标行之后跟替换后的代码行；\n" +
-        "- 第一块之前可用一行「# 推断：…」简述推断的意图；无法给出合理建议时仅输出：# 意图不明确，无合适建议。\n" +
-        "选择依据：需要修正/调整已有行（改数值、改条件、补完未写完的键、换标签名）→ 用替换；需要新增行 → 用插入。替换目标必须逐字复制上下文中的原有行，禁止改写、省略或凭记忆拼凑。\n" +
-        "规则：\n" +
-        "1. 键名语言与上下文一致（中文视图用中文键名，英文视图用英文键名）；\n" +
-        "2. 键名只从参考表挑选，不编造；标签名优先复用【已知标签】，不创造新名；数值给典型值不留占位符；\n" +
-        "3. 替换不得重复目标中已有且无需修改的行，只输出替换后的完整结果；若在写隐藏行动（行为节），优先条件→动作组合（如 需要标签:xxx 配 添加标签:xxx / 发送消息到:xxx）。\n" +
-        "4. 最多 3 条建议，每条尽量短（1-3 行）；不要写解释、不要写总结、不要复述上下文——输出越长用户等得越久。"
-
-    /** 组装补全 prompt：意图推断导向、结构化、有 token 预算控制 */
-    private fun buildCompletionPrompt(
-        filePath: String,
-        sectionName: String?,
-        isHiddenAction: Boolean,
-        recentInputLines: String,
-        contextLines: String,
-        currentLine: String,
-        codeTable: String,
-        fileStructure: String,
-        isChineseView: Boolean
-    ): String {
-        val sb = StringBuilder()
-        // 文件与位置信息（含节类型）
-        sb.append("文件: $filePath")
-        if (!sectionName.isNullOrBlank()) sb.append(" | 节: [$sectionName]")
-        sb.append(" | 节类型: ${if (isHiddenAction) "隐藏行动(行为节)" else "属性/配置节"}")
-        sb.append(" | 视图: ${if (isChineseView) "中文" else "英文"}\n\n")
-
-        // 文件结构概览（节头列表，帮助理解文件用途；低价值，配额压到最小）
-        if (fileStructure.isNotBlank()) {
-            sb.append("## 文件结构\n")
-            sb.append(fileStructure.take(160))
-            sb.append("\n\n")
-        }
-
-        // 编辑动作（意图推断主依据）
-        if (recentInputLines.isNotBlank()) {
-            sb.append("## 最近编辑动作（推断意图的主依据，跨文件）\n")
-            sb.append(recentInputLines.trim().take(600))
-            sb.append("\n\n")
-        }
-
-        // 已知标签（复用这些标签名，避免 AI 编造新名）
-        val knownTags = extractKnownTags(contextLines)
-        if (knownTags.isNotBlank()) {
-            sb.append("## 已知标签（优先复用这些标签名，勿创造新名）\n")
-            sb.append(knownTags.take(160))
-            sb.append("\n\n")
-        }
-
-        // 光标上下文（锚定位置）
-        if (contextLines.isNotBlank()) {
-            sb.append("## 光标上下文\n")
-            sb.append(contextLines.trim().take(400))
-            sb.append("\n\n")
-        }
-
-        // 当前行
-        sb.append("## 当前行(光标处)\n")
-        sb.append(if (currentLine.isBlank()) "（空行）" else currentLine.trim().take(200))
-        sb.append("\n\n")
-
-        // 合法键名参考表（精简，仅键名）
-        if (codeTable.isNotBlank()) {
-            sb.append("## 合法键名\n")
-            sb.append(codeTable.take(600))
-            sb.append("\n\n")
-        }
-
-        sb.append("请先推断用户意图，再给出编辑操作建议（插入或替换，按块格式输出，最多 3 条）。")
-        return sb.toString()
-    }
-
-    /**
-     * 从上下文中提取已知标签集合（需要标签/添加标签/删除标签/发送消息到 等键的值）。
-     * 供 AI 复用标签名，避免编造新名，保持标签契约一致。
-     */
-    private fun extractKnownTags(contextLines: String): String {
-        val tags = LinkedHashSet<String>()
-        for (line in contextLines.split('\n')) {
-            val t = line.trim()
-            if (t.isEmpty() || t.startsWith("[") || t.startsWith("#")) continue
-            val idx = maxOf(t.indexOf(':'), t.indexOf('='))
-            if (idx <= 0) continue
-            val key = t.substring(0, idx).trim()
-            val value = t.substring(idx + 1).trim()
-            // 仅收集标签/消息类键值
-            if (value.isNotBlank() &&
-                (key.contains("标签") || key.contains("消息") ||
-                    key.lowercase().contains("tag") || key.lowercase().contains("message"))
-            ) {
-                value.split(',').map { it.trim() }.filter { it.isNotBlank() }.forEach { tags.add(it) }
-            }
-        }
-        return tags.joinToString(", ")
-    }
-
-    /** 清理 AI 输出：去掉 markdown 围栏、多余空行与可能的说明文字 */
-    private fun cleanCompletionResult(raw: String): String {
-        var text = raw.trim()
-        // 去掉 ```ini / ``` 包围
-        if (text.startsWith("```")) {
-            text = text.removePrefix("```")
-            // 去掉可能的语言标识行（ini / ini）
-            text = text.trimStart()
-            if (text.startsWith("ini") || text.startsWith("INI")) {
-                text = text.substring(3).trimStart()
-            }
-            if (text.endsWith("```")) {
-                text = text.removeSuffix("```").trimEnd()
-            }
-        }
-        // 去掉首尾多余空行
-        return text.trim().trim('\n').trim()
-    }
-
-    // ==================== 网络 ====================
-
-    /** 解析并校验 AI 配置，返回 (endpoint, model, apiKey) */
-    private fun resolveConfig(): Triple<String, String, String> {
-        val baseUrl = SettingsManager.aiBaseUrl.trimEnd('/')
-        val model = SettingsManager.aiModel.trim()
-        val apiKey = SettingsManager.aiApiKey.trim()
-        if (baseUrl.isEmpty() || model.isEmpty() || apiKey.isEmpty()) {
-            throw IOException("AI 配置不完整：请先在开发者模式 → AI 助手中填写服务地址、模型与 API Key")
-        }
-        val endpoint = if (baseUrl.endsWith("/chat/completions")) baseUrl else "$baseUrl/chat/completions"
-        return Triple(endpoint, model, apiKey)
-    }
-
-    /**
-     * 非流式请求入口：设置生成中阶段提示后发出请求。
-     * 默认非流式，兼容不支持流式的模型（如 sensenova 系列），避免挂起/转圈。
-     */
-    private fun postCompletion(
-        endpoint: String,
-        model: String,
-        apiKey: String,
-        messages: List<ChatMessage>,
-        generatingPhase: String,
-        onPhase: (String) -> Unit
-    ): String {
-        onPhase(generatingPhase)
-        return postChatCompletionNonStream(endpoint, model, apiKey, messages)
-    }
-
-    /** 非流式 POST：完整响应解析 choices[0].message.content */
-    private fun postChatCompletionNonStream(
-        endpoint: String,
-        model: String,
-        apiKey: String,
-        messages: List<ChatMessage>
-    ): String {
-        val body = encodeRequest(model, messages, stream = false)
-        val conn = openConnection(endpoint, apiKey)
-        conn.readTimeout = READ_TIMEOUT_MS
-        try {
-            writeBody(conn, body)
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-            if (code !in 200..299) {
-                throw IOException("AI 请求失败 (HTTP $code)：${parseErrorMessage(raw, code)}")
-            }
-            val content = runCatching {
-                val obj = JSONObject(raw)
-                val choices = obj.optJSONArray("choices")
-                if (choices != null && choices.length() > 0) {
-                    val choice = choices.getJSONObject(0)
-                    choice.optJSONObject("message")?.optString("content")
-                        ?.takeIf { it.isNotEmpty() && it != "null" } // optString 缺失时返回 "null" 字符串
-                        ?: choice.optString("text").takeIf { it.isNotEmpty() }
-                } else {
-                    obj.optString("content").takeIf { it.isNotEmpty() && it != "null" }
-                }
-            }.getOrNull()
-                ?: throw IOException("AI 响应解析失败：${raw.take(300)}")
-            Log.d(TAG, "non-stream ok: url=$endpoint, chars=${content.length}")
-            return content
-        } finally {
-            conn.disconnect()
-        }
-    }
 
     private fun openConnection(endpoint: String, apiKey: String): HttpURLConnection {
         return (URL(endpoint).openConnection() as HttpURLConnection).apply {

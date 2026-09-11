@@ -387,35 +387,11 @@ fun DeveloperModeScreen(
             }
             DevDivider()
             DevSwitchCompact(
-                icon = Icons.Default.AutoAwesome,
-                title = "AI 辅助补全",
-                subtitle = "编辑器「更多」菜单中按需调用，根据光标上下文续写代码",
-                checked = SettingsManager.devAiCompletion,
-                onCheckedChange = { SettingsManager.devAiCompletion = it }
-            )
-            DevSwitchCompact(
-                icon = Icons.Default.Refresh,
-                title = "流式输出",
-                subtitle = "边生成边显示，首条建议秒出；模型不支持流式时自动降级",
-                checked = SettingsManager.aiStreaming,
-                onCheckedChange = { SettingsManager.aiStreaming = it },
-                isChild = true
-            )
-            DevSwitchCompact(
-                icon = Icons.Default.Star,
-                title = "本地即时建议",
-                subtitle = "点击瞬间先用本地规则出内容（同类节已用键/代码参考库），不等网络",
-                checked = SettingsManager.aiLocalFallback,
-                onCheckedChange = { SettingsManager.aiLocalFallback = it },
-                isChild = true
-            )
-            DevSwitchCompact(
-                icon = Icons.Default.Build,
-                title = "空闲预取",
-                subtitle = "输入停顿 2 秒后后台提前算好建议并缓存，点击即命中（约 30 秒节流）",
-                checked = SettingsManager.aiPrefetchEnabled,
-                onCheckedChange = { SettingsManager.aiPrefetchEnabled = it },
-                isChild = true,
+                icon = Icons.Default.SmartToy,
+                title = "智能助理",
+                subtitle = "近期弹窗内，以项目差异与待办为上下文对话，可维护待办",
+                checked = SettingsManager.devAiAssistant,
+                onCheckedChange = { SettingsManager.devAiAssistant = it },
                 isLast = true
             )
         }

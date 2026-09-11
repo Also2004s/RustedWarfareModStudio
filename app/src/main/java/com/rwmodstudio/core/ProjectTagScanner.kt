@@ -508,7 +508,7 @@ object ProjectTagScanner {
     private val memoryRegex = Regex("""@memory\s+(\S+)\s*:""")
     // @memory name:type（类型可选，供 unit 型内存变量链式补全）
     private val memoryTypeRegex = Regex("""@memory\s+(\S+)\s*:\s*(\S+)""", RegexOption.IGNORE_CASE)
-    // @define / @global 变量定义：@define name:value、@global name:value
+    // @define / @global 变量定义：@define name:value、@global name:value（只认冒号，等号写法不参与判定）
     private val defineRegex = Regex("""^@(define|global)\s+(\S+?)\s*:\s*(.*)$""", RegexOption.IGNORE_CASE)
     // ${xxx} 变量引用
     private val variableRefRegex = Regex("""\$\{([^}]+)\}""")

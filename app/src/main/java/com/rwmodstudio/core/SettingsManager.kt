@@ -927,37 +927,15 @@ object SettingsManager {
         settings.edit().remove("ai_api_key_enc").remove("ai_api_key").apply()
     }
 
-    // === AI 辅助补全（开发者模式开关，编辑器内按需调用） ===
-    var devAiCompletion: Boolean
-        get() = settings.getBoolean("dev_ai_completion", false)
-        set(value) = settings.edit().putBoolean("dev_ai_completion", value).apply()
-
-    // === AI 建议加速（流式 / 预取 / 本地兜底） ===
-
-    /** 流式输出：边生成边显示。模型不支持流式时自动降级为非流式。 */
-    var aiStreaming: Boolean
-        get() = settings.getBoolean("ai_streaming", true)
-        set(value) = settings.edit().putBoolean("ai_streaming", value).apply()
-
-    /** 本地规则兜底：点击瞬间先用本地规则出内容，不等网络。 */
-    var aiLocalFallback: Boolean
-        get() = settings.getBoolean("ai_local_fallback", true)
-        set(value) = settings.edit().putBoolean("ai_local_fallback", value).apply()
-
-    /** 空闲预取：输入停顿后后台静默请求并缓存，点击时命中即 0 延迟。 */
-    var aiPrefetchEnabled: Boolean
-        get() = settings.getBoolean("ai_prefetch_enabled", true)
-        set(value) = settings.edit().putBoolean("ai_prefetch_enabled", value).apply()
-
-    /** 预取最小间隔（毫秒）：距上次实际请求小于此值不发起，避免频繁烧 token。 */
-    var aiPrefetchMinIntervalMs: Long
-        get() = settings.getInt("ai_prefetch_min_interval", 30_000).toLong().coerceIn(3_000L, 300_000L)
-        set(value) = settings.edit().putInt("ai_prefetch_min_interval", value.coerceIn(3_000L, 300_000L).toInt()).apply()
-
-    /** 输出 token 上限：限制建议长度以缩短生成时间；<=0 表示不限制（由模型默认决定）。 */
+    /** 输出 token 上限：限制 AI 输出长度以缩短生成时间；<=0 表示不限制（由模型默认决定）。 */
     var aiMaxOutputTokens: Int
         get() = settings.getInt("ai_max_output_tokens", 512).coerceIn(0, 4096)
         set(value) = settings.edit().putInt("ai_max_output_tokens", value.coerceIn(0, 4096)).apply()
+
+    /** AI 智能助理（项目助理）：近期弹窗内，以项目 diff 与待办为上下文对话，可维护待办 */
+    var devAiAssistant: Boolean
+        get() = settings.getBoolean("dev_ai_assistant", false)
+        set(value) = settings.edit().putBoolean("dev_ai_assistant", value).apply()
 
     // === 外部文件导入目录 ===
     var replayImportDir: String

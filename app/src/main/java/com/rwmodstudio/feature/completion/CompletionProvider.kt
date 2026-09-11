@@ -8,6 +8,7 @@ import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.feature.completion.value.ProjectSoundCache
 import com.rwmodstudio.feature.completion.value.ValueCompletionAggregator
+import com.rwmodstudio.feature.completion.value.booleanLogicValueItems
 import com.rwmodstudio.feature.completion.value.isKnownParamFunctionContext
 import com.rwmodstudio.feature.completion.value.isInsideParentheses
 
@@ -204,28 +205,65 @@ class CompletionProvider(
         }
         val rawPrefix = textBeforeCursor.substring(end)
 
-        // @memory 指令定义行（@memory 名字:类型）：变量名/类型补全优先处理。
-        // 必须在值补全之前拦截——否则 `@memory 遍历次数:` 会被 splitKeyValueLine 当成「属性:值」，
-        // 因「空值未知键兜底抑制」提前 return，导致冒号后的内存类型补全永远不可达。
-        val currentLineForMemory = textBeforeCursor.substringAfterLast('\n')
-        val memoryDefMatch = memoryDefLineRegex.find(currentLineForMemory)
-        if (memoryDefMatch != null) {
-            val afterMemory = memoryDefMatch.groupValues[1]
-            val colonIdx = afterMemory.indexOf(':')
-            if (colonIdx >= 0) {
-                // 类型补全阶段：@memory name: → 提示类型
-                val typePrefix = afterMemory.substring(colonIdx + 1).trim()
-                memoryTypes.forEach { type ->
-                    if (completionMatchLevel(typePrefix, type) > 0) {
-                        results.add(CompletionItem(label = type, type = CompletionType.KEY, detail = "内存类型", insertText = type, category = listOf("指令")))
+        // 指令定义行（@memory/@define/@global）：变量名/类型/值补全优先处理。
+        // 必须在值补全之前拦截——否则 `@memory 遍历次数:` / `@define team:` 会被 splitKeyValueLine
+        // 当成「属性:值」，因「空值未知键兜底抑制」提前 return，导致冒号后的类型/值补全永远不可达；
+        // `@global `（命令后带空格）也会落入空前缀通用兜底、倾泻整张补全表。
+        val directiveLine = textBeforeCursor.substringAfterLast('\n')
+        val directiveMatch = directiveDefLineRegex.find(directiveLine)
+        if (directiveMatch != null) {
+            val directive = directiveMatch.groupValues[1].trim().lowercase()
+            val after = directiveMatch.groupValues[2]
+            // 分隔符只认冒号：等号写法（@define team=0）不参与变量定义判定，
+            // 避免与命名参数等带等号语法混淆造成误判。
+            val sepIdx = after.indexOf(':')
+            val namePrefix = if (sepIdx >= 0) after.substring(0, sepIdx).trim() else after.trim()
+            val valuePrefix = if (sepIdx >= 0) after.substring(sepIdx + 1).trim() else ""
+            if (sepIdx >= 0 && namePrefix.isNotEmpty()) {
+                // 值阶段：@memory name: → 提示类型；
+                // @define/@global name: → 逻辑布尔表达式操作数集（布尔+数值+文本+单位标记函数），
+                // 不含 真/假/if/and/or/not/运算符 等入口语法项（LOGIC_SYNTAX_ITEMS）。
+                if (directive == "memory") {
+                    memoryTypes.forEach { type ->
+                        if (completionMatchLevel(valuePrefix, type) > 0) {
+                            results.add(CompletionItem(label = type, type = CompletionType.KEY, detail = "内存类型", insertText = type, category = listOf("指令")))
+                        }
                     }
+                } else {
+                    results.addAll(
+                        booleanLogicValueItems(
+                            translationDict,
+                            context,
+                            prefix = valuePrefix,
+                            prefixLength = valuePrefix.length,
+                            memoryNames = fileSymbols?.memories ?: emptySet(),
+                            memoryTypes = fileSymbols?.memoryTypes ?: emptyMap(),
+                            excludeTokens = LOGIC_SYNTAX_ITEMS
+                        )
+                    )
                 }
             } else {
-                // 变量名补全阶段：@memory na → 提示常用变量名
-                val namePrefix = afterMemory.trim()
-                memoryVarNames.forEach { name ->
-                    if (completionMatchLevel(namePrefix, name) > 0) {
-                        results.add(CompletionItem(label = name, type = CompletionType.KEY, detail = "内存变量名", insertText = "$name:", category = listOf("指令")))
+                // 变量名阶段：@memory → 常用内存变量名；@define → 当前节+继承链局部变量；@global → 项目全局变量
+                when (directive) {
+                    "memory" -> memoryVarNames.forEach { name ->
+                        if (completionMatchLevel(namePrefix, name) > 0) {
+                            results.add(CompletionItem(label = name, type = CompletionType.KEY, detail = "内存变量名", insertText = "$name:", category = listOf("指令")))
+                        }
+                    }
+                    "define" -> {
+                        val sectionLower = currentSectionName?.trim()?.lowercase().orEmpty()
+                        val candidates = (fileSymbols?.sectionDefines?.get(sectionLower) ?: emptySet()) +
+                            (chainSymbols?.sectionDefines?.get(sectionLower) ?: emptySet())
+                        candidates.forEach { name ->
+                            if (completionMatchLevel(namePrefix, name) > 0) {
+                                results.add(CompletionItem(label = name, type = CompletionType.KEY, detail = "局部变量", insertText = "$name:", category = listOf("指令")))
+                            }
+                        }
+                    }
+                    else -> (fileSymbols?.globalVariables ?: emptySet()).forEach { name ->
+                        if (completionMatchLevel(namePrefix, name) > 0) {
+                            results.add(CompletionItem(label = name, type = CompletionType.KEY, detail = "全局变量", insertText = "$name:", category = listOf("指令")))
+                        }
                     }
                 }
             }
@@ -667,8 +705,9 @@ class CompletionProvider(
 
     // --- @memory 补全辅助 ---
 
-    /** 匹配当前行 @memory 后的内容（变量名或类型阶段），仅行首匹配 */
-    private val memoryDefLineRegex = Regex("""^\s*@memory\s+(.*)""", RegexOption.IGNORE_CASE)
+    /** 匹配当前行指令定义后的内容（@memory/@define/@global，变量名/类型/值阶段），仅行首匹配 */
+    private val directiveDefLineRegex =
+        Regex("""^\s*@(memory|define|global)\s+(.*)""", RegexOption.IGNORE_CASE)
 
     /** 从全文提取所有 memory 变量名：
      *  1. @memory name:type 指令
@@ -745,7 +784,8 @@ private val localResourceSectionRegex = Regex("""^\[(?:resource|资源)_([^\]]+)
 private val globalResourceSectionRegex = Regex("""^\[(?:global_resource|globalResource|全局资源)_([^\]]+)\]$""", RegexOption.IGNORE_CASE)
 /** 通用节头检测 */
 private val sectionHeaderRegex = Regex("""^\[([^\]]+)\]$""")
-/** @define / @global 变量定义行（@global 全局变量、@define 局部变量，${} 引用） */
+/** @define / @global 变量定义行（@global 全局变量、@define 局部变量，${} 引用）。
+ *  分隔符只认冒号：等号写法不参与变量定义判定，避免混淆误判。 */
 private val defineVarRegex = Regex("""^\s*@(define|global)\s+(\S+?)\s*:""", RegexOption.IGNORE_CASE)
 /**
  * 从当前文件全文提取五类符号（不合并项目级缓存）。

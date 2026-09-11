@@ -63,7 +63,6 @@ import androidx.lifecycle.lifecycleScope
 import com.rwmodstudio.core.InheritanceResolver
 import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.ProjectTagScanner
-import com.rwmodstudio.core.RecentInputTracker
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
@@ -196,9 +195,7 @@ fun EditorScreen(
     bookmarkPanelOpen: Boolean = false,
     onBookmarkPanelClose: () -> Unit = {},
     backRequest: Int = 0,
-    onBackRequestConsumed: () -> Unit = {},
-    aiCompletionTrigger: Int = 0,
-    onAiCompletionTriggerConsumed: () -> Unit = {}
+    onBackRequestConsumed: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -318,16 +315,6 @@ fun EditorScreen(
     var showInheritanceView by remember(filePath) { mutableStateOf(false) }
     var inheritanceText by remember { mutableStateOf("") }
     var showSearch by remember(filePath) { mutableStateOf(false) }
-    // AI 辅助建议：按需调用，弹卡展示结构化建议（插入/替换），可逐条应用或取消
-    var showAiCompletion by remember(filePath) { mutableStateOf(false) }
-    var aiCompletionLoading by remember(filePath) { mutableStateOf(false) }
-    var aiSuggestions by remember(filePath) { mutableStateOf<List<com.rwmodstudio.core.AiService.AiSuggestion>>(emptyList()) }
-    var aiCompletionError by remember(filePath) { mutableStateOf<String?>(null) }
-    var aiCompletionPhase by remember(filePath) { mutableStateOf("") }
-    // 当前展示的建议是否来自本地规则兜底（true=本地，AI 结果还没到）
-    var aiIsLocalFallback by remember(filePath) { mutableStateOf(false) }
-    // ghost 模式：已应用的条数（Tab/点击逐条接受，全部应用完自动收起）
-    var aiAppliedCount by remember(filePath) { mutableIntStateOf(0) }
     // 「方块+」折叠菜单：输入法关闭时显示，点击展开「更多」浮层
     var fabExpanded by remember(filePath) { mutableStateOf(false) }
     var fabShowColorPicker by remember { mutableStateOf(false) }
@@ -404,9 +391,6 @@ fun EditorScreen(
     val context = LocalContext.current
     var insertTextRequest by remember(filePath) { mutableStateOf("") }
     var insertTextTick by remember(filePath) { mutableIntStateOf(0) }
-    // AI 建议「替换」请求：first=目标文本，second=替换后文本；tick 触发，消费后置空
-    var aiReplaceRequest by remember(filePath) { mutableStateOf<Pair<String, String>?>(null) }
-    var aiReplaceTick by remember(filePath) { mutableIntStateOf(0) }
     var resetTextRequest by remember(filePath) { mutableStateOf<Pair<String, Int>?>(null) }
     var resetTextTick by remember(filePath) { mutableIntStateOf(0) }
     // 文件加载时待恢复的视图状态（来自工作区缓存 workspaceEntry.viewState），消费后置空，避免中英切换等复用
@@ -688,217 +672,6 @@ fun EditorScreen(
         }
     }
 
-    /**
-     * 构建 AI 建议请求上下文（点击触发与空闲预取共用同一份上下文，保证指纹一致）。
-     * 编辑器未就绪时返回 null。
-     */
-    fun buildAiSuggestionRequest(): com.rwmodstudio.core.AiSuggestionPrefetcher.Request? {
-        val ed = editorRef ?: return null
-        val cursorLine = ed.cursor.leftLine
-        val col = ed.cursor.leftColumn
-        // 相对路径
-        val relPath = if (homeDir.isNotEmpty() && filePath.startsWith(homeDir)) {
-            filePath.removePrefix(homeDir).removePrefix("/")
-        } else {
-            filePath.substringAfterLast("/")
-        }
-        // 关联编辑动作来源文件
-        RecentInputTracker.currentFilePath = relPath
-        // 光标上下文：从光标向上找最近的节头 [xxx]，确保节头在上下文内
-        // 取 min(cursorLine, 节头行) 到 cursorLine，最多 10 行
-        var sectionHeaderLine = cursorLine
-        for (i in cursorLine downTo maxOf(0, cursorLine - 30)) {
-            val l = ed.text.getLineString(i).trim()
-            if (l.startsWith("[") && l.endsWith("]")) {
-                sectionHeaderLine = i
-                break
-            }
-        }
-        val startLine = maxOf(sectionHeaderLine, cursorLine - 10).coerceAtLeast(0)
-        val contextSb = StringBuilder()
-        for (i in startLine..cursorLine) {
-            contextSb.append(ed.text.getLineString(i))
-            if (i < cursorLine) contextSb.append('\n')
-        }
-        val currentLineText = ed.text.getLineString(cursorLine)
-        // 当前行光标前部分
-        val currentBeforeCursor = if (col > 0 && col <= currentLineText.length) {
-            currentLineText.substring(0, col)
-        } else currentLineText
-        // 文件结构概览：所有节头列表（帮助 AI 理解文件用途）
-        val fileStructure = runCatching {
-            val fullText = ed.text.toString()
-            val headers = mutableListOf<String>()
-            for (line in fullText.split('\n')) {
-                val t = line.trim()
-                if (t.startsWith("[") && t.endsWith("]")) headers.add(t)
-            }
-            headers.take(20).joinToString(" ")
-        }.getOrDefault("")
-        // 最近输入行（跨文件，由 onTextChange diff 实时追踪，含未保存内容）
-        val recentInput = RecentInputTracker.getRecentLines()
-        // 代码参考表：标准节查代码参考库，隐藏行动节从文件内容提取已用键名
-        val codeTable = com.rwmodstudio.core.AiService.buildCodeTableForSection(currentSection, ed.text.toString())
-        // 当前节是否为隐藏行动（行为节）
-        val secName = currentSection
-        val isHiddenAction = !secName.isNullOrBlank() &&
-            (secName.contains("隐藏行动") || secName.lowercase().contains("hiddenaction"))
-
-        return com.rwmodstudio.core.AiSuggestionPrefetcher.Request(
-            filePath = relPath,
-            sectionName = currentSection,
-            isHiddenAction = isHiddenAction,
-            recentInputLines = recentInput,
-            contextLines = contextSb.toString(),
-            currentLine = currentBeforeCursor,
-            codeTable = codeTable,
-            fileStructure = fileStructure,
-            isChineseView = showChinese
-        )
-    }
-
-    /**
-     * AI 建议：三级提速——
-     * 1. 点击瞬间先出「本地规则建议」（零延迟，不等网络）；
-     * 2. 命中预取缓存则直接换成 AI 结果（0 延迟）；
-     * 3. 都未命中则发流式请求，边生成边刷新（首条建议秒出）。
-     */
-    fun triggerAiCompletion() {
-        val req = buildAiSuggestionRequest() ?: return
-
-        showAiCompletion = true
-        aiCompletionError = null
-        aiSuggestions = emptyList()
-        aiIsLocalFallback = false
-
-        // 1) 本地兜底：点击即出内容
-        val local = if (SettingsManager.aiLocalFallback) {
-            com.rwmodstudio.core.LocalSuggestionProvider.build(
-                sectionName = req.sectionName,
-                contextLines = req.contextLines,
-                fileContent = editorRef?.text?.toString().orEmpty(),
-                isChineseView = req.isChineseView
-            )
-        } else emptyList()
-        aiSuggestions = local
-        aiIsLocalFallback = local.isNotEmpty()
-        aiCompletionLoading = local.isEmpty()
-        aiCompletionPhase = if (local.isEmpty()) "正在连接 AI 服务" else "AI 生成中…"
-
-        // 2) 预取命中：立即替换为 AI 结果
-        val cached = com.rwmodstudio.core.AiSuggestionPrefetcher.peek(req)
-        if (cached != null) {
-            aiSuggestions = cached
-            aiIsLocalFallback = false
-            aiCompletionLoading = false
-            aiCompletionPhase = if (cached.isEmpty()) "AI 无合适建议" else ""
-            return
-        }
-
-        // 3) 流式请求，边生成边刷
-        scope.launch {
-            val result = com.rwmodstudio.core.AiService.suggestCompletion(
-                filePath = req.filePath,
-                sectionName = req.sectionName,
-                isHiddenAction = req.isHiddenAction,
-                recentInputLines = req.recentInputLines,
-                contextLines = req.contextLines,
-                currentLine = req.currentLine,
-                codeTable = req.codeTable,
-                fileStructure = req.fileStructure,
-                isChineseView = req.isChineseView,
-                streaming = true,
-                onPartial = { list ->
-                    // 流式增量（IO 线程回调）：直接写 Compose state，后台线程赋值线程安全
-                    aiSuggestions = list
-                    aiIsLocalFallback = false
-                    aiCompletionLoading = false
-                    aiCompletionPhase = ""
-                },
-                onPhase = { aiCompletionPhase = it }
-            )
-            withContext(Dispatchers.Main) {
-                aiCompletionLoading = false
-                result.onSuccess { list ->
-                    // AI 有结果则以 AI 为准；AI 空结果时保留本地兜底内容
-                    if (list.isNotEmpty() || !aiIsLocalFallback) {
-                        aiSuggestions = list
-                        aiIsLocalFallback = false
-                    }
-                    aiCompletionPhase = if (aiSuggestions.isEmpty()) "AI 无合适建议" else ""
-                    if (aiSuggestions.isEmpty()) {
-                        // ghost 模式：无任何可显示的建议 → 轻提示后收起，不弹卡片
-                        Toast.makeText(ctx, "AI 无合适建议", Toast.LENGTH_SHORT).show()
-                        showAiCompletion = false
-                        aiAppliedCount = 0
-                    } else {
-                        aiAppliedCount = 0
-                    }
-                }.onFailure { e ->
-                    if (e is kotlinx.coroutines.CancellationException) {
-                        // 协程取消（用户关闭/切文件/重新触发）：不是错误，静默收场
-                        aiCompletionLoading = false
-                        return@withContext
-                    }
-                    if (aiSuggestions.isEmpty()) {
-                        aiCompletionError = e.message ?: "未知错误"
-                        aiCompletionPhase = ""
-                        // ghost 模式：失败且无内容可显示 → Toast 提示并收起
-                        Toast.makeText(ctx, "AI 建议失败：${e.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
-                        showAiCompletion = false
-                        aiAppliedCount = 0
-                    } else {
-                        // 有本地兜底内容可看，不弹错误，继续在光标处预览
-                        aiCompletionPhase = "AI 未响应，以下为本地建议"
-                        aiAppliedCount = 0
-                    }
-                }
-            }
-        }
-    }
-
-    // 应用一条 AI 建议：插入→光标处写入；替换→按目标文本定位并整段替换。
-    // 返回 false 表示未能应用（如替换目标在文件中找不到），由调用方提示。
-    fun applyAiSuggestion(s: com.rwmodstudio.core.AiService.AiSuggestion): Boolean {
-        val ok = when (s.action) {
-            com.rwmodstudio.core.AiService.ACTION_REPLACE -> {
-                val ed = editorRef
-                val target = s.target
-                if (target.isNullOrBlank() || ed == null) false
-                else if (com.rwmodstudio.editor.findTextRangeInEditor(ed, target) == null) {
-                    Toast.makeText(ctx, "未找到要替换的目标行，已跳过该条建议", Toast.LENGTH_SHORT).show()
-                    false
-                } else {
-                    aiReplaceRequest = target to s.code
-                    aiReplaceTick++
-                    true
-                }
-            }
-            else -> {
-                if (s.code.isBlank()) false
-                else {
-                    insertTextRequest = s.code
-                    insertTextTick++
-                    true
-                }
-            }
-        }
-        if (ok) {
-            isModified = true
-            // 内容已变更，旧的预取结果不再对应当前上下文
-            com.rwmodstudio.core.AiSuggestionPrefetcher.invalidate()
-        }
-        return ok
-    }
-
-    // 顶部菜单栏「AI 建议」按钮触发：等编辑器就绪（editorRef 非空）后调用，再消费触发值。
-    LaunchedEffect(aiCompletionTrigger, editorRef) {
-        if (aiCompletionTrigger > 0 && editorRef != null) {
-            triggerAiCompletion()
-            onAiCompletionTriggerConsumed()
-        }
-    }
-
     LaunchedEffect(
         completionDetailEnabled,
         SettingsManager.devValueCompletion,
@@ -976,21 +749,6 @@ fun EditorScreen(
                 }
                 fileSymbols = symbols
                 chainSymbols = chain
-            }
-    }
-
-    // AI 建议预取：输入停止后，用当前上下文提前算好建议并按指纹缓存。
-    // 点击「AI 建议」时若指纹命中即 0 延迟出内容；节流与去重由 AiSuggestionPrefetcher 负责。
-    // debounce 取 800ms：既避开逐键噪声，又比 2s 更早触发，提高点击命中率。
-    LaunchedEffect(filePath) {
-        // 切文件：旧文件的缓存与在途请求全部作废
-        com.rwmodstudio.core.AiSuggestionPrefetcher.invalidate()
-        if (!SettingsManager.devAiCompletion || !SettingsManager.aiPrefetchEnabled) return@LaunchedEffect
-        snapshotFlow { text to cursorPos }
-            .debounce(800)
-            .collect {
-                val req = buildAiSuggestionRequest() ?: return@collect
-                com.rwmodstudio.core.AiSuggestionPrefetcher.schedule(req)
             }
     }
 
@@ -1439,14 +1197,9 @@ fun EditorScreen(
         Box(Modifier.weight(1f)) {
             if (contentLoaded) {
                 Box(Modifier.fillMaxSize()) {
-                    // AI 建议虚影（VS Code 风格）：在光标处灰色预览，Tab/点击逐条接受、Esc 收起。
-                    // 取「未应用的第一条」；全部应用完或失败时由回调收起。
-                    val ghostSuggestion = if (showAiCompletion) aiSuggestions.drop(aiAppliedCount).firstOrNull() else null
                     SoraCodeEditor(
                         text = text,
                         onTextChange = {
-                            // 记录用户实际输入的行（diff 前后文本，提取变化行）
-                            com.rwmodstudio.core.RecentInputTracker.diffAndRecord(latestEditorText, it)
                             text = it
                             latestEditorText = it
                             isModified = true
@@ -1468,8 +1221,6 @@ fun EditorScreen(
                         sectionCompletionEnabled = SettingsManager.devSectionCompletion,
                         insertTextRequest = insertTextRequest,
                         insertTextTick = insertTextTick,
-                        replaceTextRequest = aiReplaceRequest,
-                        replaceTextTick = aiReplaceTick,
                         resetTextRequest = resetTextRequest,
                         restoreViewStateRequest = pendingRestoreViewState?.let { it to resetTextTick },
                         onRestoreViewStateConsumed = { pendingRestoreViewState = null },
@@ -1568,31 +1319,8 @@ fun EditorScreen(
                             insertTextRequest = value
                             insertTextTick++
                             isModified = true
-                        },
-                        // AI 建议虚影：光标处灰色预览，无卡片无弹窗。
-                        // 接受（Tab/点击）：逐条应用当前建议，全部应用完自动收起；失败（如替换目标找不到）也收起。
-                        ghostText = if (showAiCompletion) ghostSuggestion?.code else null,
-                        ghostAction = if (showAiCompletion) ghostSuggestion?.action else null,
-                        ghostOnAccept = {
-                            val s = aiSuggestions.drop(aiAppliedCount).firstOrNull()
-                            if (s != null && applyAiSuggestion(s)) {
-                                aiAppliedCount++
-                                if (aiAppliedCount >= aiSuggestions.size) {
-                                    showAiCompletion = false
-                                    aiAppliedCount = 0
-                                }
-                            } else {
-                                // 应用失败（Toast 已在 applyAiSuggestion 内提示）→ 收起
-                                showAiCompletion = false
-                                aiAppliedCount = 0
-                            }
-                        },
-                        ghostOnDismiss = {
-                            showAiCompletion = false
-                            aiAppliedCount = 0
                         }
                     )
-                    // AI 建议已改为光标处 ghost 虚影展示，不再弹底部卡片
                     Box(Modifier.align(Alignment.BottomEnd)) {
                         StyledPopupMenu(
                             expanded = showMore,
@@ -1667,19 +1395,6 @@ fun EditorScreen(
                                 }
                             })
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                            if (SettingsManager.devAiCompletion) {
-                                PlainMenuItem(
-                                    icon = Icons.Default.AutoAwesome,
-                                    title = "AI 建议",
-                                    subtitle = "根据光标上下文续写代码",
-                                    tint = RustedSecondary,
-                                    onClick = {
-                                        showMore = false
-                                        triggerAiCompletion()
-                                    }
-                                )
-                                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                            }
                             if (SettingsManager.devInheritanceView) {
                                 PlainMenuItem(icon = Icons.Default.AccountTree, title = "继承链", subtitle = "查看文件继承来源", tint = RustedSecondary, onClick = {
                                     showMore = false
@@ -2164,7 +1879,6 @@ fun EditorScreen(
                 }
             )
         }
-        // AI 辅助补全虚影预览卡（浮动在编辑器底部，见编辑器 Box 内叠加层）
         // 查找替换栏 - 固定在底部，adjustResize会自动把它推到键盘上方
         if (showSearch) {
             // 查找替换栏
