@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -63,6 +65,47 @@ fun MenuBottomSheet(
                 .padding(bottom = 24.dp)
         ) {
             content()
+        }
+    }
+}
+
+/**
+ * 统一的 AlertDialog 容器：单色面板 + 同色系细边框 + 标题行/关闭按钮 + 底部操作行 + 键盘避让。
+ * 替代 M3 默认 AlertDialog 容器（泛紫 surfaceContainerHigh + surfaceTint），避免弹窗颜色分层。
+ */
+@Composable
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    title: String,
+    actions: (@Composable RowScope.() -> Unit)? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+    content: @Composable () -> Unit
+) {
+    Dialog(onDismissRequest = onDismissRequest) {
+        Surface(
+            // 屏幕边距收紧，面板占满更多空间以容纳更多信息
+            Modifier.fillMaxWidth().padding(8.dp).imePadding(),
+            shape = RoundedCornerShape(18.dp),
+            color = RustedBackground,
+            border = BorderStroke(1.dp, RustedOnBackground.copy(alpha = 0.10f)),
+            tonalElevation = 0.dp
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = RustedOnBackground, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismissRequest, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(18.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
+                }
+                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                Box(Modifier.fillMaxWidth().padding(contentPadding)) {
+                    content()
+                }
+                if (actions != null) {
+                    HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        actions()
+                    }
+                }
+            }
         }
     }
 }

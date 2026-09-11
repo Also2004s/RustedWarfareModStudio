@@ -210,7 +210,10 @@ fun SoraCodeEditor(
     onToolbarAction: ((EditorToolbarAction) -> Unit)? = null,
     onSymbolInsert: ((String) -> Unit)? = null,
     rainbowSettingsTick: Int = 0,
-    sectionHighlightTick: Int = 0
+    sectionHighlightTick: Int = 0,
+    // 外部（如继承链对话框开合）触发重新应用主题/自定义颜色：扑灭其他实例
+    // 创建配色方案时全局 ThemeRegistry 派发对本实例自定义颜色的清空。
+    themeRefreshTick: Int = 0
 ) {
     val context = LocalContext.current
     val editorRef = remember { mutableStateOf<CodeEditor?>(null) }
@@ -513,7 +516,7 @@ fun SoraCodeEditor(
 
     // 主题切换（包括亮/暗、具体高亮主题、背景色、深色代码高亮颜色；字重高亮已常驻启用）
     // rainbowSettingsTick 用于在彩虹括号参数变化时触发重新应用主题
-    LaunchedEffect(isDarkTheme, highlightTheme, bgColor, darkTokenColors, rainbowSettingsTick) {
+    LaunchedEffect(isDarkTheme, highlightTheme, bgColor, darkTokenColors, rainbowSettingsTick, themeRefreshTick) {
         val resolvedBg = resolveEditorBackground(bgColor, isDarkTheme)
         val barBg = themeBackgroundColor(isDarkTheme)
         editorRef.value?.let { editor ->

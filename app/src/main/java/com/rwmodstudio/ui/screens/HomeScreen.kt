@@ -3,7 +3,9 @@ package com.rwmodstudio.ui.screens
 import android.content.Intent
 import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -11,6 +13,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,12 +44,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -267,22 +273,11 @@ fun HomeScreen(
         }
 
         // 底部操作栏
-        ElevatedCard(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.elevatedCardColors(containerColor = RustedSurface),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                HomeActionButton(Icons.Default.CompareArrows, "差异对比") { onVersionCompare?.invoke() }
-                HomeActionButton(Icons.Default.Search, "搜索") { onShowSearch?.invoke() }
-                HomeActionButton(Icons.Default.History, "最近") { onShowRecent?.invoke() }
-            }
-        }
+        HomeDock(
+            onVersionCompare = onVersionCompare,
+            onShowSearch = onShowSearch,
+            onShowRecent = onShowRecent
+        )
     }
 
     showDel?.let { f ->
@@ -1499,19 +1494,84 @@ private fun highlightMatch(text: String, queries: List<String>, caseSensitive: B
     }
 }
 
+/** 首页底部一体化分区操作栏：长圆角工具条 + 三段等宽分区（图标+文字内联）+ 段间细分割线 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 2.dp)) {
-        FilledIconButton(
-            onClick = onClick,
-            modifier = Modifier.size(38.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = RustedPrimary.copy(alpha = 0.12f), contentColor = RustedPrimary)
-        ) {
-            Icon(icon, null, Modifier.size(18.dp))
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(label, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.7f))
+private fun HomeDock(
+    onVersionCompare: (() -> Unit)?,
+    onShowSearch: (() -> Unit)?,
+    onShowRecent: (() -> Unit)?
+) {
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .shadow(6.dp, shape, spotColor = Color.Black.copy(alpha = 0.25f), ambientColor = Color.Black.copy(alpha = 0.25f))
+            .background(RustedSurface, shape)
+            .border(1.dp, RustedOnBackground.copy(alpha = 0.10f), shape)
+            .padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HomeDockItem(Icons.Default.CompareArrows, "差异对比") { onVersionCompare?.invoke() }
+        DockDivider()
+        HomeDockItem(Icons.Default.Search, "搜索") { onShowSearch?.invoke() }
+        DockDivider()
+        HomeDockItem(Icons.Default.History, "最近") { onShowRecent?.invoke() }
     }
+}
+
+/** 工具条内的单个分区项：图标+标签内联，按压时主色过渡 + 轻微缩放反馈 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RowScope.HomeDockItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val itemShape = RoundedCornerShape(18.dp)
+
+    val bgColor by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary.copy(alpha = 0.10f) else Color.Transparent,
+        animationSpec = tween(120), label = "dockBg"
+    )
+    val iconColor by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary else RustedOnBackground.copy(alpha = 0.55f),
+        animationSpec = tween(120), label = "dockIcon"
+    )
+    val labelColor by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary.copy(alpha = 0.92f) else RustedOnBackground.copy(alpha = 0.72f),
+        animationSpec = tween(120), label = "dockLabel"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = tween(120), label = "dockScale"
+    )
+
+    Row(
+        Modifier
+            .weight(1f)
+            .clip(itemShape)
+            .background(bgColor)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, Modifier.size(18.dp), tint = iconColor)
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = labelColor)
+    }
+}
+
+/** 分区之间的竖向细分割线 */
+@Composable
+private fun DockDivider() {
+    Box(
+        Modifier
+            .height(18.dp)
+            .width(1.dp)
+            .background(RustedOnBackground.copy(alpha = 0.10f))
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

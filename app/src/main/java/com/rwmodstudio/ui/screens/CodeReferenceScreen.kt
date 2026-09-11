@@ -3,13 +3,22 @@ package com.rwmodstudio.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,6 +29,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
@@ -31,14 +45,14 @@ import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<CustomCompletion> = emptyList()) {
     val context = LocalContext.current
     val engine = remember { TranslationEngine.getInstance() }
     var loaded by remember { mutableStateOf(false) }
-    var selectedCategory by rememberSaveable { mutableStateOf("") }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var expandedCategory by rememberSaveable { mutableStateOf<String?>(null) }
     var detailItem by remember { mutableStateOf<CustomCompletion?>(null) }
 
     val localUserItems = remember { loadUserItems() }
@@ -109,103 +123,132 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it; selectedCategory = "" },
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            singleLine = true,
-            placeholder = { Text("搜索属性...", fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(16.dp)) },
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+    Column(Modifier.fillMaxSize().background(RustedBackground)) {
+        CodeRefSearchBar(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            onClear = { searchQuery = "" }
         )
 
         when {
             q.isNotEmpty() -> {
-                LazyColumn(Modifier.weight(1f).background(RustedBackground), contentPadding = PaddingValues(8.dp)) {
+                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 4.dp)) {
                     if (filteredItems.isEmpty()) {
                         item { Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) { Text("无匹配", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.4f)) } }
                     } else {
-                        items(filteredItems) { item ->
-                            CompletionItemCard(item, isUser = item.name in userNames, onClick = { detailItem = item })
+                        items(filteredItems, key = { it.name }) { item ->
+                            Column {
+                                CompletionItemRow(item = item, isUser = item.name in userNames, onClick = { detailItem = item })
+                                HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                            }
                         }
                     }
                 }
             }
-            selectedCategory.isNotEmpty() -> {
-                val itemsInCategory = grouped[selectedCategory] ?: emptyList()
-                CategoryList(
-                    title = selectedCategory,
-                    count = itemsInCategory.size,
-                    items = itemsInCategory,
-                    userNames = userNames,
-                    onBack = { selectedCategory = "" },
-                    onClick = { detailItem = it }
-                )
-            }
             else -> {
-                LazyColumn(Modifier.weight(1f).background(RustedBackground), contentPadding = PaddingValues(8.dp)) {
-                    grouped.entries.sortedBy { it.key }.forEachIndexed { index, (category, items) ->
-                        if (index > 0) item { Spacer(Modifier.height(2.dp)) }
-                        item {
-                            CategoryListRow(category = category, count = items.size, onClick = { selectedCategory = category })
+                Box(Modifier.weight(1f)) {
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
+                        grouped.entries.sortedBy { it.key }.forEach { (category, items) ->
+                            item(key = "cat_$category") {
+                                Column {
+                                    CategoryDisclosureRow(
+                                        category = category,
+                                        count = items.size,
+                                        expanded = expandedCategory == category,
+                                        onClick = { expandedCategory = if (expandedCategory == category) null else category }
+                                    )
+                                    HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                                }
+                            }
+                            if (expandedCategory == category) {
+                                items(items, key = { it.name }) { item ->
+                                    Column {
+                                        CompletionItemRow(item = item, isUser = item.name in userNames, onClick = { detailItem = item })
+                                        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                                    }
+                                }
+                            }
                         }
+                    }
+                    // 展开分类时底部悬浮「收起」胶囊：随时拇指可及，无需滑回顶部
+                    expandedCategory?.let { cat ->
+                        FloatingCollapsePill(
+                            category = cat,
+                            onCollapse = { expandedCategory = null },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+                        )
                     }
                 }
             }
         }
     }
 
+    // 条目详情弹窗：单色 surface 背景 + 同色系细边框（避免外框颜色分层）
     detailItem?.let { item ->
         val ctx = LocalContext.current
         val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val tc = when (item.detail) { "bool" -> RustedPrimary; "float", "int" -> RustedSecondary; "string" -> RustedAccent; else -> RustedOnBackground.copy(alpha = 0.3f) }
         Dialog(onDismissRequest = { detailItem = null }) {
-            Surface(Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 520.dp), shape = RoundedCornerShape(20.dp), color = RustedBackground, tonalElevation = 6.dp) {
+            Surface(
+                Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 560.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = RustedSurface,
+                border = BorderStroke(1.dp, RustedOnBackground.copy(alpha = 0.10f))
+            ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(RustedPrimary.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Info, null, Modifier.size(22.dp), tint = RustedPrimary)
-                        }
-                        Spacer(Modifier.width(12.dp))
+                        Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
+                        Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(text = item.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = RustedOnBackground)
-                            if (item.detail.isNotEmpty()) {
-                                Text(text = item.detail, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                            }
+                            Text(item.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = AppCodeFontFamily, color = RustedOnBackground)
+                            if (item.detail.isNotEmpty()) Text(item.detail, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                         }
                         IconButton(onClick = { detailItem = null }, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        SelectionContainer {
-                            Column {
-                                if (item.category.isNotEmpty()) {
-                                    InfoRow("分类", item.category.joinToString(", "))
-                                }
-                                if (item.desc.isNotEmpty()) {
-                                    Spacer(Modifier.height(10.dp))
-                                    Text(text = "说明", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = RustedPrimary)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(text = item.desc, fontSize = 14.sp, color = RustedOnBackground, lineHeight = 20.sp)
-                                }
-                                if (item.example.isNotEmpty()) {
-                                    Spacer(Modifier.height(14.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = "示例", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = RustedPrimary, modifier = Modifier.weight(1f))
-                                        TextButton(
-                                            onClick = { clipboard.setPrimaryClip(ClipData.newPlainText(item.name, completionFormatInsert(item))) },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                        ) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedSecondary); Spacer(Modifier.width(4.dp)); Text("复制代码", fontSize = 11.sp, color = RustedSecondary) }
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = RustedSurface), shape = RoundedCornerShape(12.dp)) {
-                                        SelectionContainer {
-                                            Text(text = item.example, modifier = Modifier.padding(12.dp), fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = RustedSecondary, lineHeight = 18.sp)
+                        if (item.detail.isNotEmpty() || item.category.isNotEmpty()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (item.detail.isNotEmpty()) {
+                                    DetailChip {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(tc))
+                                            Text(item.detail, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f))
                                         }
                                     }
                                 }
+                                item.category.take(2).forEach { c ->
+                                    DetailChip { Text(c, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f)) }
+                                }
+                            }
+                        }
+                        if (item.desc.isNotEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            Text("说明", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary)
+                            Spacer(Modifier.height(4.dp))
+                            SelectionContainer { Text(item.desc, fontSize = 14.sp, color = RustedOnBackground, lineHeight = 20.sp) }
+                        }
+                        if (item.example.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("示例", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary, modifier = Modifier.weight(1f))
+                                TextButton(
+                                    onClick = { clipboard.setPrimaryClip(ClipData.newPlainText(item.name, completionFormatInsert(item))) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedSecondary); Spacer(Modifier.width(4.dp)); Text("复制代码", fontSize = 11.sp, color = RustedSecondary) }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            SelectionContainer {
+                                Text(
+                                    text = item.example,
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(RustedBackground).padding(10.dp),
+                                    fontSize = 12.sp,
+                                    fontFamily = AppCodeFontFamily,
+                                    color = RustedSecondary.copy(alpha = 0.9f),
+                                    lineHeight = 18.sp
+                                )
                             }
                         }
                     }
@@ -215,64 +258,129 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
     }
 }
 
+/** 顶部搜索条：极简圆角条，聚焦时主色描边，非空显示清除按钮 */
 @Composable
-private fun CategoryList(
-    title: String,
-    count: Int,
-    items: List<CustomCompletion>,
-    userNames: Set<String>,
-    onBack: () -> Unit,
-    onClick: (CustomCompletion) -> Unit
-) {
-    Column(Modifier.fillMaxSize().background(RustedBackground)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, Modifier.size(28.dp)) { Icon(Icons.Default.ArrowBack, null, Modifier.size(16.dp), tint = RustedPrimary) }
-            Text(text = title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RustedPrimary, modifier = Modifier.weight(1f))
-            Text(text = "$count 项", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f))
-        }
-        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
-            items(items) { item -> CompletionItemCard(item, isUser = item.name in userNames, onClick = { onClick(item) }) }
-        }
-    }
-}
-
-@Composable
-private fun CategoryListRow(category: String, count: Int, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = RustedSurface), shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(RustedPrimary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Folder, null, Modifier.size(16.dp), tint = RustedPrimary)
+private fun CodeRefSearchBar(query: String, onQueryChange: (String) -> Unit, onClear: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(shape)
+            .background(RustedSurface)
+            .border(1.dp, if (focused) RustedPrimary.copy(alpha = 0.6f) else RustedOnBackground.copy(alpha = 0.08f), shape)
+            .onFocusChanged { focused = it.hasFocus }
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Search, null, Modifier.size(16.dp), tint = RustedOnBackground.copy(alpha = 0.45f))
+        Spacer(Modifier.width(8.dp))
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = RustedOnBackground),
+            cursorBrush = SolidColor(RustedPrimary)
+        )
+        if (query.isNotEmpty()) {
+            Box(Modifier.size(28.dp).clip(shape).clickable(onClick = onClear), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Close, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.4f))
             }
-            Spacer(Modifier.width(10.dp))
-            Text(text = category, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = RustedOnBackground, modifier = Modifier.weight(1f))
-            Text(text = "$count 项", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f))
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.Default.ChevronRight, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.2f))
         }
     }
 }
 
+/** 分类行（无边框）：图标 + 名称 + 数量徽章 + 旋转 chevron，点击展开/收起该分类条目 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CompletionItemCard(item: CustomCompletion, isUser: Boolean, onClick: () -> Unit) {
+private fun CategoryDisclosureRow(category: String, count: Int, expanded: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val nameColor by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary else RustedOnBackground,
+        animationSpec = tween(120), label = "catName"
+    )
+    val chevronAngle by animateFloatAsState(if (expanded) 180f else 0f, tween(180), label = "catChevron")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Folder, null, Modifier.size(18.dp), tint = RustedPrimary)
+        Spacer(Modifier.width(10.dp))
+        Text(category, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = nameColor, modifier = Modifier.weight(1f))
+        Box(Modifier.clip(RoundedCornerShape(999.dp)).background(RustedOnBackground.copy(alpha = 0.08f)).padding(horizontal = 7.dp, vertical = 2.dp)) {
+            Text("$count", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.55f))
+        }
+        Spacer(Modifier.width(6.dp))
+        Icon(Icons.Default.KeyboardArrowDown, null, Modifier.size(16.dp).rotate(chevronAngle), tint = RustedOnBackground.copy(alpha = 0.35f))
+    }
+}
+
+/** 条目行（无边框）：类型色点 + 名称 + 描述，点击弹出详情 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CompletionItemRow(item: CustomCompletion, isUser: Boolean, onClick: () -> Unit) {
     val tc = when (item.detail) { "bool" -> RustedPrimary; "float", "int" -> RustedSecondary; "string" -> RustedAccent; else -> RustedOnBackground.copy(alpha = 0.3f) }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 1.dp), colors = CardDefaults.cardColors(containerColor = if (isUser) RustedSecondary.copy(alpha = 0.06f) else RustedSurface), shape = RoundedCornerShape(8.dp)) {
-        Column(Modifier.padding(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(tc)); Spacer(Modifier.width(6.dp))
-                Text(text = item.name, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground, modifier = Modifier.weight(1f))
-                if (isUser) Text("自定义", fontSize = 10.sp, color = RustedSecondary.copy(alpha = 0.6f))
-            }
-            if (item.desc.isNotEmpty()) Text(text = item.desc.take(36) + if (item.desc.length > 36) "..." else "", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f), maxLines = 1)
-            if (item.example.isNotEmpty()) Text(text = item.example.take(44) + if (item.example.length > 44) "..." else "", fontSize = 10.sp, fontFamily = AppCodeFontFamily, color = RustedSecondary.copy(alpha = 0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val nameColor by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary else RustedOnBackground,
+        animationSpec = tween(120), label = "itemName"
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
+            Spacer(Modifier.width(8.dp))
+            Text(item.name, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = nameColor, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (isUser) Text("自定义", fontSize = 10.sp, color = RustedSecondary.copy(alpha = 0.6f))
+        }
+        if (item.desc.isNotEmpty()) {
+            Text(item.desc, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.45f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 14.dp, top = 2.dp))
         }
     }
 }
 
+/** 小胶囊标签 */
 @Composable
-private fun InfoRow(label: String, value: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(text = label, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.45f))
-        Text(text = value, fontSize = 13.sp, color = RustedOnBackground)
+private fun DetailChip(content: @Composable () -> Unit) {
+    Box(Modifier.clip(RoundedCornerShape(999.dp)).background(RustedOnBackground.copy(alpha = 0.06f)).padding(horizontal = 7.dp, vertical = 2.dp)) {
+        content()
+    }
+}
+
+/** 展开分类时底部悬浮的「收起」胶囊 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FloatingCollapsePill(category: String, onCollapse: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val bg by animateColorAsState(
+        targetValue = if (pressed) RustedPrimary.copy(alpha = 0.16f) else RustedSurface,
+        animationSpec = tween(120), label = "pillBg"
+    )
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier
+            .shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.35f), spotColor = Color.Black.copy(alpha = 0.35f))
+            .clip(shape)
+            .background(bg)
+            .border(1.dp, RustedOnBackground.copy(alpha = 0.10f), shape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onCollapse)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(15.dp), tint = RustedPrimary)
+        Spacer(Modifier.width(5.dp))
+        Text("收起「$category」", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = RustedOnBackground)
     }
 }

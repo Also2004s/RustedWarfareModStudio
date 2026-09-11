@@ -506,8 +506,16 @@ fun ModInfoScreen(
         if (versionEdited) {
             val newTitle = when {
                 oldToken.isNotBlank() -> {
+                    // 跟随原文格式：版本号前原文有空格就补空格分隔，原文紧贴（无空格）就保持紧贴，
+                    // 不做「必须加空格」的假设（如 人机的玩笑v1.6.1 不能被改成 人机的玩笑 v1.6.1）。
+                    val idx = title.indexOf(oldToken)
+                    val hadSpace = idx > 0 && title[idx - 1].isWhitespace()
                     val base = removeVersionFromTitle(title, oldToken)
-                    if (newToken.isNotBlank()) (base.trimEnd() + " " + newToken).trim() else base.trim()
+                    if (newToken.isNotBlank()) {
+                        if (hadSpace) (base.trimEnd() + " " + newToken).trim() else base.trimEnd() + newToken
+                    } else {
+                        base.trim()
+                    }
                 }
                 newToken.isNotBlank() -> (title.trimEnd() + " " + newToken).trim() // 原标题无版本号，补一个
                 else -> title

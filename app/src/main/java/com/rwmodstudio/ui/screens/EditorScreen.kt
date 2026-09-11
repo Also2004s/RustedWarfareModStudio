@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import com.rwmodstudio.core.AiService
 import com.rwmodstudio.core.InheritanceResolver
 import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.ProjectTagScanner
@@ -314,6 +315,9 @@ fun EditorScreen(
     var showMore by remember(filePath) { mutableStateOf(false) }
     var showInheritanceView by remember(filePath) { mutableStateOf(false) }
     var inheritanceText by remember { mutableStateOf("") }
+    // 继承链对话框开合时递增：强制主编辑器重新应用主题/自定义颜色（只读编辑器创建配色
+    // 方案会触发全局 ThemeRegistry 派发，清空本实例自定义背景色，需在此重放恢复）
+    var editorThemeRefreshTick by remember(filePath) { mutableIntStateOf(0) }
     var showSearch by remember(filePath) { mutableStateOf(false) }
     // 「方块+」折叠菜单：输入法关闭时显示，点击展开「更多」浮层
     var fabExpanded by remember(filePath) { mutableStateOf(false) }
@@ -587,19 +591,24 @@ fun EditorScreen(
     // 避免并发保存读旧快照、isModified 误清。
     val saveMutex = remember { Mutex() }
     suspend fun saveSync(caller: String = "unknown", silent: Boolean = false): Boolean = saveMutex.withLock {
+        // 在保存锁内、切 IO 线程前一次性快照目标路径与内容标志（主线程侧一致快照）：
+        // 避免跨线程读取 Compose 状态时读到「内容与 isEnglish/showChinese 不同代」的混合状态，
+        // 导致本应反向翻译的内容被跳过翻译原样写盘（中文落盘）。
+        val targetPath = filePath
+        val currentText = latestEditorText.ifEmpty { text }
+        val engSnapshot = isEnglish
+        val zhSnapshot = showChinese
+        val litSnapshot = litLines
         withContext(Dispatchers.IO) {
             if (loading) {
                 Log.w(TAG, "[$caller] Skip save before content loaded: $filePath")
                 withContext(Dispatchers.Main) { onSaved?.invoke(true) }
                 return@withContext false
             }
-            // 快照化目标路径与内容，避免重组过程中状态被覆盖导致串写
-            val targetPath = filePath
-            // 在保存锁内读取编辑器最新内容（onTextChange 同步维护），
-            // 保证并发保存时每个事务都基于此刻的最新快照，而不是锁外读到的旧值
-            val currentText = latestEditorText.ifEmpty { text }
+            // 反向翻译判定：中文视图（isEnglish && showChinese）才把显示文本翻译回英文原文件；英文视图跳过
+            val needReverseTranslate = engSnapshot && zhSnapshot
             val contentToSave = try {
-                if (isEnglish && showChinese) engine.translateToEnglish(currentText, autoSpace, litLines)
+                if (needReverseTranslate) engine.translateToEnglish(currentText, autoSpace, litSnapshot)
                 else currentText
             } catch (e: Exception) {
                 Log.e(TAG, "[$caller] Failed to prepare content for $targetPath", e)
@@ -623,7 +632,9 @@ fun EditorScreen(
                 return@withContext false
             }
             try {
-                Log.d(TAG, "[$caller] Saving file=$targetPath length=${contentToSave.length}")
+                // [caller] 与标志位同打点：后续若仍怀疑「中文被直写」，直接看本行即可确认
+                // translate/isEnglish/showChinese/head 当时的真实取值。
+                Log.d(TAG, "[$caller] Saving file=$targetPath length=${contentToSave.length} translate=$needReverseTranslate isEnglish=$engSnapshot showChinese=$zhSnapshot head=${contentToSave.take(80).replace('\n', ' ')}")
                 val beforeContent = if (targetFile.exists()) {
                     try { targetFile.readText(Charsets.UTF_8) } catch (_: Exception) { "" }
                 } else ""
@@ -1315,6 +1326,7 @@ fun EditorScreen(
                         },
                         rainbowSettingsTick = rainbowSettingsTick,
                         sectionHighlightTick = sectionHighlightTick,
+                        themeRefreshTick = editorThemeRefreshTick,
                         onSymbolInsert = { value ->
                             insertTextRequest = value
                             insertTextTick++
@@ -1343,14 +1355,18 @@ fun EditorScreen(
                                                     chineseText = text
                                                     val translated = withContext(Dispatchers.Default) { engine.translateToEnglish(text, autoSpace, litLines) }
                                                     englishText = translated
-                                                    showChinese = false
                                                     text = translated
+                                                    // 关键：程序性 setText 走 isApplyingExternalText 抑制，onTextChange 不会回调，
+                                                    // latestEditorText 若不在此同步会残留切换前的中文内容，保存时被原样写盘（跳过反向翻译）
+                                                    latestEditorText = translated
+                                                    showChinese = false
                                                 } else {
                                                     englishText = text
                                                     val translated = withContext(Dispatchers.Default) { engine.translateToChinese(text, autoSpace) }
                                                     chineseText = translated
-                                                    showChinese = true
                                                     text = translated
+                                                    latestEditorText = translated
+                                                    showChinese = true
                                                 }
                                                 resetTextTick++
                                                 resetTextRequest = text to resetTextTick
@@ -1403,6 +1419,8 @@ fun EditorScreen(
                                         withContext(Dispatchers.Main) {
                                             inheritanceText = text
                                             showInheritanceView = true
+                                            // 只读编辑器创建配色会清空主编辑器自定义色，打开后立即重放恢复
+                                            editorThemeRefreshTick++
                                         }
                                     }
                                 })
@@ -1446,14 +1464,18 @@ fun EditorScreen(
                                                 chineseText = text
                                                 val translated = withContext(Dispatchers.Default) { engine.translateToEnglish(text, autoSpace, litLines) }
                                                 englishText = translated
-                                                showChinese = false
                                                 text = translated
+                                                // 关键：程序性 setText 走 isApplyingExternalText 抑制，onTextChange 不会回调，
+                                                // latestEditorText 若不在此同步会残留切换前的中文内容，保存时被原样写盘（跳过反向翻译）
+                                                latestEditorText = translated
+                                                showChinese = false
                                             } else {
                                                 englishText = text
                                                 val translated = withContext(Dispatchers.Default) { engine.translateToChinese(text, autoSpace) }
                                                 chineseText = translated
-                                                showChinese = true
                                                 text = translated
+                                                latestEditorText = translated
+                                                showChinese = true
                                             }
                                             resetTextTick++
                                             resetTextRequest = text to resetTextTick
@@ -1482,6 +1504,8 @@ fun EditorScreen(
                                     withContext(Dispatchers.Main) {
                                         inheritanceText = t
                                         showInheritanceView = true
+                                        // 只读编辑器创建配色会清空主编辑器自定义色，打开后立即重放恢复
+                                        editorThemeRefreshTick++
                                     }
                                 }
                             }
@@ -1855,29 +1879,37 @@ fun EditorScreen(
         }
         // 继承链查看对话框
         if (showInheritanceView) {
-            AlertDialog(
-                onDismissRequest = { showInheritanceView = false },
-                title = { Text("继承链", fontWeight = FontWeight.Bold) },
-                text = {
-                    ReadOnlyCodeEditor(
-                        text = inheritanceText,
-                        modifier = Modifier.fillMaxWidth().height(480.dp),
-                        fontSize = 12f,
-                        autoWrap = SettingsManager.autoWrap,
-                        smartWrap = smartWrap
-                    )
+            AppDialog(
+                onDismissRequest = {
+                    showInheritanceView = false
+                    // 只读编辑器销毁后重放主编辑器自定义背景色（其创建配色会清空本实例自定义色）
+                    editorThemeRefreshTick++
                 },
-                confirmButton = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = {
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("继承链", inheritanceText))
-                            showInheritanceView = false
-                        }) { Text("复制全部", fontSize = 13.sp) }
-                        TextButton(onClick = { showInheritanceView = false }) { Text("关闭", fontSize = 13.sp) }
-                    }
+                title = "继承链",
+                actions = {
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("继承链", inheritanceText))
+                        showInheritanceView = false
+                        // 只读编辑器销毁后重放主编辑器自定义背景色
+                        editorThemeRefreshTick++
+                    }) { Text("复制全部", fontSize = 13.sp) }
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = {
+                        showInheritanceView = false
+                        // 只读编辑器销毁后重放主编辑器自定义背景色
+                        editorThemeRefreshTick++
+                    }) { Text("关闭", fontSize = 13.sp) }
                 }
-            )
+            ) {
+                ReadOnlyCodeEditor(
+                    text = inheritanceText,
+                    modifier = Modifier.fillMaxWidth().height(540.dp),
+                    fontSize = 12f,
+                    autoWrap = SettingsManager.autoWrap,
+                    smartWrap = smartWrap
+                )
+            }
         }
         // 查找替换栏 - 固定在底部，adjustResize会自动把它推到键盘上方
         if (showSearch) {
@@ -1955,9 +1987,20 @@ fun EditorScreen(
             (nativeCustomCompletions.flatMap { it.category } + extraCustomCompletions.flatMap { it.category } + rawUserCompletions.flatMap { it.category })
                 .filter { it.isNotBlank() }.distinct().sorted()
         }
-        AlertDialog(onDismissRequest = { activePopup = ""; showCompletionEditor = false }, title = { Text("代码提示") }, text = {
+        AppDialog(
+            onDismissRequest = { activePopup = ""; showCompletionEditor = false },
+            title = "代码提示",
+            actions = {
+                TextButton(onClick = { activePopup = "" }) { Text("关闭") }
+            }
+        ) {
             var qr by remember { mutableStateOf(hintQuery) }
             var res by remember { mutableStateOf(hintResults) }
+            // AI 翻译状态：无匹配时自动请求，仅翻译搜索词为中文，不附带任何上下文；结果仅供查看参考
+            var aiTransText by remember { mutableStateOf("") }
+            var aiTransPhase by remember { mutableStateOf("") }
+            var aiTransDoneFor by remember { mutableStateOf<String?>(null) }
+            var aiTransRunning by remember { mutableStateOf(false) }
             LaunchedEffect(qr) {
                 fun CustomCompletion.matchesQuery(q: String): Boolean {
                     return name.contains(q, ignoreCase = true) ||
@@ -2002,13 +2045,74 @@ fun EditorScreen(
                 }
                 res = merged.sortedByDescending { namePriority(it) }
             }
+            // 无匹配时自动触发 AI 翻译：key 用 qr，用户改词即取消旧请求；同一搜索词只请求一次
+            LaunchedEffect(qr) {
+                if (res.isNotEmpty() || aiTransDoneFor == qr || aiTransRunning || qr.isBlank()) return@LaunchedEffect
+                aiTransRunning = true
+                aiTransPhase = "正在连接 AI 服务"
+                aiTransText = ""
+                AiService.streamAssistantChat(
+                    system = "你是翻译。请把用户给出的内容翻译成中文，只输出翻译结果，不要解释、不要添加任何其他内容。",
+                    messages = listOf(AiService.ChatMessage("user", qr.trim())),
+                    onChunk = { c -> aiTransText += c },
+                    onPhase = { p -> aiTransPhase = p }
+                )
+                    .onSuccess { aiTransDoneFor = qr }
+                    .onFailure { e ->
+                        aiTransPhase = "AI 翻译失败：${e.message ?: "AI 请求失败"}"
+                    }
+                aiTransRunning = false
+            }
             Column {
-                OutlinedTextField(qr, { qr = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("搜索...") }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp))
-                Spacer(Modifier.height(6.dp))
-                if (res.isEmpty()) Text("无匹配", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.4f))
-                else LazyColumn(Modifier.heightIn(max = 300.dp)) { items(res.take(15)) { p ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 1.dp), colors = CardDefaults.cardColors(containerColor = RustedSurface)) {
-                        Column(Modifier.padding(8.dp)) {
+                // 搜索条：圆角 surface 底 + 聚焦主色描边 + 清除按钮
+                OutlinedTextField(
+                    qr, { qr = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("搜索属性/值...", fontSize = 12.sp) },
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                    leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(16.dp), tint = RustedOnBackground.copy(alpha = 0.45f)) },
+                    trailingIcon = { if (qr.isNotEmpty()) IconButton(onClick = { qr = "" }, Modifier.size(26.dp)) { Icon(Icons.Default.Clear, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.4f)) } },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RustedPrimary.copy(alpha = 0.6f),
+                        unfocusedBorderColor = RustedOnBackground.copy(alpha = 0.08f),
+                        focusedContainerColor = RustedSurface,
+                        unfocusedContainerColor = RustedSurface
+                    )
+                )
+                Spacer(Modifier.height(8.dp))
+                if (res.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
+                        Text("无匹配", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                    }
+                    // AI 自动翻译区域：仅流式展示翻译结果，供查看参考，不写回、不作其他用途
+                    if (aiTransRunning || aiTransText.isNotEmpty() || aiTransPhase.isNotEmpty()) {
+                        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
+                        Spacer(Modifier.height(10.dp))
+                        Text("AI 翻译", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary)
+                        Spacer(Modifier.height(6.dp))
+                        if (aiTransPhase.isNotEmpty()) {
+                            Text(aiTransPhase, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                        }
+                        if (aiTransText.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            SelectionContainer {
+                                Text(
+                                    aiTransText,
+                                    fontSize = 13.sp,
+                                    color = RustedPrimary,
+                                    lineHeight = 20.sp,
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState())
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text("⚠ AI 翻译仅供参考，可能不准确", fontSize = 11.sp, color = RustedSecondary)
+                    }
+                }
+                else LazyColumn(Modifier.heightIn(max = 340.dp)) { items(res.take(15)) { p ->
+                    Column {
+                        // 无边框条目行：细分割线分隔，与代码参考列表同款
+                        Column(Modifier.padding(vertical = 6.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 SelectionContainer(Modifier.weight(1f)) { Text(p.name, fontSize = 14.sp, fontFamily = AppCodeFontFamily, fontWeight = FontWeight.Medium, color = RustedPrimary) }
                                 Row {
@@ -2027,22 +2131,23 @@ fun EditorScreen(
                                             isOverridden = true
                                         )
                                         showCompletionEditor = true
-                                    }, Modifier.size(24.dp)) { Icon(Icons.Default.Edit, null, Modifier.size(14.dp), tint = RustedSecondary) }
+                                    }, Modifier.size(24.dp)) { Icon(Icons.Default.Edit, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.4f)) }
                                     IconButton(onClick = {
                                         // 与代码表「复制代码」同一逻辑：按格式分类生成插入文本（不解析 example）
                                         val src = (rawUserCompletions + nativeCustomCompletions + extraCustomCompletions).firstOrNull { it.name == p.name }
                                         copyToClip(p.name, if (src != null) completionFormatInsert(src) else p.name)
-                                    }, Modifier.size(24.dp)) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedSecondary) }
+                                    }, Modifier.size(24.dp)) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.4f)) }
                                 }
                             }
                             if (!p.name_en.isNullOrEmpty()) SelectionContainer { Text("(${p.name_en})", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f)) }
                             if (p.desc_zh.isNotEmpty()) SelectionContainer { Text(p.desc_zh, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.7f)) }
                             if (p.example.isNotEmpty()) SelectionContainer { Text(p.example, fontSize = 11.sp, fontFamily = AppCodeFontFamily, color = RustedSecondary, maxLines = 3) }
                         }
+                        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
                     }
                 } }
             }
-        }, confirmButton = { TextButton(onClick = { activePopup = "" }) { Text("关闭") } })
+        }
 
         if (showCompletionEditor) {
             CustomCompletionEditorDialog(
@@ -2211,9 +2316,15 @@ fun EditorScreen(
         }
     }
 
-    // Code reference popup
+    // Code reference popup：统一 AppDialog 容器（内页自带内边距，容器不再额外 pad）
     if (activePopup == "ref") {
-        AlertDialog(onDismissRequest = { activePopup = "" }, title = { Text("代码参考") }, text = { Box(Modifier.heightIn(max = 480.dp)) { CodeReferenceScreen(userCompletions = rawUserCompletions) } }, confirmButton = { TextButton(onClick = { activePopup = "" }) { Text("关闭") } })
+        AppDialog(
+            onDismissRequest = { activePopup = "" },
+            title = "代码参考",
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            Box(Modifier.heightIn(max = 540.dp)) { CodeReferenceScreen(userCompletions = rawUserCompletions) }
+        }
     }
 
     // @ file reference popup

@@ -201,26 +201,26 @@ fun ColorWheelHSV(
                     value = sat.coerceIn(0f, 1f),
                     thumbColor = Color(android.graphics.Color.HSVToColor(255, floatArrayOf(hue, sat, value)))
                 ) { sat = it.coerceIn(0f, 1f) }
-                // 明度 V（顶部纯色 → 底部纯黑）
+                // 明度 V（顶部纯色 → 底部纯黑），顶部对应最大值
                 VerticalSliderTrack(
                     modifier = Modifier.width(26.dp).fillMaxHeight(),
                     brush = Brush.verticalGradient(
                         0f to Color(android.graphics.Color.HSVToColor(255, floatArrayOf(hue, 1f, 1f))),
                         1f to Color.Black
                     ),
-                    value = value.coerceIn(0f, 1f),
+                    value = 1f - value.coerceIn(0f, 1f),
                     thumbColor = Color(android.graphics.Color.HSVToColor(255, floatArrayOf(hue, sat, value)))
-                ) { value = it.coerceIn(0f, 1f) }
-                // 透明度 A（顶部不透明 → 底部透明）
+                ) { value = (1f - it).coerceIn(0f, 1f) }
+                // 透明度 A（顶部不透明 → 底部透明），顶部对应最大值
                 VerticalSliderTrack(
                     modifier = Modifier.width(26.dp).fillMaxHeight(),
                     brush = Brush.verticalGradient(
                         0f to Color(android.graphics.Color.HSVToColor(255, floatArrayOf(hue, sat, value))),
                         1f to Color.White.copy(alpha = 0f)
                     ),
-                    value = (alpha / 255f).coerceIn(0f, 1f),
+                    value = 1f - (alpha / 255f).coerceIn(0f, 1f),
                     thumbColor = Color(currentColor)
-                ) { alpha = (it * 255f).coerceIn(0f, 255f).toInt() }
+                ) { alpha = ((1f - it) * 255f).coerceIn(0f, 255f).toInt() }
             }
         }
 
