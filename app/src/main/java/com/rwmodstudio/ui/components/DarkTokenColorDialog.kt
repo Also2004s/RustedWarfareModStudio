@@ -139,7 +139,7 @@ fun DarkTokenColorDialog(
                         colors = updateColor(colors, selectedCategory, newColor)
                     },
                     wheelSize = 180.dp,
-                    showHexInput = false
+                    showHexInput = true
                 )
             } else {
                 ColorWheelPicker(
@@ -148,7 +148,7 @@ fun DarkTokenColorDialog(
                         colors = updateColor(colors, selectedCategory, newColor)
                     },
                     wheelSize = 180.dp,
-                    showHexInput = false
+                    showHexInput = true
                 )
             }
         }

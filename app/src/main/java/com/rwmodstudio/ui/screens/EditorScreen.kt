@@ -357,7 +357,9 @@ fun EditorScreen(
     }
     // 调色盘对话框打开时忽略输入法状态：其 HEX 输入框本身就要用输入法，
     // 若随 IME 弹起联动折叠 +号/重组，会把焦点与输入法一起挤掉。
-    val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker
+    // 这些弹窗内带 HEX 输入/输入框，输入法展开时必须保持容器不被卸载；
+    // 否则 effectiveIme 变 true → fabShown 变 false → if (fabShown) 容器整体卸载 → 弹窗连同输入法一起关闭（与调色盘一致）
+    val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker || showDarkTokens
     val effectiveIme = imeVisible && !pickerOpen
     val editingBarShown = !showSearch && effectiveIme
     val fabShown = !showSearch && !effectiveIme
@@ -1068,7 +1070,8 @@ fun EditorScreen(
                     .fillMaxWidth()
                     .height(22.dp)
                     .alpha(1 - topFold)
-                    .background(RustedSurface.copy(alpha = 0.5f)),
+                    // 背景用不透明主题 surface 色：半透明会叠加编辑器背景导致颜色不定（如浅背景+深主题时发灰）
+                    .background(RustedSurface),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 可滚动的 tab 列表占 72%（开启节名显示块时剩余 28% 留给它，与底部功能栏占比一致）

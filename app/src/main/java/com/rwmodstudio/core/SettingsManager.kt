@@ -181,12 +181,12 @@ object SettingsManager {
 
     private fun migrateDefaults() {
         try {
-            // 节名行高亮默认色改为含透明度的 #20F05E5A：一次性把"未自定义（无记录或空串）"的老用户迁移到新默认，
+            // 节名行高亮默认色改为含透明度的 #15F05E5A：一次性把"未自定义（无记录或空串）"的老用户迁移到新默认，
             // 已被用户手动改过的彩色值保留，不覆盖。
             if (!settings.contains("section_highlight_color_migration_v1")) {
                 val cur = settings.getString("section_highlight_color", "") ?: ""
                 if (cur.isBlank()) {
-                    settings.edit().putString("section_highlight_color", "#20F05E5A").apply()
+                    settings.edit().putString("section_highlight_color", "#15F05E5A").apply()
                 }
                 settings.edit().putBoolean("section_highlight_color_migration_v1", true).apply()
                 Log.d(TAG, "Migrated section_highlight_color default (one-time)")
@@ -424,12 +424,12 @@ object SettingsManager {
         set(value) = settings.edit().putBoolean("section_highlight_enabled", value).apply()
 
     /**
-     * 节名行高亮自定义底色（#AARRGGBB，如 #20F05E5A，高 4 位为透明度）。
+     * 节名行高亮自定义底色（#AARRGGBB，如 #15F05E5A，高 4 位为透明度）。
      * 非空时使用该自定义色（含透明度，节行高亮与背景不再随主题明暗自适应）；
      * 空字符串表示「不自定义」，跟随编辑器背景明暗自适应默认色。
      */
     var sectionHighlightColor: String
-        get() = settings.getString("section_highlight_color", "#18F05E5A") ?: "#18F05E5A"
+        get() = settings.getString("section_highlight_color", "#15F05E5A") ?: "#15F05E5A"
         set(value) = settings.edit().putString("section_highlight_color", value).apply()
 
     /**

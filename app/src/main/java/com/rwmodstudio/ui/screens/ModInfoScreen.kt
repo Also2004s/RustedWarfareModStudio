@@ -99,15 +99,14 @@ private fun extractVersionFromTitle(title: String): String? {
     return rx.find(title)?.value?.trim()
 }
 
-/** 从标题中移除末尾版本号 token，返回去掉版本（并收尾空白）后的基础名。 */
-private fun removeVersionFromTitle(title: String, token: String): String {
-    val idx = title.indexOf(token)
-    if (idx < 0) return title
-    return title.removeRange(idx, idx + token.length).trimEnd()
+/**
+ * 版本号精确替换：跳过后面紧跟版本字符（数字/字母/. _ -）的旧 token（视为更长版本的一部分）。
+ * 防止新旧 token 前缀重叠时（如 v1.6.0 → v1.6.0.1）把新 token 内部的旧前缀再替换一遍，产生 v1.6.0.1.1。
+ */
+private fun replaceVersionToken(content: String, old: String, new: String): String {
+    val rx = Regex(Regex.escape(old) + "(?![0-9A-Za-z._-])")
+    return rx.replace(content, new)
 }
-
-/** 待确认的项目版本号同步信息（受影响文件 + 替换对） */
-private class VersionSyncInfo(val files: List<File>, val oldToken: String, val newToken: String)
 
 /** 任意节头判定（`[xxx]`） */
 private fun isAnySectionHeader(line: String): Boolean {
@@ -440,8 +439,6 @@ fun ModInfoScreen(
     var version by remember { mutableStateOf("") }
     var originalVersion by remember { mutableStateOf("") }
     var versionEdited by remember { mutableStateOf(false) }
-    // 待确认的项目版本号同步（扫描出的受影响文件 + 替换对），null 表示无待确认
-    var pendingVersionSync by remember { mutableStateOf<VersionSyncInfo?>(null) }
     // 键级编辑标记：被编辑过的键名集合 → 保存时只重写这些键的行，其余键/未知行/注释原样保留
     // （music 节没编辑过 → 整节原样，一般 mod-info.txt 没有 [music] 节就一个字不写）。
     // 注意：保存成功后只清 edited（顶栏灯灭），不清 dirtyKeys —— 重建基于表单值，
@@ -470,7 +467,6 @@ fun ModInfoScreen(
         version = v
         originalVersion = v
         versionEdited = false
-        pendingVersionSync = null
         parsed = p
         loaded = true
     }
@@ -483,47 +479,41 @@ fun ModInfoScreen(
     var showBackConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    /** 扫描项目内精确出现的旧版本 token；命中则弹确认框，未命中静默跳过。 */
-    fun scanAndConfirmVersionSync(oldToken: String, newToken: String) {
-        scope.launch(Dispatchers.IO) {
-            val files = dir.walkTopDown()
-                .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "txt") }
-                .filter { f -> try { f.readText().indexOf(oldToken) >= 0 } catch (_: Exception) { false } }
-                .toList()
-            withContext(Dispatchers.Main) {
-                if (files.isNotEmpty()) pendingVersionSync = VersionSyncInfo(files, oldToken, newToken)
-            }
+    /** 保存后直接把项目内（含当前 mod-info 的标题/描述）出现的旧版本 token 批量替换为新 token，不弹确认框。 */
+    suspend fun replaceVersionInProject(oldToken: String, newToken: String): Set<String>? {
+        val files = dir.walkTopDown()
+            .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "txt") }
+            .filter { f -> try { f.readText().indexOf(oldToken) >= 0 } catch (_: Exception) { false } }
+            .toList()
+        if (files.isEmpty()) return emptySet()
+        try {
+            // 替换前先把受影响文件中「打开着且未保存」的编辑器工作区落盘，避免覆盖未保存修改
+            onSaveWorkspaceBeforeReplace(files.map { it.absolutePath }.toSet())
+        } catch (e: Exception) {
+            return null // 有编辑器未保存内容，无法同步，中止
         }
+        val replacedPaths = mutableSetOf<String>()
+        for (f in files) {
+            try {
+                val oldContent = f.readText()
+                val newContent = replaceVersionToken(oldContent, oldToken, newToken)
+                if (newContent != oldContent) {
+                    f.atomicWriteText(newContent)
+                    SaveHistoryManager.record(context, f.absolutePath, oldContent, newContent)
+                    replacedPaths.add(f.absolutePath)
+                }
+            } catch (_: Exception) {}
+        }
+        return replacedPaths
     }
 
     fun save() {
         val p = parsed ?: return
 
-        // —— 版本号同步：仅用户改过版本号才触发 ——
+        // —— 版本号同步：仅用户改过版本号且新旧不同才触发，保存时统一批量替换整个项目 ——
         val oldToken = originalVersion
         val newToken = version.trim()
-        var needProjectSync = false
-        if (versionEdited) {
-            val newTitle = when {
-                oldToken.isNotBlank() -> {
-                    // 跟随原文格式：版本号前原文有空格就补空格分隔，原文紧贴（无空格）就保持紧贴，
-                    // 不做「必须加空格」的假设（如 人机的玩笑v1.6.1 不能被改成 人机的玩笑 v1.6.1）。
-                    val idx = title.indexOf(oldToken)
-                    val hadSpace = idx > 0 && title[idx - 1].isWhitespace()
-                    val base = removeVersionFromTitle(title, oldToken)
-                    if (newToken.isNotBlank()) {
-                        if (hadSpace) (base.trimEnd() + " " + newToken).trim() else base.trimEnd() + newToken
-                    } else {
-                        base.trim()
-                    }
-                }
-                newToken.isNotBlank() -> (title.trimEnd() + " " + newToken).trim() // 原标题无版本号，补一个
-                else -> title
-            }
-            if (newTitle != title) { title = newTitle; markDirty("title") }
-            // 只有旧版本号非空且不同于新值才需要项目内精确替换
-            if (oldToken.isNotBlank() && oldToken != newToken) needProjectSync = true
-        }
+        val needProjectSync = versionEdited && oldToken.isNotBlank() && oldToken != newToken
 
         val data = ModInfoData(title, description, tags, minVersion, thumbnail, sourceFolder, playExclusively)
         // 键级局部写回：只重写被编辑过的键，其余键/未知行/注释整段原样保留
@@ -539,11 +529,27 @@ fun ModInfoScreen(
                 }
                 false
             }
-            if (saved) withContext(Dispatchers.Main) {
-                edited = false // 保存成功：顶栏保存按钮熄灭
-                android.widget.Toast.makeText(context, "已保存", android.widget.Toast.LENGTH_SHORT).show()
-                originalVersion = newToken // 同步完成：避免下次保存重复触发
-                if (needProjectSync) scanAndConfirmVersionSync(oldToken, newToken)
+            if (saved) {
+                // 版本号同步：一次批量替换整个项目（含 mod-info 自身的标题/描述）
+                val syncedFiles = if (needProjectSync) replaceVersionInProject(oldToken, newToken) else null
+                withContext(Dispatchers.Main) {
+                    edited = false // 保存成功：顶栏保存按钮熄灭
+                    originalVersion = newToken // 同步完成：避免下次保存重复触发
+                    if (needProjectSync) {
+                        // 同步刷新内存表单的标题/描述，避免后续保存用旧值覆盖回退
+                        val t2 = replaceVersionToken(title, oldToken, newToken)
+                        if (t2 != title) title = t2
+                        val d2 = replaceVersionToken(description, oldToken, newToken)
+                        if (d2 != description) description = d2
+                    }
+                    val msg = when {
+                        syncedFiles === null -> "已保存，但版本号同步中止（有编辑器未保存内容）"
+                        syncedFiles.isEmpty() -> "已保存（未发现需同步版本号的文件）"
+                        else -> "已保存，已同步 ${syncedFiles.size} 个文件"
+                    }
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    if (syncedFiles?.isNotEmpty() == true) onFilesModified(syncedFiles)
+                }
             }
         }
     }
@@ -569,7 +575,7 @@ fun ModInfoScreen(
                 if (!versionEdited) versionEdited = true
                 edited = true // 点亮顶栏保存（version 是独立字段，不走 markDirty，避免污染键级写回）
             },
-            placeholder = "默认读取标题里的版本号；修改后保存会同步写入标题并在项目内精确替换"
+            placeholder = "默认读取标题里的版本号；修改后保存会同步替换整个项目里的所有旧版本号（含本文件标题/描述）"
         )
         FormField(label = "标题 title", value = title, onValueChange = { title = it; markDirty("title") }, placeholder = "模组标题，会显示到加载页面里面（版本号习惯写在标题里，如 xxx v1.6.0）")
         FormField(label = "描述 description", value = description, onValueChange = { description = it; markDirty("description") }, multiLine = true, minLines = 4, placeholder = "模组描述；原文为 \"\"\" 多行块时保持块格式，单行时换行自动转成 \\n")
@@ -648,55 +654,6 @@ fun ModInfoScreen(
         confirmButton = { TextButton(onClick = { showBackConfirm = false; onBack() }) { Text("确定") } },
         dismissButton = { TextButton(onClick = { showBackConfirm = false }) { Text("取消") } }
     )
-
-    // 版本号同步确认：对项目内精确出现的旧版本做批量替换
-    pendingVersionSync?.let { info ->
-        AlertDialog(
-            onDismissRequest = { pendingVersionSync = null },
-            title = { Text("同步版本号") },
-            text = { Text("将在 ${info.files.size} 个文件中把「${info.oldToken}」精确替换为「${info.newToken}」，是否继续？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val files = info.files
-                    val o = info.oldToken
-                    val n = info.newToken
-                    pendingVersionSync = null
-                    scope.launch(Dispatchers.IO) {
-                        var replaced = 0
-                        var aborted = false
-                        var replacedPaths = emptySet<String>()
-                        try {
-                            // 替换前先把受影响文件中「打开着且未保存」的编辑器工作区落盘，避免覆盖未保存修改
-                            onSaveWorkspaceBeforeReplace(files.map { it.absolutePath }.toSet())
-                            val collected = mutableSetOf<String>()
-                            for (f in files) {
-                                try {
-                                    val oldContent = f.readText()
-                                    val newContent = oldContent.replace(o, n)
-                                    if (newContent != oldContent) {
-                                        f.atomicWriteText(newContent)
-                                        SaveHistoryManager.record(context, f.absolutePath, oldContent, newContent)
-                                        replaced++
-                                        collected.add(f.absolutePath)
-                                    }
-                                } catch (_: Exception) {}
-                            }
-                            replacedPaths = collected
-                        } catch (e: Exception) {
-                            // 工作区落盘失败：中止替换，避免基于过期缓冲写盘覆盖未保存修改
-                            aborted = true
-                        }
-                        withContext(Dispatchers.Main) {
-                            if (!aborted && replacedPaths.isNotEmpty()) onFilesModified(replacedPaths)
-                            val msg = if (aborted) "有编辑器未保存内容，无法同步，请先保存" else "已同步 $replaced 个文件"
-                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }) { Text("继续") }
-            },
-            dismissButton = { TextButton(onClick = { pendingVersionSync = null }) { Text("取消") } }
-        )
-    }
 
     if (showImagePicker) {
         ImagePickerDialog(dir = dir, current = thumbnail, onPick = { name ->

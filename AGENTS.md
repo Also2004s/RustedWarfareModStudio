@@ -183,6 +183,8 @@ app/src/main/
 ## 五、常见陷阱（代码观察）
 
 0. **调试设备问题先查包名（血泪教训，2026-09-01 踩过）**：App 有两个 applicationId——正式版 `com.rwmodstudio`、debug 变体 `com.rwmodstudio.debug`（`app/build.gradle.kts` 里 `applicationIdSuffix = ".debug"`）。**用户说"装的是测试版"时，指的就是 debug 包**。`adb shell pm list packages | grep rwmod` 会看到两个包；查安装时间/版本时用 `adb shell dumpsys package com.rwmodstudio.debug`，**不要只查正式包**。判断"设备上是不是最新代码"，以 **debug 包的 lastUpdateTime ≥ APK 构建时间** 为准，别拿正式包的时间戳下结论。
+0'. **红旗铁律（2026-09-01 教训强化，2026-09-14 再次违反被批）**：**绝对不允许质疑用户是否装了新版本、绝对不允许质疑用户的测试流程**。用户报 bug 一律「先信用户、先自查」——直接把现象当真，研究代码/重现去修，而不是用「lastUpdateTime 对比 APK 构建时间」「是不是没装新包/没测对」这类话去怀疑用户。核对包名/版本只用于自己定位，**绝不以此为凭否定用户的测试结论或与他争辩**。之前只写了「先查包名」，没把这条显式写死，才导致再次踩雷——现在立为铁律。
+0''. **安装流程（2026-09-14 血泪教训，务必照做）**：adb 有时会把**同一台物理设备列出为多个条目**（例如 `xxx._adb-tls-connect._tcp` 和 `xxx (2)._adb-tls-connect._tcp`），它们其实是同一台设备。此时 `installDebug` 会对每个条目各装一次，后装的通常报 `User rejected permissions`——**但这经常是假失败，设备早在第一个条目安装时就已装好新包**。正确做法：**安装只针对一个设备条目**（web-tls 模式用 `adb -s <某个设备id> install -r <apk>` 单独装），一次只给一个设备安装；不要被「安装失败」误导，更不允许拿它去质疑用户是否装的是新包（见 0' 铁律）。
 1. **org.json `optString` 双坑（AiService 流式解析，2026-09-01 血泪）**：`optString("content")` 在两种情况都返回字符串 `"null"`——① key 缺失；② key 存在但值为 JSON `null`（`{"content":null}`）。**`has("content")` 只能挡①，挡不住②**：`has()` 对 JSON null 返回 true，`optString` 照样吐出 `"null"` 且非空，会通过 `isNullOrEmpty()` 检查被 append 进输出 → 界面一直显示 null。修复必须三重过滤：`delta.has("content")` + `optString` 结果 `isEmpty()` + `== "null"` 再排除（见 `AiService.postChatCompletionStream`）。同样 `extractMessageContent` 用 `takeIf { it.isNotEmpty() && it != "null" }`。
 2. **UI 分类混入 value 类别名**（如 `bool`、`Prices_Resources`、`drawLayer`）：说明误用了 `getAllSectionNames()`，改回 `getRealSectionNames()`。
 2. **切换文件后节名不更新**：`LaunchedEffect` 忘了用 `filePath` 作 key。
