@@ -193,6 +193,8 @@ fun SoraCodeEditor(
     canUndo: Boolean = false,
     canRedo: Boolean = false,
     showBottomToolbar: Boolean = true,
+    // 滚动方向上报：手指上滑(内容下滚)=1 / 下滑(内容上滚)=-1，方向反转时触发一次，供宿主联动顶部栏显隐
+    onScrollDirectionChanged: ((Int) -> Unit)? = null,
     blocklistEnabled: Boolean = true,
     blockableStringKeys: Set<String> = emptySet(),
     onCursorChange: ((Int) -> Unit)? = null,
@@ -237,7 +239,17 @@ fun SoraCodeEditor(
     // 规避 sora 在 tap 选择时会 hide() 窗口导致的 SelectionChangeEvent 重触发竞态（光标移动不弹）。
     val probeHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val probeToken = remember { object { var runnable: Runnable? = null } }
+    // 顶部栏显隐的滚动方向跟踪（跨 View 复用生命周期共享）：只统计手指按住编辑器时的手动滚动，
+    // 输入法弹出对焦、tap 光标定位、恢复视图等程序化滚动一律不计入，避免误折叠/误展开。
+    val scrollTrack = remember { object {
+        var lastY = 0
+        var dir = 0      // +1 内容下滚(手指上滑)，-1 内容上滚(手指下滑)
+        var accum = 0f   // 当前方向累计滚动距离（阈值过滤小幅拖动）
+        var toggleDir = 0 // 最近已触发上报的方向，防止同方向重复触发
+        var touching = false // 手指是否按住编辑器
+    } }
     val currentOnTextChange by rememberUpdatedState(onTextChange)
+    val currentOnScrollDirectionChanged by rememberUpdatedState(onScrollDirectionChanged)
     val currentRestoreViewStateRequest by rememberUpdatedState(restoreViewStateRequest)
     var isApplyingExternalText by remember { mutableStateOf(false) }
     // 整篇替换的稳定化代次：每次 resetTextRequest 递增，旧的 postDelayed 稳定化回调据此判定失效。
@@ -395,6 +407,11 @@ fun SoraCodeEditor(
                         editor.setSelection(line, targetColumn)
                     }
                     isApplyingExternalText = false
+                    // 换文件/恢复视图后复位顶部栏显隐的滚动跟踪，避免旧文件残留的累计值让首次拖动误触发
+                    scrollTrack.lastY = editor.getOffsetY()
+                    scrollTrack.dir = 0
+                    scrollTrack.accum = 0f
+                    scrollTrack.toggleDir = 0
                     if (restore == null) {
                         // 稳定化：setText 后的异步重排/TextMate 分析期间可能多次触发内部滚动把视角漂离目标行，
                         // 这里用少量递增延时做「光标行垂直居中」覆盖（代次校验防串扰），确保停稳在目标位置。
@@ -809,8 +826,47 @@ fun SoraCodeEditor(
                         ))
                     } catch (_: Exception) { }
                 }
+                // 手动滚动判定：仅当手指按住编辑器时产生的滚动才计入顶部栏显隐，
+                // 输入法弹出对焦等程序化滚动（此时无手指）一律忽略。返回 false 不拦截，交给 sora 正常处理。
+                setOnTouchListener { _, event ->
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> scrollTrack.touching = true
+                        android.view.MotionEvent.ACTION_UP,
+                        android.view.MotionEvent.ACTION_CANCEL -> scrollTrack.touching = false
+                    }
+                    false
+                }
                 subscribeEvent(ScrollEvent::class.java) { event, _ ->
                     reportViewState(event.editor)
+                    // 顶部栏显隐联动：只统计手指按住时的手动滚动方向 + 累计距离阈值，滚动停顿 250ms 后上报一次。
+                    // 输入法弹出对焦、tap 光标定位、恢复视图等程序化滚动（无手指按住）不计入。
+                    val st = scrollTrack
+                    val y = event.editor.getOffsetY()
+                    val dy = y - st.lastY
+                    st.lastY = y
+                    if (st.touching) {
+                        val dir = when {
+                            dy > 24f -> 1      // 内容下滚/手指上滑
+                            dy < -24f -> -1    // 内容上滚/手指下滑
+                            else -> 0
+                        }
+                        if (dir != 0) {
+                            if (dir != st.dir) {
+                                st.dir = dir
+                                st.accum = 0f
+                            }
+                            st.accum += if (dy < 0) -dy else dy
+                            // 累计超过阈值即立即上报方向（折叠是纯视觉浮层，不碰滚动，无需等滚动停顿）
+                            if (st.accum > 150f && dir != st.toggleDir) {
+                                st.toggleDir = dir
+                            }
+                        }
+                    }
+                    if (st.toggleDir != 0) {
+                        val d = st.toggleDir
+                        st.toggleDir = 0
+                        currentOnScrollDirectionChanged?.invoke(d)
+                    }
                 }
                 subscribeEvent(ContentChangeEvent::class.java) { event, _ ->
                     // 程序 setText 触发的事件只刷新按钮状态，不同步 text，避免宿主 isModified 被误标
@@ -1192,22 +1248,30 @@ private fun applyEditorColors(
     // 先计算背景明暗，用于滚动条等判断
     val isDark = android.graphics.Color.luminance(resolvedBg) < 0.5
 
-    // 深色主题下允许用户自定义 UI 高亮色（选中、当前行、匹配文本、高亮分隔符等）
-    if (highlightTheme == "dark") {
+    // 点击 () [] 等符号时的匹配高亮（光标处与配对符号）。
+    // 「深色高亮 dark」始终生效；custom 由配色数据「UI 高亮」类别内的「激活高亮」开关控制（深色预设默认勾选）。
+    // 颜色取该主题的 UI 高亮色（dark=默认深色 UI，custom=用户编辑的 UI 高亮色）。
+    val delimiterHighlightActive =
+        highlightTheme == "dark" || (highlightTheme == "custom" && darkTokenColors.highlightDelimiters)
+    if (delimiterHighlightActive) {
         try {
-            val highlight = android.graphics.Color.parseColor(darkTokenColors.ui)
+            val ui = if (highlightTheme == "dark") DarkThemeColors.Default.ui else darkTokenColors.ui
+            val highlight = android.graphics.Color.parseColor(ui)
             val highlightAlpha = (highlight and 0x00FFFFFF) or 0x44000000
             scheme.setColor(EditorColorScheme.SELECTED_TEXT_BACKGROUND, highlightAlpha)
             scheme.setColor(EditorColorScheme.MATCHED_TEXT_BACKGROUND, highlightAlpha)
-            scheme.setColor(EditorColorScheme.CURRENT_LINE, highlightAlpha)
+            // 当前行背景更淡（0x22：约 13.3%），避免整行色块过重
+            scheme.setColor(EditorColorScheme.CURRENT_LINE, (highlight and 0x00FFFFFF) or 0x22000000)
             scheme.setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND, highlight)
             scheme.setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_BACKGROUND, (highlight and 0x00FFFFFF) or 0x22000000)
+            scheme.setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_UNDERLINE, highlight)
+            scheme.setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_BORDER, highlight)
             scheme.setColor(EditorColorScheme.BLOCK_LINE_CURRENT, highlight)
             scheme.setColor(EditorColorScheme.SELECTION_INSERT, highlight)
             scheme.setColor(EditorColorScheme.SELECTION_HANDLE, highlight)
-            Log.d(TAG, "Applied dark UI highlight color: ${darkTokenColors.ui}")
+            Log.d(TAG, "Applied delimiter highlight (ui=$ui, theme=$highlightTheme, active=$delimiterHighlightActive)")
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse dark UI highlight color: ${darkTokenColors.ui}", e)
+            Log.w(TAG, "Failed to parse delimiter highlight color", e)
         }
     }
 
@@ -1301,14 +1365,13 @@ private fun createToolbar(
     val density = ctx.resources.displayMetrics.density
     val hPadding = (4 * density).toInt()
 
-    val iconBg = createToolbarIconBackground(isDarkTheme)
     items.forEach { (action, iconRes) ->
         if (iconRes != null) {
             val btn = ImageButton(ctx).apply {
                 tag = action.name
                 setImageDrawable(ContextCompat.getDrawable(ctx, iconRes))
                 setColorFilter(iconColor, android.graphics.PorterDuff.Mode.SRC_IN)
-                background = iconBg.constantState?.newDrawable()?.mutate()
+                ripple?.constantState?.newDrawable()?.mutate()?.let { background = it }
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 setPadding(hPadding, 0, hPadding, 0)
@@ -1321,7 +1384,7 @@ private fun createToolbar(
                 text = "@"
                 textSize = 15f
                 setTextColor(iconColor)
-                background = iconBg.constantState?.newDrawable()?.mutate()
+                ripple?.constantState?.newDrawable()?.mutate()?.let { background = it }
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 setPadding(0, 0, 0, 0)
                 setOnClickListener { onToolbarAction?.invoke(action) }
@@ -1331,14 +1394,6 @@ private fun createToolbar(
     }
 
     return toolbar
-}
-
-private fun createToolbarIconBackground(isDarkTheme: Boolean): android.graphics.drawable.Drawable {
-    return android.graphics.drawable.GradientDrawable().apply {
-        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        cornerRadius = 8f
-        setColor(if (isDarkTheme) 0x30FFFFFF else 0x20000000)
-    }
 }
 
 private fun resolveRipple(ctx: Context): android.graphics.drawable.Drawable? {

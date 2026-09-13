@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,114 +51,108 @@ fun DarkTokenColorDialog(
         pickerSeed = colorForCategory(colors, selectedCategory)
     }
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("自定义高亮", fontWeight = FontWeight.Medium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { showSavePresetDialog = true }) {
-                        Text("保存预设", color = RustedPrimary)
-                    }
-                    TextButton(onClick = { showPresetDialog = true }) {
-                        Text("使用预设", color = RustedPrimary)
-                    }
-                }
-            }
-        },
-        text = {
-            Column(
-                Modifier
+        title = "自定义高亮",
+        actions = {
+            DialogActionButton("保存预设") { showSavePresetDialog = true }
+            DialogActionButton("使用预设") { showPresetDialog = true }
+            Spacer(Modifier.weight(1f))
+            DialogActionButton("应用") { onConfirm(colors) }
+        }
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Box(
+                modifier = Modifier
                     .fillMaxWidth()
+                    .height(110.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text("选择类型", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp)
-                        .verticalScroll(rememberScrollState())
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val categories = listOf("ui", "plainText") + DarkThemeColors.targetScopes.keys.toList()
-                        categories.forEach { category ->
-                            val color = colorForCategory(colors, category)
-                            val label = DarkThemeColors.labels[category] ?: category
-                            val selected = selectedCategory == category
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (selected) RustedPrimary.copy(alpha = 0.15f) else RustedSurface,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (selected) RustedPrimary else RustedOnBackground.copy(alpha = 0.15f)
-                                ),
-                                modifier = Modifier.clickable { selectedCategory = category }
+                    val categories = listOf("ui", "plainText") + DarkThemeColors.targetScopes.keys.toList()
+                    categories.forEach { category ->
+                        val color = colorForCategory(colors, category)
+                        val label = DarkThemeColors.labels[category] ?: category
+                        val isUi = category == "ui"
+                        val selected = selectedCategory == category
+                        // 仅「UI 高亮」显示勾（激活标记）；其余类别选中沿用高亮边框样式、不显示勾
+                        val active = if (isUi) colors.highlightDelimiters else selected
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (active) RustedPrimary.copy(alpha = 0.15f) else RustedSurface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (active) RustedPrimary else RustedOnBackground.copy(alpha = 0.15f)
+                            ),
+                            modifier = Modifier.clickable {
+                                if (isUi) {
+                                    if (colors.highlightDelimiters && selectedCategory == "ui") {
+                                        // 已激活：取消勾选并取消选中
+                                        colors = colors.copy(highlightDelimiters = false)
+                                        selectedCategory = ""
+                                    } else {
+                                        colors = colors.copy(highlightDelimiters = true)
+                                        selectedCategory = "ui"
+                                    }
+                                } else {
+                                    selectedCategory = category
+                                }
+                            }
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .size(14.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(parseHexColor(color))
-                                            .border(1.dp, RustedOnBackground.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(label, fontSize = 12.sp, color = RustedOnBackground)
+                                Box(
+                                    Modifier
+                                        .size(14.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(parseHexColor(color))
+                                        .border(1.dp, RustedOnBackground.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(label, fontSize = 12.sp, color = RustedOnBackground)
+                                if (isUi && colors.highlightDelimiters) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = RustedPrimary)
                                 }
                             }
                         }
                     }
                 }
-
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "${DarkThemeColors.labels[selectedCategory] ?: selectedCategory} · $currentColor",
-                    fontSize = 12.sp,
-                    color = RustedOnBackground.copy(alpha = 0.6f)
-                )
-                Spacer(Modifier.height(6.dp))
-
-                if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
-                    ColorWheelHSV(
-                        initialColor = pickerSeed,
-                        onColorChanged = { newColor ->
-                            colors = updateColor(colors, selectedCategory, newColor)
-                        },
-                        wheelSize = 180.dp,
-                        showHexInput = false
-                    )
-                } else {
-                    ColorWheelPicker(
-                        initialColor = pickerSeed,
-                        onColorChanged = { newColor ->
-                            colors = updateColor(colors, selectedCategory, newColor)
-                        },
-                        wheelSize = 180.dp,
-                        showHexInput = false
-                    )
-                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(colors) }) { Text("应用", color = RustedPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-        containerColor = RustedSurface
-    )
+
+            Spacer(Modifier.height(8.dp))
+
+            if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
+                ColorWheelHSV(
+                    initialColor = pickerSeed,
+                    onColorChanged = { newColor ->
+                        colors = updateColor(colors, selectedCategory, newColor)
+                    },
+                    wheelSize = 180.dp,
+                    showHexInput = false
+                )
+            } else {
+                ColorWheelPicker(
+                    initialColor = pickerSeed,
+                    onColorChanged = { newColor ->
+                        colors = updateColor(colors, selectedCategory, newColor)
+                    },
+                    wheelSize = 180.dp,
+                    showHexInput = false
+                )
+            }
+        }
+    }
 
     if (showPresetDialog) {
         PresetPickerDialog(
@@ -198,109 +193,97 @@ private fun PresetPickerDialog(
         "纯净" to DarkThemeColors.PresetPure
     )
     val userPresets = ThemeState.highlightPresets
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text("使用预设", fontWeight = FontWeight.Medium) },
-        text = {
-            Column {
-                builtinPresets.forEach { (name, preset) ->
-                    Surface(
-                        modifier = Modifier
+        title = "使用预设",
+        actions = {
+            if (onSaveCurrent != null) {
+                DialogActionButton("保存当前为预设") { onSaveCurrent() }
+            }
+        }
+    ) {
+        Column {
+            builtinPresets.forEach { (name, preset) ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(preset) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = RustedSurface
+                ) {
+                    Row(
+                        Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(preset) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = RustedSurface
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
+                        Box(
                             Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(20.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(parseHexColor(preset.section))
-                            )
-                            Text(name, fontSize = 14.sp, color = RustedOnBackground)
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-                if (userPresets.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("我的预设", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                    Spacer(Modifier.height(4.dp))
-                    userPresets.forEach { preset ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSelect(preset.colors) }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(20.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(parseHexColor(preset.colors.section))
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                preset.name,
-                                fontSize = 14.sp,
-                                color = RustedOnBackground,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = { confirmDelete = preset }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "删除 ${preset.name}",
-                                    tint = RustedOnBackground.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
+                                .size(20.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(parseHexColor(preset.section))
+                        )
+                        Text(name, fontSize = 14.sp, color = RustedOnBackground)
                     }
                 }
-                if (onSaveCurrent != null) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onSaveCurrent,
-                        modifier = Modifier.fillMaxWidth()
+                Spacer(Modifier.height(4.dp))
+            }
+            if (userPresets.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("我的预设", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
+                Spacer(Modifier.height(4.dp))
+                userPresets.forEach { preset ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onSelect(preset.colors) }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("保存当前为预设", color = RustedPrimary)
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(parseHexColor(preset.colors.section))
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            preset.name,
+                            fontSize = 14.sp,
+                            color = RustedOnBackground,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { confirmDelete = preset }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除 ${preset.name}",
+                                tint = RustedOnBackground.copy(alpha = 0.5f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-        containerColor = RustedSurface
-    )
+        }
+    }
 
     confirmDelete?.let { preset ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("删除预设", fontWeight = FontWeight.Medium) },
-            text = { Text("确定删除预设「${preset.name}」？") },
-            confirmButton = {
-                TextButton(onClick = {
+            title = "删除预设",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { confirmDelete = null }
+                DialogActionButton("删除", color = MaterialTheme.colorScheme.error) {
                     HighlightThemeManager.deletePreset(preset.id)
                     Toast.makeText(context, "已删除预设「${preset.name}」", Toast.LENGTH_SHORT).show()
                     confirmDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("取消") }
-            },
-            containerColor = RustedSurface
-        )
+                }
+            }
+        ) {
+            Text("确定删除预设「${preset.name}」？")
+        }
     }
 }
 
@@ -315,24 +298,12 @@ private fun SavePresetDialog(
     var name by remember { mutableStateOf(HighlightThemeManager.nextDefaultName()) }
     var conflict by remember { mutableStateOf<HighlightPreset?>(null) }
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text("保存为预设", fontWeight = FontWeight.Medium) },
-        text = {
-            Column {
-                Text("把当前配色保存为预设，之后可在高亮主题中直接切换。", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("预设名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
+        title = "保存为预设",
+        actions = {
+            DialogActionButton("取消", color = RustedOnBackground) { onDismiss() }
+            DialogActionButton("保存") {
                 when (val r = HighlightThemeManager.addPreset(name, colors, isDark, "saved")) {
                     is HighlightThemeManager.AddResult.Added -> {
                         Toast.makeText(context, "已保存预设「${r.preset.name}」", Toast.LENGTH_SHORT).show()
@@ -344,32 +315,38 @@ private fun SavePresetDialog(
                     is HighlightThemeManager.AddResult.InvalidName ->
                         Toast.makeText(context, r.reason, Toast.LENGTH_SHORT).show()
                 }
-            }) { Text("保存", color = RustedPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-        containerColor = RustedSurface
-    )
+            }
+        }
+    ) {
+        Column {
+            Text("把当前配色保存为预设，之后可在高亮主题中直接切换。", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("预设名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 
     conflict?.let { existing ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { conflict = null },
-            title = { Text("覆盖预设", fontWeight = FontWeight.Medium) },
-            text = { Text("已存在同名预设「${existing.name}」，是否用当前配色覆盖？") },
-            confirmButton = {
-                TextButton(onClick = {
+            title = "覆盖预设",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { conflict = null }
+                DialogActionButton("覆盖") {
                     HighlightThemeManager.updatePreset(existing.id, colors, isDark)
                     Toast.makeText(context, "已覆盖预设「${existing.name}」", Toast.LENGTH_SHORT).show()
                     conflict = null
                     onDismiss()
-                }) { Text("覆盖", color = RustedPrimary) }
-            },
-            dismissButton = {
-                TextButton(onClick = { conflict = null }) { Text("取消") }
-            },
-            containerColor = RustedSurface
-        )
+                }
+            }
+        ) {
+            Text("已存在同名预设「${existing.name}」，是否用当前配色覆盖？")
+        }
     }
 }
 

@@ -60,7 +60,10 @@ import kotlinx.serialization.json.Json
     val bracketRound: String = "#AD99B7",
     val bracketCurly: String = "#F1D7FF",
 
-    val variable: String = "#9CDCFE"
+    val variable: String = "#9CDCFE",
+
+    /** 是否激活「点击符号（() [] 等）匹配高亮」：勾选后点击符号用 [ui]（UI 高亮）色高亮，与深色高亮一致。默认开启（深色预设默认勾选）。 */
+    val highlightDelimiters: Boolean = true
 ) {
     companion object {
         val Default = DarkThemeColors()
@@ -104,7 +107,8 @@ import kotlinx.serialization.json.Json
             bracket = "#deae12",
             bracketRound = "#deae12",
             bracketCurly = "#99B7AD",
-            variable = "#001080"
+            variable = "#001080",
+            highlightDelimiters = false
         )
 
         /**
@@ -146,7 +150,8 @@ import kotlinx.serialization.json.Json
             bracket = "#FF8855",
             bracketRound = "#66DD99",
             bracketCurly = "#2492db",
-            variable = "#aab9e9"
+            variable = "#aab9e9",
+            highlightDelimiters = false
         )
 
         val labels = mapOf(

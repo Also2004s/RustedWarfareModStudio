@@ -65,6 +65,11 @@ fun AssistantChatTab(
         if (projectRoot.isBlank()) "未打开项目" else File(projectRoot).name
     }
 
+    // 模组目标来源（mod-info.txt）是否已存在：缺失时提示用户补充
+    val hasModInfo = remember(projectRoot) {
+        projectRoot.isNotBlank() && File(projectRoot, "mod-info.txt").isFile
+    }
+
     /** 刷新顶部统计（diff 文件数 / 待办数） */
     fun refreshContext() {
         scope.launch(Dispatchers.IO) {
@@ -151,6 +156,14 @@ fun AssistantChatTab(
                 "当前未打开项目，仅提供近期修改 diff；请先在文件浏览中打开项目以维护待办。",
                 fontSize = 10.sp,
                 color = RustedOnBackground.copy(alpha = 0.45f),
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+        }
+        if (projectRoot.isNotBlank() && !hasModInfo) {
+            Text(
+                "在项目根目录放 mod-info.txt（写清模组方向）可让助理更懂你的模组",
+                fontSize = 10.sp,
+                color = RustedOnBackground.copy(alpha = 0.4f),
                 modifier = Modifier.padding(bottom = 6.dp)
             )
         }

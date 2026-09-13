@@ -238,6 +238,13 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.VerticalAlignTop,
+                title = "顶部浮层滚动",
+                checked = SettingsManager.devTopBarsFold,
+                onCheckedChange = { SettingsManager.devTopBarsFold = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.GridOn,
                 title = "坐标可视化",
                 checked = SettingsManager.devCoordVisual,

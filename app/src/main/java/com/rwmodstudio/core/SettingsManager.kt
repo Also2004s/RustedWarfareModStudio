@@ -827,6 +827,10 @@ object SettingsManager {
     var devTabBar: Boolean
         get() = settings.getBoolean("dev_tab_bar", true)
         set(value) = settings.edit().putBoolean("dev_tab_bar", value).apply()
+    /** 顶部浮层：滚动隐藏/展开全局菜单栏+Tab栏（默认关，仅编辑器页生效） */
+    var devTopBarsFold: Boolean
+        get() = settings.getBoolean("dev_top_bars_fold", false)
+        set(value) = settings.edit().putBoolean("dev_top_bars_fold", value).apply()
     /** 小菜单栏显示复制文件名/路径 */
     var devShowCopyPath: Boolean
         get() = settings.getBoolean("dev_show_copy_path", false)

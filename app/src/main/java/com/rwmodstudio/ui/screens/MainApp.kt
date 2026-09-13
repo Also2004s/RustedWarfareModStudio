@@ -5,6 +5,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -32,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toArgb
@@ -442,12 +444,15 @@ fun MainApp() {
     var autoWrap by remember { mutableStateOf(SettingsManager.autoWrap) }
     var smartWrap by remember { mutableStateOf(SettingsManager.smartWrap) }
     var defaultPath by remember { mutableStateOf(SettingsManager.defaultModPath()) }
+    // 编辑器页顶部两栏（全局菜单栏 + Tab 栏）显示状态：由编辑区滚动方向驱动，仅在编辑器页生效
+    var editorTopBarsShown by remember { mutableStateOf(true) }
     var browserStartPath by rememberSaveable { mutableStateOf("") }
     // 打开外部传入的文件（外部 Intent / 保存确认后共用入口）
     fun openExternalFile(name: String, path: String) {
         editorJumpLine = -1
         selectedFile = name to path
         browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+        editorTopBarsShown = true
         currentScreen = Screen.EDITOR
     }
 
@@ -456,6 +461,7 @@ fun MainApp() {
         editorJumpLine = -1
         selectedFile = name to path
         browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+        editorTopBarsShown = true
         if (name.equals("mod-info.txt", ignoreCase = true)) {
             pushScreen(Screen.MOD_INFO)
         } else {
@@ -735,6 +741,13 @@ fun MainApp() {
             }
         }
     ) {
+        // 顶栏折叠动画进度（Scaffold 外层共享）：0=显示，1=折叠收起；topBar 高度与编辑区内容平移都随它联动。
+        // 浮层开关关闭时强制 0（顶栏常显，不折叠）。
+        val topFold by animateFloatAsState(
+            targetValue = if (currentScreen != Screen.EDITOR || editorTopBarsShown || !SettingsManager.devTopBarsFold) 0f else 1f,
+            animationSpec = tween(200),
+            label = "topBarFold"
+        )
         Scaffold(
             topBar = {
                 val containerColor = if (currentScreen == Screen.EDITOR) Color(0xFF1E1E1E) else RustedBackground
@@ -755,8 +768,15 @@ fun MainApp() {
                     Screen.TODO_LIST -> "待办"
                     Screen.MOD_INFO -> "模组信息"
                 }
+                // 编辑器页的全局菜单栏改为浮层（渲染在 Screen.EDITOR 分支，随 topFold 上滑隐藏），
+                // 此处仅渲染非编辑器页的顶栏，始终可见、不参与折叠。
+                if (currentScreen != Screen.EDITOR) {
                 Row(
-                    Modifier.fillMaxWidth().height(44.dp).background(containerColor).padding(horizontal = 4.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .background(containerColor)
+                        .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = {
@@ -896,6 +916,7 @@ fun MainApp() {
                             )
                         }
                     }
+                }
                 }
             }
         ) { padding ->
@@ -1125,6 +1146,9 @@ fun MainApp() {
                                         }
                                             },
                                             onShowRecent = { showRecentSheet = true; recentSourceScreen = Screen.EDITOR },
+                                            topBarsShown = editorTopBarsShown,
+                                            topFold = topFold,
+                                            onTopBarsScroll = { dir -> if (SettingsManager.devTopBarsFold) editorTopBarsShown = dir < 0 },
                                             jumpLine = if (path == activePath) editorJumpLine else -1,
                                             jumpTick = if (path == activePath) editorJumpTick else 0,
                                             jumpColumnStart = if (path == activePath) editorJumpColumnStart else -1,
@@ -1141,8 +1165,53 @@ fun MainApp() {
                                         )
                                     }
                                 }
+                            // 编辑器页全局菜单栏浮层：叠加在编辑器上方，随 topFold 上滑隐藏（44dp），
+                            // 不占布局空间，编辑器始终全屏、滚动完全不受折叠影响
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopStart)
+                                    .fillMaxWidth()
+                                    .offset { IntOffset(0, (-44.dp * topFold).roundToPx()) }
+                                    .clipToBounds()
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .alpha(1 - topFold)
+                                        .background(Color(0xFF1E1E1E))
+                                        .padding(horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(onClick = { showBookmarkPanel = !showBookmarkPanel }) { Icon(Icons.Default.Menu, null, tint = Color.White) }
+                                    Spacer(Modifier.weight(1f))
+                                    // 钉子：标记/取消标记当前文件为书签
+                                    val currentPathMaybe = selectedFile?.second ?: ""
+                                    val currentIsBookmarked = (bookmarkTick >= 0) && currentPathMaybe.isNotEmpty() && BookmarkManager.isBookmarked(currentPathMaybe)
+                                    IconButton(onClick = {
+                                        val sf = selectedFile
+                                        if (sf != null) { BookmarkManager.toggle(sf.second, sf.first); bookmarkTick++ }
+                                    }, modifier = Modifier.size(36.dp)) {
+                                        Icon(if (currentIsBookmarked) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder, "书签当前文件", Modifier.size(18.dp), tint = if (currentIsBookmarked) RustedSecondary else Color.White.copy(alpha = 0.7f))
+                                    }
+                                    IconButton(onClick = { editorSaveTrigger++; showRecentSheet = true; recentSourceScreen = Screen.EDITOR }, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.Default.History, "最近", Modifier.size(18.dp), tint = Color.White)
+                                    }
+                                    IconButton(onClick = { editorSearchTrigger++ }, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.Default.Search, "查找替换", Modifier.size(20.dp), tint = Color.White)
+                                    }
+                                    // 保存：白色图标，仅在文件有修改（可保存）时亮起
+                                    IconButton(
+                                        onClick = { if (editorModified) editorSaveTrigger++ },
+                                        enabled = editorModified,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.Save, "保存", Modifier.size(20.dp), tint = Color.White.copy(alpha = if (editorModified) 1f else 0.3f))
+                                    }
+                                }
                             }
                         }
+                    }
                     }
                     Screen.PROJECT_MANAGER -> {
                         val root = projectRoot.ifEmpty { defaultPath }

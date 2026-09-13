@@ -78,7 +78,7 @@ fun AppDialog(
     onDismissRequest: () -> Unit,
     title: String,
     actions: (@Composable RowScope.() -> Unit)? = null,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     content: @Composable () -> Unit
 ) {
     Dialog(onDismissRequest = onDismissRequest) {
@@ -91,9 +91,9 @@ fun AppDialog(
             tonalElevation = 0.dp
         ) {
             Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 0.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = RustedOnBackground, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismissRequest, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(18.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
+                    IconButton(onClick = onDismissRequest, Modifier.size(30.dp)) { Icon(Icons.Default.Close, null, Modifier.size(16.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
                 }
                 HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                 Box(Modifier.fillMaxWidth().padding(contentPadding)) {
@@ -101,12 +101,29 @@ fun AppDialog(
                 }
                 if (actions != null) {
                     HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.06f))
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 0.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         actions()
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * 紧凑的弹窗操作按钮：缩小上下内边距，让底部操作行更贴分隔线。
+ */
+@Composable
+fun DialogActionButton(
+    text: String,
+    color: Color = RustedPrimary,
+    onClick: () -> Unit
+) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+    ) {
+        Text(text, color = color, fontSize = 14.sp)
     }
 }
 

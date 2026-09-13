@@ -25,54 +25,42 @@ fun ColorPickerDialog(
 ) {
     var picked by remember { mutableStateOf(initialColor) }
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.Medium) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-
-                if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
-                    // 开发者模式：HSV 取色盘（左色盘 + 右滑杆，支持透明度）
-                    ColorWheelHSV(
-                        initialColor = initialColor,
-                        onColorChanged = { picked = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        wheelSize = 180.dp,
-                        showHexInput = true
-                    )
-                } else {
-                    ColorWheelPicker(
-                        initialColor = initialColor,
-                        onColorChanged = { picked = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        wheelSize = 180.dp,
-                        showHexInput = true
-                    )
-                }
+        title = title,
+        actions = {
+            if (showInsertButton && onInsert != null) {
+                DialogActionButton("插入文本") { onInsert(picked); onDismiss() }
             }
-        },
-        confirmButton = {
-            Row {
-                if (showInsertButton && onInsert != null) {
-                    TextButton(
-                        onClick = { onInsert(picked); onDismiss() }
-                    ) { Text("插入文本", color = RustedPrimary) }
-                }
-                // 符号栏调色盘仅插入、不应用背景色时隐藏「应用」按钮
-                if (showApplyButton) {
-                    TextButton(
-                        onClick = { onConfirm(picked) }
-                    ) { Text("应用", color = RustedPrimary) }
-                }
+            // 符号栏调色盘仅插入、不应用背景色时隐藏「应用」按钮
+            if (showApplyButton) {
+                DialogActionButton("应用") { onConfirm(picked) }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-        containerColor = RustedSurface
-    )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
+                // 开发者模式：HSV 取色盘（左色盘 + 右滑杆，支持透明度）
+                ColorWheelHSV(
+                    initialColor = initialColor,
+                    onColorChanged = { picked = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    wheelSize = 180.dp,
+                    showHexInput = true
+                )
+            } else {
+                ColorWheelPicker(
+                    initialColor = initialColor,
+                    onColorChanged = { picked = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    wheelSize = 180.dp,
+                    showHexInput = true
+                )
+            }
+        }
+    }
 }

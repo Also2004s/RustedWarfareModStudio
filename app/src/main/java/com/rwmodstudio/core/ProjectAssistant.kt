@@ -18,9 +18,9 @@ object ProjectAssistant {
     private const val TAG = "ProjectAssistant"
 
     /** diff 上下文：参与的文件数量上限 */
-    private const val MAX_FILES = 20
+    private const val MAX_FILES = 10
     /** 单个文件展示的差异行上限 */
-    private const val MAX_DIFF_LINES_PER_FILE = 25
+    private const val MAX_DIFF_LINES_PER_FILE = 10
     /** 聊天记录保留条数上限 */
     private const val MAX_CHAT_MESSAGES = 30
 
@@ -44,18 +44,30 @@ object ProjectAssistant {
     /**
      * 构建项目 diff 摘要：对 projectRoot（为空则全部）内近期保存的文件，
      * 取「最早保存前 → 最近保存后」做行级 diff，生成供 AI 阅读的文本。
-     * 带 3 秒 TTL 缓存，防止每次发送重复做昂贵的大文件 LCS。
+     *
+     * @param includeLines 是否包含具体差异行；false 时只给「文件 + 增减行数」摘要（普通对话用，省 token 提速）。
+     * 带 3 秒 TTL 缓存（区分 includeLines），防止每次发送重复做昂贵的大文件 LCS。
      */
-    fun buildDiffContext(context: Context, projectRoot: String, recentFiles: List<String>): String {
+    fun buildDiffContext(
+        context: Context,
+        projectRoot: String,
+        recentFiles: List<String>,
+        includeLines: Boolean = true
+    ): String {
         val now = System.currentTimeMillis()
-        val key = projectRoot.ifBlank { "__global__" }
+        val key = projectRoot.ifBlank { "__global__" } + "|lines=$includeLines"
         diffCache[key]?.let { if (now - it.at < DIFF_TTL_MS) return it.text }
-        val text = buildDiffContextInner(context, projectRoot, recentFiles)
+        val text = buildDiffContextInner(context, projectRoot, recentFiles, includeLines)
         diffCache[key] = DiffCacheEntry(now, text)
         return text
     }
 
-    private fun buildDiffContextInner(context: Context, projectRoot: String, recentFiles: List<String>): String {
+    private fun buildDiffContextInner(
+        context: Context,
+        projectRoot: String,
+        recentFiles: List<String>,
+        includeLines: Boolean
+    ): String {
         val rootPrefix = if (projectRoot.isNotBlank()) {
             runCatching { File(projectRoot).canonicalPath + File.separator }.getOrDefault("")
         } else ""
@@ -76,6 +88,7 @@ object ProjectAssistant {
             val added = ops.count { it.type == '+' }
             val removed = ops.count { it.type == '-' }
             sb.append("\n文件：${displayPath(path, projectRoot)}（+$added / -$removed）\n")
+            if (!includeLines) continue
             val shown = ops.filter { it.type != ' ' }.take(MAX_DIFF_LINES_PER_FILE)
             shown.forEach { op ->
                 val sign = if (op.type == '+') "+" else "-"
@@ -88,13 +101,14 @@ object ProjectAssistant {
         return sb.toString()
     }
 
-    /** 待办上下文：当前项目的待办列表 */
+    /** 待办上下文：当前项目的待办列表（最多注入前 20 项，控制输入 token） */
     fun buildTodosText(projectPath: String): String {
         val todos = TodoManager.load(projectPath)
         if (todos.isEmpty()) return "（当前项目暂无待办）"
+        val shown = todos.take(20)
         val sb = StringBuilder()
-        sb.append("【当前待办】（共 ${todos.size} 项）\n")
-        todos.forEachIndexed { index, t ->
+        sb.append("【当前待办】（共 ${todos.size} 项，列出前 ${shown.size} 项）\n")
+        shown.forEachIndexed { index, t ->
             val mark = if (t.done) "[x]" else "[ ]"
             val priority = when (t.priority) {
                 1 -> "重要"
@@ -106,6 +120,20 @@ object ProjectAssistant {
             sb.append("\n")
         }
         return sb.toString()
+    }
+
+    /**
+     * 读取项目根目录的 mod-info.txt 作为【模组目标】注入助理上下文。
+     * 文件不存在/为空返回 null；内容限 1500 字符（超出截断）。须在 IO 线程调用。
+     */
+    fun readModInfo(projectRoot: String): String? {
+        if (projectRoot.isBlank()) return null
+        val f = File(projectRoot, "mod-info.txt")
+        if (!f.isFile) return null
+        return runCatching {
+            val text = f.readText(Charsets.UTF_8).trim()
+            if (text.isEmpty()) null else text.take(1500)
+        }.getOrNull()
     }
 
     private fun displayPath(path: String, projectRoot: String): String {
@@ -123,9 +151,9 @@ object ProjectAssistant {
 
     // ==================== 项目文件索引 ====================
 
-    private const val MAX_INDEX_FILES = 50
-    private const val MAX_SECTIONS_PER_FILE = 10
-    private const val INDEX_CHAR_BUDGET = 8_000
+    private const val MAX_INDEX_FILES = 25
+    private const val MAX_SECTIONS_PER_FILE = 6
+    private const val INDEX_CHAR_BUDGET = 5_000
 
     private val indexRegex = Regex("""^\s*\[([^\]]+)\]""")
 

@@ -10,12 +10,6 @@ import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,15 +32,17 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
@@ -55,6 +51,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -183,6 +180,12 @@ fun EditorScreen(
     saveTrigger: Int = 0,
     onSaveTriggerConsumed: () -> Unit = {},
     onShowRecent: (() -> Unit)? = null,
+    // 顶部两栏（全局菜单栏 + Tab 栏）是否显示：由编辑区滚动方向驱动，宿主持有状态
+    topBarsShown: Boolean = true,
+    // 顶栏折叠动画进度（宿主驱动）：0=显示，1=折叠收起；Tab 栏高度与编辑区内容平移都随它联动
+    topFold: Float = 0f,
+    // 编辑区滚动方向上报（SoraCodeEditor 透传）：1=上滑/内容下滚，-1=下滑/内容上滚
+    onTopBarsScroll: ((Int) -> Unit)? = null,
     jumpLine: Int = -1,
     jumpTick: Int = 0,
     jumpColumnStart: Int = -1,
@@ -401,6 +404,20 @@ fun EditorScreen(
     var pendingRestoreViewState by remember(filePath) { mutableStateOf<EditorViewState?>(null) }
     // 编辑器引用：View 复用（切换文件不销毁 View），editor 对象保持不变，故不随 filePath 重置。
     var editorRef by remember { mutableStateOf<CodeEditor?>(null) }
+    // 折叠/展开动画期间关闭「尺寸变化自动滚动到光标」：内边距联动会让视图高度变化，
+    // sora 的 adjustToSelectionOnResize 会把视角拽到光标位置；动画结束 250ms 后恢复。
+    LaunchedEffect(topBarsShown) {
+        editorRef?.let { ed ->
+            try { ed.getProps().adjustToSelectionOnResize = false } catch (_: Exception) { }
+        }
+    }
+    LaunchedEffect(topFold) {
+        if (topFold <= 0f || topFold >= 1f) {
+            editorRef?.let { ed ->
+                try { ed.postDelayed({ ed.getProps().adjustToSelectionOnResize = true }, 250) } catch (_: Exception) { }
+            }
+        }
+    }
     // 供离开文件时捕获视图状态：不随 filePath 重置。view 由 SoraCodeEditor 复用，
     // onReady 同步刷新，onDispose 时仍指向离开前的编辑器，可读到真实光标/滚动。
     val editorViewRef = remember { mutableStateOf<CodeEditor?>(null) }
@@ -1034,13 +1051,23 @@ fun EditorScreen(
 
     // 非 edge-to-edge + adjustResize：系统在键盘弹出时顶高窗口即缩小编辑器，不加 imePadding（避免双重削减），
     // sora 感知编辑器尺寸变化自动校正光标，此为本仓库验证过的流畅方案。
-    Column(modifier.fillMaxSize().background(RustedBackground)) {
-        // Tab bar（仅前台实例显示）
+    Box(Modifier.fillMaxSize().background(Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark)))) {
+        // Tab bar（仅前台实例显示）：浮层叠加在编辑器上方，位于全局菜单栏（44dp）之下，
+        // 随 topFold 上滑隐藏；不占布局空间，编辑器始终全屏、滚动完全不受折叠影响。
         if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
+            Box(
+                Modifier
+                    .zIndex(1f)
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .offset { IntOffset(0, (44.dp - 66.dp * topFold).roundToPx()) }
+                    .clipToBounds()
+            ) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .height(22.dp)
+                    .alpha(1 - topFold)
                     .background(RustedSurface.copy(alpha = 0.5f)),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1197,6 +1224,7 @@ fun EditorScreen(
                 }
             }
         }
+            }
         }
         // 节名显示栏已并入顶部 tab 栏右侧（只显示节名）
         // 维持补全器当前文件路径与项目根（供图片/音效「同目录裸名、跨目录 ROOT:」判定）
@@ -1204,8 +1232,13 @@ fun EditorScreen(
             cp?.currentFilePath = filePath
             cp?.currentProjectRoot = projectRoot.ifEmpty { SettingsManager.defaultModPath() }
         }
-        // Editor - 占满剩余空间
-        Box(Modifier.weight(1f)) {
+        // Editor - 顶部内边距随折叠动画联动（66→0）：顶栏显示时内容从顶栏下方开始（文档开头不被遮挡），
+        // 顶栏隐藏时内边距归零、内容填满全屏，隐藏才有意义；滚动偏移始终不变，视图仅高度变化、宽度不变不会重排换行。
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 66.dp else 44.dp) * (1 - topFold))
+        ) {
             if (contentLoaded) {
                 Box(Modifier.fillMaxSize()) {
                     SoraCodeEditor(
@@ -1238,6 +1271,7 @@ fun EditorScreen(
                         canUndo = canUndo,
                         canRedo = canRedo,
                         showBottomToolbar = editingBarShown,
+                        onScrollDirectionChanged = onTopBarsScroll,
                         blocklistEnabled = SettingsManager.translationBlockEnabled && SettingsManager.devLightbulbEnabled,
                         blockableStringKeys = blockableStringKeys,
                         onCursorChange = { cursorPos = it },
@@ -1887,19 +1921,19 @@ fun EditorScreen(
                 },
                 title = "继承链",
                 actions = {
-                    TextButton(onClick = {
+                    DialogActionButton("复制全部", color = RustedOnBackground) {
                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("继承链", inheritanceText))
                         showInheritanceView = false
                         // 只读编辑器销毁后重放主编辑器自定义背景色
                         editorThemeRefreshTick++
-                    }) { Text("复制全部", fontSize = 13.sp) }
+                    }
                     Spacer(Modifier.width(4.dp))
-                    TextButton(onClick = {
+                    DialogActionButton("关闭", color = RustedOnBackground) {
                         showInheritanceView = false
                         // 只读编辑器销毁后重放主编辑器自定义背景色
                         editorThemeRefreshTick++
-                    }) { Text("关闭", fontSize = 13.sp) }
+                    }
                 }
             ) {
                 ReadOnlyCodeEditor(
@@ -1991,7 +2025,7 @@ fun EditorScreen(
             onDismissRequest = { activePopup = ""; showCompletionEditor = false },
             title = "代码提示",
             actions = {
-                TextButton(onClick = { activePopup = "" }) { Text("关闭") }
+                DialogActionButton("关闭", color = RustedOnBackground) { activePopup = "" }
             }
         ) {
             var qr by remember { mutableStateOf(hintQuery) }

@@ -57,7 +57,7 @@ object AssistantWorkCoordinator {
         flow.value = flow.value.copy(messages = newMessages, sending = true, phase = "", pending = "", reasoning = "", todoApplied = null)
 
         RwModApplication.getInstance().applicationScope.launch {
-            val system = buildContext(projectRoot, appContext) { p ->
+            val system = buildContext(projectRoot, appContext, input) { p ->
                 flow.value = flow.value.copy(phase = p)
             }
             // 流式增量节流：约 80ms 合并一次写入共享状态
@@ -65,8 +65,8 @@ object AssistantWorkCoordinator {
             var lastEmit = 0L
             val result = AiService.streamAssistantChat(
                 system = system,
-                // 只带最近 12 条对话（新鲜上下文已含当前 diff/待办/文件结构/理解），控制输入 token 降首字延迟
-                messages = newMessages.takeLast(12),
+                // 只带最近 6 条对话（新鲜上下文已含当前模组目标/diff/待办/文件结构/理解），控制输入 token 降首字延迟
+                messages = newMessages.takeLast(6),
                 onChunk = { c ->
                     buffer.append(c)
                     val now = System.currentTimeMillis()
@@ -117,16 +117,34 @@ object AssistantWorkCoordinator {
         }
     }
 
-    /** 组装本次发送用的最新项目上下文（diff + 待办 + 文件结构 + 项目理解），IO 线程调用 */
-    private suspend fun buildContext(projectRoot: String, context: Context, onPhase: (String) -> Unit): String =
+    /**
+     * 组装本次发送用的最新项目上下文（模组目标 + diff + 待办 + 文件结构 + 项目理解），IO 线程调用。
+     * 按用户消息内容做「按需上下文」：聊一般问题用精简（diff 只给文件+增减行数、不挂文件索引）省 token 提速；
+     * 涉及待办/改动/分析等才上全量（diff 明细 + 文件索引）。
+     */
+    private suspend fun buildContext(
+        projectRoot: String,
+        context: Context,
+        input: String,
+        onPhase: (String) -> Unit
+    ): String =
         withContext(Dispatchers.IO) {
+            // 需要 diff 明细 / 文件索引的强信号（待办、文件定位、改动详情、分析）
+            val needDetail = listOf("最近", "改动", "修改", "变化", "diff", "看看", "检查", "分析", "怎么", "为什么").any { input.contains(it) }
+            val needIndex = listOf("待办", "计划", "要做", "下一步", "整理", "文件", "列", "建议", "优化").any { input.contains(it) }
+
             val recentFiles = SaveHistoryManager.getRecentFiles(context)
-            val diff = ProjectAssistant.buildDiffContext(context, projectRoot, recentFiles)
+            val diff = ProjectAssistant.buildDiffContext(context, projectRoot, recentFiles, includeLines = needDetail)
             val todos = ProjectAssistant.buildTodosText(projectRoot)
-            val fileIndex = ProjectAssistant.buildProjectFileIndex(projectRoot)
+            val fileIndex = if (needIndex) ProjectAssistant.buildProjectFileIndex(projectRoot) else ""
             // 项目理解：会话内缓存复用，缺失/手动刷新时才生成（避免每次发送因保存导致重复生成）
             val understanding = ProjectAssistant.getOrBuildUnderstanding(projectRoot, onPhase = onPhase)
             val understandingBlock = if (understanding.isNullOrBlank()) "" else "\n\n【项目理解】\n$understanding"
-            AiService.ASSISTANT_SYSTEM_PROMPT + "\n\n【项目上下文】\n" + diff + "\n\n" + todos + "\n\n" + fileIndex + understandingBlock
+            // 模组目标：优先注入，助理的一切建议/待办都要对齐它
+            val modInfo = ProjectAssistant.readModInfo(projectRoot)
+            val modInfoBlock = if (modInfo.isNullOrBlank()) "" else "\n【模组目标】\n$modInfo"
+            val indexBlock = if (fileIndex.isBlank()) "" else "\n\n$fileIndex"
+            AiService.ASSISTANT_SYSTEM_PROMPT + "\n\n【项目上下文】" + modInfoBlock +
+                "\n\n" + diff + "\n\n" + todos + indexBlock + understandingBlock
         }
 }

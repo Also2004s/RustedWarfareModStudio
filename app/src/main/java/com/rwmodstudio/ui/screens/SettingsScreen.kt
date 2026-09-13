@@ -42,9 +42,11 @@ import com.rwmodstudio.core.UpdateChecker
 import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.TranslationBlocklist
 import com.rwmodstudio.core.translation.TranslationEngine
+import com.rwmodstudio.ui.components.AppDialog
 import com.rwmodstudio.ui.components.ColorWheelHSV
 import com.rwmodstudio.ui.components.ColorWheelPicker
 import com.rwmodstudio.ui.components.DarkTokenColorDialog
+import com.rwmodstudio.ui.components.DialogActionButton
 import com.rwmodstudio.ui.components.UpdateStateManager
 import com.rwmodstudio.ui.theme.fontFamilyDisplayName
 import com.rwmodstudio.ui.theme.*
@@ -588,37 +590,33 @@ fun SettingsScreen(
 
     if (showColorPicker) {
         var picked by remember { mutableStateOf(bg) }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showColorPicker = false },
-            title = { Text("背景颜色") },
-            text = {
-                if (SettingsManager.devHsvPicker) {
-                    ColorWheelHSV(
-                        initialColor = bg,
-                        onColorChanged = { picked = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        wheelSize = 220.dp
-                    )
-                } else {
-                    ColorWheelPicker(
-                        initialColor = bg,
-                        onColorChanged = { picked = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        wheelSize = 220.dp
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
+            title = "背景颜色",
+            actions = {
+                DialogActionButton("确定") {
                     bg = picked
                     ThemeState.applyBgColor(picked)
                     showColorPicker = false
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showColorPicker = false }) { Text("取消") }
+                }
             }
-        )
+        ) {
+            if (SettingsManager.devHsvPicker) {
+                ColorWheelHSV(
+                    initialColor = bg,
+                    onColorChanged = { picked = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    wheelSize = 220.dp
+                )
+            } else {
+                ColorWheelPicker(
+                    initialColor = bg,
+                    onColorChanged = { picked = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    wheelSize = 220.dp
+                )
+            }
+        }
     }
 
     if (showDarkHlPicker) {

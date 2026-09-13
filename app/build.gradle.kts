@@ -22,7 +22,7 @@ android {
     defaultConfig {
         // 包名：应用的唯一标识，修改后相当于变成一个新应用，已安装用户会丢失数据
         applicationId = "com.rwmodstudio"
-        minSdk = 26
+        minSdk = 21
         targetSdk = 34
         // 版本号：每次发布新版本必须 +1，且只能增加不能减少
         versionCode = 27
