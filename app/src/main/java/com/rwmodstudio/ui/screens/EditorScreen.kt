@@ -51,7 +51,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -68,6 +70,7 @@ import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.util.atomicWriteText
+import com.rwmodstudio.editor.BracketIssue
 import com.rwmodstudio.editor.CURSOR_MARKER
 import com.rwmodstudio.editor.EditorToolbarAction
 import com.rwmodstudio.editor.EditorViewState
@@ -406,6 +409,11 @@ fun EditorScreen(
     var pendingRestoreViewState by remember(filePath) { mutableStateOf<EditorViewState?>(null) }
     // 编辑器引用：View 复用（切换文件不销毁 View），editor 对象保持不变，故不随 filePath 重置。
     var editorRef by remember { mutableStateOf<CodeEditor?>(null) }
+    // 括号诊断问题（设置开启时由编辑器主线程回调更新；清空时回调空列表）。
+    // 按 filePath 归零：编辑器 View 跨文件复用，切换文件后若不重置，角标会残留上一个文件的问题数，
+    // 直到新文件扫描（reset 后 50ms）回来才刷新。
+    var bracketIssues by remember(filePath) { mutableStateOf<List<BracketIssue>>(emptyList()) }
+    var bracketJumpIndex by remember(filePath) { mutableIntStateOf(0) }
     // 折叠/展开动画期间关闭「尺寸变化自动滚动到光标」：内边距联动会让视图高度变化，
     // sora 的 adjustToSelectionOnResize 会把视角拽到光标位置；动画结束 250ms 后恢复。
     LaunchedEffect(topBarsShown) {
@@ -1235,12 +1243,20 @@ fun EditorScreen(
             cp?.currentFilePath = filePath
             cp?.currentProjectRoot = projectRoot.ifEmpty { SettingsManager.defaultModPath() }
         }
+        // 查找替换栏实际高度（px）：显示时给编辑区让出等量底部空间，
+        // 避免搜索栏浮在正文之上遮住当前匹配行；关闭时归零，编辑区恢复全高。
+        var searchBarHeightPx by remember { mutableIntStateOf(0) }
+        val density = LocalDensity.current
+        val searchBarBottomPad = if (showSearch) with(density) { searchBarHeightPx.toDp() } else 0.dp
         // Editor - 顶部内边距随折叠动画联动（66→0）：顶栏显示时内容从顶栏下方开始（文档开头不被遮挡），
         // 顶栏隐藏时内边距归零、内容填满全屏，隐藏才有意义；滚动偏移始终不变，视图仅高度变化、宽度不变不会重排换行。
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 66.dp else 44.dp) * (1 - topFold))
+                .padding(
+                    top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 66.dp else 44.dp) * (1 - topFold),
+                    bottom = searchBarBottomPad
+                )
         ) {
             if (contentLoaded) {
                 Box(Modifier.fillMaxSize()) {
@@ -1261,6 +1277,8 @@ fun EditorScreen(
                         highlightTheme = ThemeState.highlightTheme,
                         bgColor = ThemeState.bgColor,
                         darkTokenColors = ThemeState.darkTokenColors,
+                        // 自定义高亮规则修订号：在此读取以订阅状态，规则增删改后编辑器就地重建语言
+                        highlightRulesRevision = com.rwmodstudio.core.HighlightRuleManager.revision,
                         customSymbols = customSymbols,
                         completionProvider = cp,
                         currentSectionName = currentSection,
@@ -1289,6 +1307,7 @@ fun EditorScreen(
                             canRedo = redo
                         },
                         onLitLinesChange = { litLines = it },
+                        onBracketIssues = { bracketIssues = it },
                         onLightbulbToggle = { line, isLit ->
                             val editor = editorRef
                             if (editor == null || line < 0 || line >= editor.text.lineCount) return@SoraCodeEditor
@@ -1370,6 +1389,45 @@ fun EditorScreen(
                             isModified = true
                         }
                     )
+                    // 括号诊断角标：仅存在问题且设置开启（否则回调不会触发）时显示；
+                    // 点击循环跳转到下一处问题并居中（与搜索跳转同款多次重定位稳定化）
+                    if (bracketIssues.isNotEmpty()) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 8.dp, end = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    val ed = editorRef ?: return@clickable
+                                    val issue = bracketIssues[bracketJumpIndex.mod(bracketIssues.size)]
+                                    bracketJumpIndex++
+                                    if (issue.line < ed.text.lineCount) {
+                                        val lineLen = ed.text.getColumnCount(issue.line)
+                                        val col = issue.column.coerceIn(0, lineLen)
+                                        if (col + 1 <= lineLen) {
+                                            ed.setSelectionRegion(issue.line, col, issue.line, col + 1)
+                                        } else {
+                                            ed.setSelection(issue.line, col)
+                                        }
+                                        for (d in longArrayOf(0L, 50L, 120L, 240L)) {
+                                            ed.postDelayed({ ed.centerCursorOnVisible(issue.line, col) }, d)
+                                        }
+                                        ed.ensureSelectionVisible()
+                                        ed.invalidate()
+                                    }
+                                },
+                            color = RustedError.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text(
+                                "括号 ${bracketIssues.size}",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                     Box(Modifier.align(Alignment.BottomEnd)) {
                         StyledPopupMenu(
                             expanded = showMore,
@@ -1949,9 +2007,20 @@ fun EditorScreen(
             }
         }
         // 查找替换栏 - 固定在底部，adjustResize会自动把它推到键盘上方
+        // ⚠️ 必须显式 align(BottomCenter)：根容器是 Box，默认子项对齐 TopStart，
+        // 全局菜单栏改为浮层（不再占 Scaffold topBar 空间）后，未对齐的搜索栏会顶到屏幕最上方、
+        // 与菜单栏浮层重叠。底对齐后 adjustResize 才能在键盘弹出时把它推到输入法上方。
         if (showSearch) {
             // 查找替换栏
-            Surface(Modifier.fillMaxWidth(), color = RustedSurface) {
+            Surface(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .zIndex(3f)
+                    .fillMaxWidth()
+                    .onSizeChanged { searchBarHeightPx = it.height },
+                color = RustedSurface,
+                shadowElevation = 8.dp
+            ) {
                 Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.Top) {
                         OutlinedTextField(searchQuery, { searchQuery = it }, maxLines = 3, modifier = Modifier.weight(1f), placeholder = { Text("查找...", fontSize = 12.sp) }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp), trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }, Modifier.size(20.dp)) { Icon(Icons.Default.Clear, null, Modifier.size(14.dp)) } })

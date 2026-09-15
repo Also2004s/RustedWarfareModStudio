@@ -30,7 +30,8 @@ import com.rwmodstudio.ui.theme.*
 @Composable
 fun DeveloperModeScreen(
     onOpenMockIni: () -> Unit = {},
-    onOpenCompletionTypes: () -> Unit = {}
+    onOpenCompletionTypes: () -> Unit = {},
+    onOpenHighlightRules: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -134,8 +135,15 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.Category,
                 title = "补全类型分类",
                 subtitle = "按实际补全代码归类各属性，可改分类",
-                isLast = true,
                 onClick = onOpenCompletionTypes
+            )
+            DevDivider()
+            DevActionRow(
+                icon = Icons.Default.Rule,
+                title = "规则",
+                subtitle = "自定义高亮规则：按「类别：规则」给任意关键字/正则上色",
+                isLast = true,
+                onClick = onOpenHighlightRules
             )
         }
 

@@ -124,7 +124,8 @@ object SoraEditorInitializer {
         return if (themeName in setOf("light", "pure")) {
             0xFFdeae12.toInt()
         } else {
-            0xFFAD99B7.toInt()
+            // 深色预设的圆括号基础色（与 DarkThemeColors.Default.bracketRound 一致）
+            0xFFF1D5FF.toInt()
         }
     }
 

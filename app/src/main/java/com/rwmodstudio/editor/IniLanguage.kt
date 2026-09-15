@@ -13,6 +13,7 @@ import io.github.rosemoe.sora.lang.completion.CompletionItem
 import io.github.rosemoe.sora.lang.completion.CompletionItemKind
 import io.github.rosemoe.sora.lang.completion.CompletionPublisher
 import io.github.rosemoe.sora.lang.completion.SimpleCompletionItem
+import io.github.rosemoe.sora.lang.diagnostic.DiagnosticDetail
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
 import io.github.rosemoe.sora.lang.format.Formatter
@@ -24,22 +25,244 @@ import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
 import io.github.rosemoe.sora.text.CharPosition
 import io.github.rosemoe.sora.text.ContentReference
 import io.github.rosemoe.sora.widget.SymbolPairMatch
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "IniLanguage"
 
 /**
+ * 一处括号问题（供 UI 跳转与提示使用）。
+ * 位置基于扫描时的编辑器显示文本（中文视图即中文缓冲），无需中英列映射。
+ */
+data class BracketIssue(
+    val startIndex: Int,   // 编辑器全文索引
+    val line: Int,         // 0-based
+    val column: Int,       // 0-based
+    val message: String    // 如「第 12 行：「(」未闭合」
+)
+
+/**
+ * INI 感知的括号配对扫描器：跳过注释（`;`/`#` 至行尾，`#RRGGBB` hex 颜色除外）、
+ * `"""` 多行值块、单行引号字符串，再做栈匹配。
+ * 交叉错配（如 `(]`）按 VS Code 风格处理：被挤出的中间开括号记「未闭合」，
+ * 找不到同类开括号时闭括号记「多余」，避免同一处问题双重报告。
+ */
+internal object BracketScanner {
+
+    private val OPEN_BRACKETS = setOf('(', '[', '{')
+    private val CLOSE_BRACKETS = setOf(')', ']', '}')
+    private val MATCHING = mapOf(')' to '(', ']' to '[', '}' to '{')
+    private val HEX_CHARS = "0123456789abcdefABCDEF".toSet()
+
+    private const val STATE_NORMAL = 0
+    private const val STATE_COMMENT = 1
+    private const val STATE_DQUOTE = 2
+    private const val STATE_SQUOTE = 3
+    private const val STATE_BLOCK = 4
+
+    /** 扫描全文，返回按位置排序的括号问题列表 */
+    fun scan(text: String): List<BracketIssue> {
+        val issues = mutableListOf<BracketIssue>()
+        val stack = ArrayDeque<StackEntry>()
+        val lineStarts = mutableListOf(0)
+        var state = STATE_NORMAL
+        var i = 0
+        val n = text.length
+
+        // 按索引反查行号（记录位置可能在当前扫描位置之前的行，如被挤出的开括号/文末栈内条目）
+        fun lineOf(index: Int): Int {
+            var lo = 0
+            var hi = lineStarts.size - 1
+            while (lo < hi) {
+                val mid = (lo + hi + 1) / 2
+                if (lineStarts[mid] <= index) lo = mid else hi = mid - 1
+            }
+            return lo
+        }
+
+        fun record(index: Int, bracket: Char, kind: String) {
+            val ln = lineOf(index)
+            issues.add(
+                BracketIssue(
+                    startIndex = index,
+                    line = ln,
+                    column = index - lineStarts[ln],
+                    message = "第 ${ln + 1} 行：「$bracket」$kind"
+                )
+            )
+        }
+
+        fun handleClose(index: Int, c: Char) {
+            val expected = MATCHING[c]!!
+            if (stack.isEmpty()) {
+                record(index, c, "多余")
+                return
+            }
+            if (stack.last().char == expected) {
+                stack.removeLast()
+                return
+            }
+            // 自顶向下找同类开括号
+            var foundIdx = -1
+            for (j in stack.indices.reversed()) {
+                if (stack[j].char == expected) {
+                    foundIdx = j
+                    break
+                }
+            }
+            if (foundIdx >= 0) {
+                // 匹配位置之上的开括号记「未闭合」，匹配位置本身静默出栈（与该闭括号配对）
+                while (stack.size > foundIdx + 1) {
+                    val entry = stack.removeLast()
+                    record(entry.index, entry.char, "未闭合")
+                }
+                stack.removeLast()
+            } else {
+                // 栈内没有同类开括号：闭括号多余，栈保持不变（开括号可能稍后闭合）
+                record(index, c, "多余")
+            }
+        }
+
+        while (i < n) {
+            val c = text[i]
+            when (state) {
+                STATE_COMMENT -> {
+                    if (c == '\n') {
+                        state = STATE_NORMAL
+                        lineStarts.add(i + 1)
+                    }
+                    i++
+                }
+                STATE_BLOCK -> {
+                    // 块内只识别闭合 """，其余全部跳过
+                    if (c == '"' && i + 2 < n && text[i + 1] == '"' && text[i + 2] == '"') {
+                        state = STATE_NORMAL
+                        i += 3
+                    } else {
+                        if (c == '\n') lineStarts.add(i + 1)
+                        i++
+                    }
+                }
+                STATE_DQUOTE, STATE_SQUOTE -> {
+                    // 单行引号字符串：遇配对引号或换行结束，不跨行
+                    val quote = if (state == STATE_DQUOTE) '"' else '\''
+                    if (c == quote) {
+                        state = STATE_NORMAL
+                    } else if (c == '\n') {
+                        state = STATE_NORMAL
+                        lineStarts.add(i + 1)
+                    }
+                    i++
+                }
+                STATE_NORMAL -> {
+                    when {
+                        c == ';' -> {
+                            state = STATE_COMMENT
+                            i++
+                        }
+                        c == '#' -> {
+                            // #RRGGBB hex 颜色不算注释（其后同行内容仍需检查括号）
+                            if (i + 6 < n && (1..6).all { text[i + it] in HEX_CHARS }) {
+                                i += 7
+                            } else {
+                                state = STATE_COMMENT
+                                i++
+                            }
+                        }
+                        c == '"' && i + 2 < n && text[i + 1] == '"' && text[i + 2] == '"' -> {
+                            state = STATE_BLOCK
+                            i += 3
+                        }
+                        c == '"' -> {
+                            state = STATE_DQUOTE
+                            i++
+                        }
+                        c == '\'' -> {
+                            state = STATE_SQUOTE
+                            i++
+                        }
+                        c == '\n' -> {
+                            lineStarts.add(i + 1)
+                            i++
+                        }
+                        c in OPEN_BRACKETS -> {
+                            stack.addLast(StackEntry(i, c))
+                            i++
+                        }
+                        c in CLOSE_BRACKETS -> {
+                            handleClose(i, c)
+                            i++
+                        }
+                        else -> i++
+                    }
+                }
+            }
+        }
+        // 文末：栈内剩余的开括号全部未闭合
+        for (entry in stack) {
+            record(entry.index, entry.char, "未闭合")
+        }
+        return issues.sortedBy { it.startIndex }
+    }
+
+    /** 把扫描结果转换为编辑器诊断区域（附加中文消息） */
+    fun toDiagnosticRegions(issues: List<BracketIssue>): List<DiagnosticRegion> {
+        return issues.mapIndexed { idx, issue ->
+            DiagnosticRegion(
+                issue.startIndex,
+                issue.startIndex + 1,
+                DiagnosticRegion.SEVERITY_ERROR,
+                idx.toLong(),
+                DiagnosticDetail(issue.message, null, emptyList(), null)
+            )
+        }
+    }
+
+    private data class StackEntry(val index: Int, val char: Char)
+}
+
+/**
+ * 取编辑器当前全文快照（供括号诊断扫描使用）。
+ *
+ * **不要**用 ContentReference.toString()：它走 TextReference.toString()，
+ * 按**构造时**固定的长度切片（end 在创建时确定，之后不随文本变化），因此
+ * 1) 文本被删短后取快照会抛 StringIndexOutOfBoundsException（诊断被静默吞掉，表现为「删了括号不诊断、角标不消失」）；
+ * 2) 文本变长后快照会被截掉尾部同样多的字符（文件末尾内容看不到，可能误报未闭合）。
+ * 底层 Content 的 toString() 始终返回当前全文，位置索引也与编辑器一致。
+ */
+internal fun bracketSnapshot(ref: ContentReference): String = ref.reference.toString()
+
+/**
  * 包装 AnalyzeManager，在 TextMate 高亮分析之上追加括号匹配诊断。
- * 文本变更后防抖检查整段文本的括号配对，未匹配的括号通过编辑器诊断系统标记。
+ * 文本变更后短防抖（120ms）在后台线程扫描全文括号配对，结果回主线程
+ * 更新诊断容器并回调监听器；文件加载（reset）用更短的 50ms 延迟。
  */
 class BracketDiagnosticManager(
     private val delegate: AnalyzeManager
 ) : AnalyzeManager {
+
+    /** 主线程回调：问题列表（清空时也回调空列表，便于 UI 撤销角标） */
+    @Volatile
+    var listener: ((List<BracketIssue>) -> Unit)? = null
 
     private var receiver: StyleReceiver? = null
     private var contentRef: ContentReference? = null
     private val handler = Handler(Looper.getMainLooper())
     private var checkRunnable: Runnable? = null
     private var diagnosticContainer: DiagnosticsContainer? = null
+    private var scanExecutor = newScanExecutor()
+    private val generation = AtomicLong(0)
+    @Volatile
+    private var destroyed = false
+    @Volatile
+    private var lastScannedText: String? = null
+
+    /** 已推送给编辑器的诊断列表：与本次结果相同就不再重推，避免每次按键都让编辑器重建诊断并重绘 */
+    private var lastPushedIssues: List<BracketIssue>? = null
+
+    private fun newScanExecutor() = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "bracket-diag-scan").apply { isDaemon = true }
+    }
 
     /**
      * 包装 StyleReceiver，将 TextMate 分析器发出的 sourceManager 替换为本包装器，
@@ -68,6 +291,15 @@ class BracketDiagnosticManager(
     override fun setReceiver(receiver: StyleReceiver?) {
         this.receiver = receiver
         if (receiver != null) {
+            // 同一个 IniLanguage 会被反复挂到编辑器上：切 tab / 应用前后台切换时
+            // CodeEditor.setEditorLanguage(null) 会对本管理器调用 destroy()，切回来又
+            // 重新 setReceiver+reset。若不复位销毁标记，括号诊断会就此永久失效。
+            if (destroyed) {
+                destroyed = false
+                lastScannedText = null
+                lastPushedIssues = null
+                if (scanExecutor.isShutdown) scanExecutor = newScanExecutor()
+            }
             delegate.setReceiver(ReceiverWrapper(receiver))
         } else {
             delegate.setReceiver(null)
@@ -76,8 +308,13 @@ class BracketDiagnosticManager(
 
     override fun reset(content: ContentReference, extraArguments: Bundle) {
         contentRef = content
+        // 装载/重建后编辑器侧诊断会被清空（setEditorLanguage 置 diagnostics = null），
+        // 因此即使文本没变也要重扫并重推一次，否则角标/下划线不再出现。
+        lastScannedText = null
+        lastPushedIssues = null
         delegate.reset(content, extraArguments)
-        scheduleBracketCheck()
+        // 文件加载/语言重置：短延迟尽快出结果
+        scheduleBracketCheck(RESET_DELAY_MS)
     }
 
     override fun insert(start: CharPosition, end: CharPosition, insertedContent: CharSequence) {
@@ -96,69 +333,82 @@ class BracketDiagnosticManager(
     }
 
     override fun destroy() {
+        destroyed = true
         checkRunnable?.let { handler.removeCallbacks(it) }
         checkRunnable = null
+        scanExecutor.shutdownNow()
         receiver = null
         contentRef = null
         diagnosticContainer = null
+        lastScannedText = null
+        lastPushedIssues = null
         delegate.destroy()
     }
 
-    private fun scheduleBracketCheck() {
+    /**
+     * 防抖后在后台线程扫描括号。主线程仅做文本快照（与旧实现成本相同），
+     * 扫描本身交给单线程执行器，结果经主线程 Handler 回传；
+     * generation 计数丢弃过期结果，避免旧文本的诊断覆盖新文本。
+     */
+    private fun scheduleBracketCheck(delayMs: Long = CHECK_DELAY_MS) {
         checkRunnable?.let { handler.removeCallbacks(it) }
-        val ref = contentRef ?: return
-        val rcv = receiver ?: return
-        val runnable = Runnable {
-            try {
-                val text = ref.toString()
-                val regions = checkBrackets(text)
-                // 复用持久化容器：首次创建并注册到编辑器，后续直接增删诊断项
-                if (diagnosticContainer == null) {
-                    diagnosticContainer = DiagnosticsContainer()
-                    rcv.setDiagnostics(this, diagnosticContainer)
-                }
-                diagnosticContainer!!.reset()
-                if (regions.isNotEmpty()) {
-                    diagnosticContainer!!.addDiagnostics(regions)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Bracket check failed", e)
-            }
-        }
+        val runnable = Runnable { runBracketCheck() }
         checkRunnable = runnable
-        handler.postDelayed(runnable, 300)
+        handler.postDelayed(runnable, delayMs)
     }
 
-    companion object {
-        private val OPEN_BRACKETS = setOf('(', '[', '{')
-        private val CLOSE_BRACKETS = setOf(')', ']', '}')
-        private val MATCHING = mapOf(')' to '(', ']' to '[', '}' to '{')
-
-        /**
-         * 检查文本中的括号配对，返回未匹配括号的诊断区域列表。
-         * 支持 ()、[]、{} 三种括号，使用栈进行匹配。
-         */
-        fun checkBrackets(text: String): List<DiagnosticRegion> {
-            val regions = mutableListOf<DiagnosticRegion>()
-            val stack = ArrayDeque<Int>()
-            for (i in text.indices) {
-                val c = text[i]
-                if (c in OPEN_BRACKETS) {
-                    stack.addLast(i)
-                } else if (c in CLOSE_BRACKETS) {
-                    val expected = MATCHING[c]!!
-                    if (stack.isEmpty() || text[stack.last()] != expected) {
-                        regions.add(DiagnosticRegion(i, i + 1, DiagnosticRegion.SEVERITY_ERROR))
-                    } else {
-                        stack.removeLast()
+    private fun runBracketCheck() {
+        checkRunnable = null
+        if (destroyed) return
+        val ref = contentRef ?: return
+        val rcv = receiver ?: return
+        try {
+            // 快照必须取「当前全文」：ContentReference.toString() 按构造时的固定长度切片
+            // （见 bracketSnapshot），文本被删短后取快照会抛异常，正是「删除后不再诊断」的根因。
+            val snapshot = bracketSnapshot(ref)
+            // 与上次相同且已推送过则跳过重扫（rerun 无变更时省一次全文扫描）
+            if (snapshot == lastScannedText && lastPushedIssues != null) return
+            val gen = generation.incrementAndGet()
+            scanExecutor.execute {
+                val issues = try {
+                    BracketScanner.scan(snapshot)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Bracket scan failed", e)
+                    return@execute
+                }
+                handler.post {
+                    // 过期结果或已销毁：丢弃
+                    if (destroyed || gen != generation.get()) return@post
+                    try {
+                        // 每次结果变化都推一个「新的」诊断容器：sora 只把
+                        // EditorStyleDelegate 汇总出的合并容器挂到编辑器（attachEditor 仅在
+                        // CodeEditor 内部调用），就地增删自建容器里的诊断项不会再被编辑器看到，
+                        // 诊断标记会永远停在第一次扫描的结果上（角标与下划线都对不上）。
+                        if (lastPushedIssues != issues) {
+                            val container = DiagnosticsContainer()
+                            val regions = BracketScanner.toDiagnosticRegions(issues)
+                            if (regions.isNotEmpty()) {
+                                container.addDiagnostics(regions)
+                            }
+                            diagnosticContainer = container
+                            rcv.setDiagnostics(this, container)
+                            lastPushedIssues = issues
+                        }
+                        lastScannedText = snapshot
+                        listener?.invoke(issues)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Bracket check failed", e)
                     }
                 }
             }
-            for (idx in stack) {
-                regions.add(DiagnosticRegion(idx, idx + 1, DiagnosticRegion.SEVERITY_ERROR))
-            }
-            return regions
+        } catch (e: Exception) {
+            Log.e(TAG, "Bracket check schedule failed", e)
         }
+    }
+
+    companion object {
+        private const val CHECK_DELAY_MS = 120L
+        private const val RESET_DELAY_MS = 50L
     }
 }
 
@@ -209,6 +459,10 @@ class IniLanguage(private val delegate: TextMateLanguage) : EmptyLanguage() {
     @Volatile
     var bracketDiagnosticsEnabled: Boolean = false
 
+    /** 括号问题回调（主线程），由 BracketDiagnosticManager 触发，供编辑器 UI 显示角标/跳转 */
+    @Volatile
+    var bracketIssuesListener: ((List<BracketIssue>) -> Unit)? = null
+
     private var bracketDiagnosticManager: BracketDiagnosticManager? = null
 
     override fun getAnalyzeManager(): AnalyzeManager {
@@ -216,7 +470,9 @@ class IniLanguage(private val delegate: TextMateLanguage) : EmptyLanguage() {
             return delegate.analyzeManager
         }
         if (bracketDiagnosticManager == null) {
-            bracketDiagnosticManager = BracketDiagnosticManager(delegate.analyzeManager)
+            bracketDiagnosticManager = BracketDiagnosticManager(delegate.analyzeManager).also { manager ->
+                manager.listener = { issues -> bracketIssuesListener?.invoke(issues) }
+            }
         }
         return bracketDiagnosticManager!!
     }

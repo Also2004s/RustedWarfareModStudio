@@ -146,6 +146,12 @@
 			}
 		},
 		{
+			"scope": "punctuation.ignored.ini",
+			"settings": {
+				"foreground": "#FFFFFF"
+			}
+		},
+		{
 			"scope": "punctuation.separator.forward-slash.ini",
 			"settings": {
 				"foreground": "#000000"

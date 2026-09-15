@@ -3,8 +3,10 @@ package com.rwmodstudio.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,10 +15,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.OnApplyWindowInsetsListener
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 
 private val PRESET_COLORS = listOf(
     "#000000", "#1E1E1E", "#2B2B2B", "#4A3728",
@@ -29,6 +38,7 @@ private val PRESET_COLORS = listOf(
  * 简洁版 RGB 调色盘。
  * 使用 R/G/B 三条滑杆 + 成品色卡，交互更直接。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ColorWheelPicker(
     initialColor: String,
@@ -62,7 +72,9 @@ fun ColorWheelPicker(
     // 回写时 initialColor == lastEmitted，必须跳过重置，否则会丢弃正在拖拽的状态、中断手势。
     var lastEmitted by remember { mutableStateOf(colorHex(currentColor)) }
 
-    // 仅当 initialColor 是外部变化（切换分类等）且非自身回写时，才重新装载 RGBA 与 hexText
+    // 仅当 initialColor 是外部变化（切换分类等）且非自身回写时，才重新装载 RGBA 与 hexText。
+    // 注意：此处不设 hexFocused 门禁——initialColor 只会在「分类切换/选用预设」这类外部重置时变化，
+    // 且已有 lastEmitted 防回写，不会打断用户敲字；聚焦中输入保护由下方 currentColor 效应的门禁承担。
     LaunchedEffect(initialColor) {
         if (initialColor != lastEmitted) {
             val e = parseColor(initialColor)
@@ -70,13 +82,13 @@ fun ColorWheelPicker(
             green = android.graphics.Color.green(e)
             blue = android.graphics.Color.blue(e)
             alpha = android.graphics.Color.alpha(e)
-            val hex = colorHex(e)
-            if (!hexFocused) hexText = hex
-            lastEmitted = hex
+            hexText = colorHex(e)
+            lastEmitted = colorHex(e)
         }
     }
 
-    // 颜色变化时同步 hexText（非聚焦）并通知外部，同时记录 lastEmitted 以识别后续回写
+    // 颜色变化时同步 hexText（非聚焦）并通知外部，同时记录 lastEmitted 以识别后续回写。
+    // 这里的 hexFocused 门禁必须保留：用户在 HEX 输入框敲字时，颜色写回不能覆盖正在编辑的文本。
     LaunchedEffect(currentColor) {
         val hex = colorHex(currentColor)
         if (!hexFocused) hexText = hex
@@ -84,7 +96,39 @@ fun ColorWheelPicker(
         onColorChanged(hex)
     }
 
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    // 点击取色盘非输入区域（色盘/滑杆/预设色块之外的空白）时清除 HEX 输入框焦点，输入法随之收起。
+    // 滑杆/色盘的拖拽手势由各自子组件消费，不会触达这里。
+    val focusManager = LocalFocusManager.current
+
+    // 输入法收起（无论按完成键、系统返回、下滑还是输入法自带收起按钮等任何方式）后不再保持聚焦。
+    // 监听 dialog 窗口 root view 的 window insets：IME 状态变化即时回调，比屏幕高度几何法可靠
+    //（对话框非全屏，几何对比屏幕高度对 dialog 恒失效）。
+    val imeView = LocalView.current
+    var imeVisible by remember { mutableStateOf(false) }
+    var lastImeVisible by remember { mutableStateOf(false) }
+    DisposableEffect(imeView) {
+        val rootView = imeView.rootView
+        val listener = OnApplyWindowInsetsListener { _, insets ->
+            imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            insets
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(rootView, listener)
+        onDispose {
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, null)
+        }
+    }
+    // 仅在 IME 由「展开→收起」时清除焦点（首次组合不误清）
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible && lastImeVisible) focusManager.clearFocus()
+        lastImeVisible = imeVisible
+    }
+
+    Column(
+        modifier = modifier.pointerInput(Unit) {
+            detectTapGestures { focusManager.clearFocus() }
+        },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         // 当前颜色预览 + HEX 输入
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -137,6 +181,8 @@ fun ColorWheelPicker(
                     singleLine = true,
                     textStyle = TextStyle(fontSize = 13.sp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    // 按输入法「完成/换行」键收键盘时同时清除焦点，光标不再停留在输入框
+                    keyboardActions = KeyboardActions(onAny = { focusManager.clearFocus() }),
                     modifier = Modifier.weight(1f).onFocusChanged { hexFocused = it.isFocused }
                 )
             } else {
@@ -165,7 +211,13 @@ fun ColorWheelPicker(
         Spacer(Modifier.height(10.dp))
 
         // 紧凑色卡网格
-        PresetColorGrid(PRESET_COLORS, currentColor) { applyPreset(it) { r, g, b -> red = r; green = g; blue = b } }
+        PresetColorGrid(PRESET_COLORS, currentColor) { hex ->
+            // 点击色块会修改颜色：先清除 HEX 输入框焦点（并同步 hexFocused=false，
+            // 避免 currentColor 效应因「聚焦中不覆盖」门禁而挡住输入框色值刷新）
+            focusManager.clearFocus()
+            hexFocused = false
+            applyPreset(hex) { r, g, b -> red = r; green = g; blue = b }
+        }
     }
 }
 

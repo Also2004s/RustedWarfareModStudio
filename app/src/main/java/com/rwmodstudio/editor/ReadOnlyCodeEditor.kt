@@ -4,6 +4,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.rwmodstudio.core.DarkThemeColors
+import com.rwmodstudio.core.HighlightRuleManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.ui.theme.editorTypeface
@@ -74,14 +75,16 @@ fun ReadOnlyCodeEditor(
                     resolveEditorBackground(bgColor, isDarkTheme)
                 )
                 val tmLanguage = try {
+                    // 自定义高亮规则（开发者模式→规则）：有启用规则时用合并语法的独立注册表
+                    val customRegistry = HighlightRuleManager.registryWithCustomRules(ctx)
                     if (SettingsManager.rainbowBrackets) {
                         try {
-                            RainbowTextMateLanguage.create("source.ini", false)
+                            RainbowTextMateLanguage.create("source.ini", false, customRegistry)
                         } catch (e: Exception) {
-                            TextMateLanguage.create("source.ini", false)
+                            TextMateLanguage.create("source.ini", customRegistry, false)
                         }
                     } else {
-                        TextMateLanguage.create("source.ini", false)
+                        TextMateLanguage.create("source.ini", customRegistry, false)
                     }
                 } catch (e: Exception) {
                     null

@@ -38,7 +38,7 @@ object VerifyManager {
     const val NATIVE_COMPLETIONS_CODE = "819413"
     const val EXTRA_COMPLETIONS_CODE = "530719"
     const val CODE_REFERENCE_CODE = "720524"
-    const val ONBOARDING_CODE = "294817"
+    const val ONBOARDING_CODE = "481203"
     const val TRANSLATION_CACHE_CODE = "100001"
     const val COMPLETIONS_CODE = "100002"
     const val SETTINGS_CODE = "100003"
@@ -54,7 +54,9 @@ object VerifyManager {
         NATIVE_COMPLETIONS to NATIVE_COMPLETIONS_CODE,
         EXTRA_COMPLETIONS to EXTRA_COMPLETIONS_CODE,
         CODE_REFERENCE to CODE_REFERENCE_CODE,
-        ONBOARDING to ONBOARDING_CODE,
+        // 首次引导的默认值必须是「未完成」：写默认值即等于把 onboarding 标记为已完成，
+        // 新装/清数据后首次启动会被判定为「已引导」而永不显示引导页。
+        ONBOARDING to "",
         TRANSLATION_CACHE to TRANSLATION_CACHE_CODE,
         COMPLETIONS to COMPLETIONS_CODE,
         SETTINGS to SETTINGS_CODE,

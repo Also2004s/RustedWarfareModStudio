@@ -140,15 +140,16 @@ class MainActivity : ComponentActivity() {
                             TaskProgressManager.start("预热失败: ${e.message}")
                             TaskProgressManager.finish()
                         }
-                        // 翻译缓存预热完成后，预热继承链缓存
-                        if (SettingsManager.devInheritanceView) {
-                            try {
-                                InheritanceCache.prepareIfNeeded(projectRoot, applicationContext)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "InheritanceCache prepare failed", e)
-                                TaskProgressManager.start("继承链预热失败: ${e.message}")
-                                TaskProgressManager.finish()
-                            }
+                        // 翻译缓存预热完成后，预热继承链缓存。
+                        // 不按 devInheritanceView 门控：该开关只管「查看」入口，而补全的继承链符号
+                        // （@copyFromSection/复制节/附属 slot 节名、@define 同节变量）无条件依赖继承链数据，
+                        // 关掉查看开关也必须预热，否则每个文件首开都要现算整条链、且孤儿缓存无人清理。
+                        try {
+                            InheritanceCache.prepareIfNeeded(projectRoot, applicationContext)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "InheritanceCache prepare failed", e)
+                            TaskProgressManager.start("继承链预热失败: ${e.message}")
+                            TaskProgressManager.finish()
                         }
                     }
                 }

@@ -37,11 +37,23 @@ fun DarkTokenColorDialog(
     onConfirm: (DarkThemeColors) -> Unit
 ) {
     var colors by remember { mutableStateOf(initialColors) }
-    var selectedCategory by remember { mutableStateOf("section") }
+    // 记住上次打开时选中的高亮分类（持久化到 SettingsManager，弹窗关闭不丢失）
+    var selectedCategory by remember {
+        mutableStateOf(com.rwmodstudio.core.SettingsManager.lastDarkTokenCategory)
+    }
     var showPresetDialog by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
 
     val currentColor = colorForCategory(colors, selectedCategory)
+
+    // 点击分类/预设等操作时显式清除 HEX 输入框焦点、收起输入法（色值随后由 pickerSeed 刷新）
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    // 统一选择分类：更新局部状态并持久化，便于下次打开记住上次分类
+    fun selectCategory(cat: String) {
+        selectedCategory = cat
+        com.rwmodstudio.core.SettingsManager.lastDarkTokenCategory = cat
+    }
 
     // 取色盘「初始颜色」只随分类切换更新，取色回调不回写它（与调色盘 ColorPickerDialog 一致）。
     // 若直接用 currentColor 作 initialColor，取色回调会把它写回 colors → currentColor 变化 →
@@ -93,17 +105,19 @@ fun DarkTokenColorDialog(
                                 if (active) RustedPrimary else RustedOnBackground.copy(alpha = 0.15f)
                             ),
                             modifier = Modifier.clickable {
+                                // 点击分类=明确离开 HEX 输入框：清除焦点、收起输入法（色值随后由 pickerSeed 刷新）
+                                focusManager.clearFocus()
                                 if (isUi) {
                                     if (colors.highlightDelimiters && selectedCategory == "ui") {
                                         // 已激活：取消勾选并取消选中
                                         colors = colors.copy(highlightDelimiters = false)
-                                        selectedCategory = ""
+                                        selectCategory("")
                                     } else {
                                         colors = colors.copy(highlightDelimiters = true)
-                                        selectedCategory = "ui"
+                                        selectCategory("ui")
                                     }
                                 } else {
-                                    selectedCategory = category
+                                    selectCategory(category)
                                 }
                             }
                         ) {
@@ -159,7 +173,7 @@ fun DarkTokenColorDialog(
             onDismiss = { showPresetDialog = false },
             onSelect = { preset ->
                 colors = preset
-                selectedCategory = "section"
+                selectCategory("section")
                 pickerSeed = preset.section
                 showPresetDialog = false
             },

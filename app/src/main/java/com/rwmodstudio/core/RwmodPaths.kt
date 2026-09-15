@@ -77,6 +77,8 @@ object RwmodPaths {
     val translationBlocklistFile: File get() = File(configDir, "translation_blocklist.json")
     val resourceNameKeysFile: File get() = File(configDir, "resource_name_keys.json")
     val sectionFiltersFile: File get() = File(configDir, "section_filters.json")
+    /** 自定义代码高亮规则（开发者模式→规则，按「类别：规则」组织） */
+    val highlightRulesFile: File get() = File(configDir, "highlight_rules.json")
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
     val saveHistoryFile: File get() = File(configDir, "save_history.json")

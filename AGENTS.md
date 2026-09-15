@@ -93,6 +93,8 @@ app/src/main/
 | `TaskProgressManager.kt` | Debug 模式右上角后台任务进度浮窗 |
 | `UpdateChecker.kt` / `UpdateDownloader.kt` | 检查更新（GitHub Releases，直连失败自动切 `gh-proxy` 镜像）/ APK 下载 |
 | `FileSettings.kt` / `ThemeState.kt` / `ThemeManager.kt` / `DarkThemeColors.kt` / `TodoManager.kt` | 文件键值存储 / 主题 / 待办 |
+| `HighlightRuleManager.kt` | 自定义代码高亮规则（开发者模式→规则）：`RWmod/config/highlight_rules.json` 读写、按 `source` 原文**原位替换**内置规则（手写规则才插到最前）、`revision++` 通知编辑器重建语言、复刻保真度自检 |
+| `HighlightRulesDefaults.kt` | 内置语法复刻：`SLOTS` 表逐条对应内置语法里每条带 scope 的配色片段（规则级 `name` + 捕获里的具名 `name`，含重复定义，共 **92** 条），生成默认规则（首次运行播种 / 「重置为内置规则」用）；`parityReport` 对账并写到 `RWmod/cache/defaults_report.txt`（必须 92/92 且逐条对账「无人认领=0 原文不一致=0」） |
 
 ### core/translation/ 关键模块
 
@@ -161,7 +163,7 @@ app/src/main/
 
 - 导航：`ModalNavigationDrawer`（侧边栏）+ `Scaffold` 全局 `topBar`。**所有页面自带全局标题栏，不要再额外加标题栏**。
 - 返回：`backStack` 记录嵌套导航，"从哪个页面打开，就返回哪个页面"（`pushScreen`/`popScreen`/`clearBackStack`）。
-- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST。
+- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST / HIGHLIGHT_RULES。
 - 关键状态用 `rememberSaveable`（`selectedFile`、`currentScreen`、`saveAndExit` 等）防止配置变更丢失。
 - 编辑器工作区（`workspace` 内存缓冲，含文本/光标/滚动/修改标记）与存活实例仅在编辑器内存活，离开编辑器按三口径处理（`onBack(discard, saveAll)` + 离场统一效应）：**明确保存**（返回确认框「保存」/保存并退出）→ 全部实例落盘并销毁工作区；**明确不保存** → 丢弃不落盘并销毁；**直接返回**（返回键无修改、抽屉/工具页一切未做选择的离开）→ 自动保存开启时全部落盘并销毁，未开启时暂存（`holdPaths`，不落盘，下次打开恢复）。
 
@@ -172,7 +174,86 @@ app/src/main/
 - 代码高亮主题（TextMate：vs-dark/light/pure/neon/monokai/github）→ `ThemeState.highlightTheme`
 - 状态栏/导航栏颜色：编辑器页与编辑器配色一致，其他页跟随主题色（`MainApp` 统一处理）。
 
-### 9. 项目硬性要求（docs/项目要求.txt，保留的需求定义）
+### 9. 自定义高亮规则（开发者模式→规则）
+
+- 数据：`RWmod/config/highlight_rules.json`（用户配置，非生成物，无需验证码）。格式 v2：
+  `categories.<类别id>` = 规则数组（`{pattern,type,enabled}`），`groups.<类别id>` = `[{name,count}]`
+  记录每个**列表**的名称与条数。**count 必须落盘**：只存名字会导致回读时无法切分列表
+  （历史 bug：规则被平均分错，界面显示每个列表只有 1 条）。
+- 生效：`HighlightRuleManager.registryWithCustomRules()` 把规则合并进内置 grammar 后**装进单例
+  `GrammarRegistry`**（scope 仍是 `source.ini`）。
+  - **合并方式（与内置一致的关键）**：复刻默认规则带 `source`（= 内置语法原文），合并时**在原位替换**
+    对应的内置规则（全文件扫描，**不是只扫顶层**——42 条规则里 31 条嵌在「键值对 begin/end」块内，
+    只扫顶层会导致它们既替换不了又不起作用）；某条内置规则的复刻规则被清空/禁用时该内置规则被删除。
+    用户在界面里手写的规则不带 `source`，合成一条插到 patterns **最前**（优先级最高）。
+  - **禁止**把全部用户规则整批插到最前：那会改变规则顺序/优先级，着色就和内置不一样了。
+  - 关键字边界走 `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])`，**不能用 `\b`**（汉字也是词字符）。
+  - 装法：换掉 `GrammarRegistry` 内部的 tm4e `Registry`（反射）以绕过 `_ensureGrammarCache`，再 `loadGrammar` +
+    `languageConfigurationToGrammar`。**不要另起子注册表**：token 颜色按注册表 id 空间编码，子注册表会导致着色失效。
+  - 开关关闭或无规则时返回 null → 编辑器走原单例语法（零介入）。
+- **语法诊断（手动触发）**：规则页顶部的「生成语法诊断」按钮会把内置语法与合并后的语法写到
+  `RWmod/cache/grammar_base.json` / `grammar_merged.json`，并输出规则条数/被改写条数到
+  `RWmod/cache/highlight_rule_report.txt`（结构对齐才是"与内置一致"的根证据）。**不要再做成开关**。
+- 默认规则 = 内置语法复刻：`HighlightRulesDefaults` 的 `SLOTS` 表**逐条对应**内置语法里每条带 scope 的规则
+  （`instance` = 该 scope 内的第几条，语法里同一条常定义两份 → 0/1），首次运行/「重置为内置规则」写入。
+  - **「带 scope 的规则」的定义（2026-09-15 血泪）**：不仅规则对象的 `name`，**`captures` / `beginCaptures` /
+    `endCaptures` 里每个具名捕获的 `name` 也算一条**，正文取所属规则的 `match`/`begin`。
+    节括号 `punctuation.definition.section.begin/end.ini`、节后缀 `entity.name.section.suffix.ini`、
+    `@memory` 快捷键的 5 个片段、键名 `keyword.key.ini`、冒号 `punctuation.separator.ini`
+    **全都只出现在捕获里** —— 早期收集器只读规则级 name，把这一整批漏了（18 条），
+    界面上就成了「内置语法里没有这个高亮类型」。**共 92 条，一条都不能少**。
+  - **验收指标**：`RWmod/cache/defaults_report.txt` 的 `parity:` 行必须是
+    `内置规则=N, 已复刻=N … → 完全一致`（当前 92/92），且紧邻的 `逐条对账小结:` 必须是
+    `无人认领=0 原文不一致=0`。对账按 `(scope, 该 scope 内第几条)` 这把**钥匙集合**比，
+    **不许用 `distinct()` 计数**——去重会把「两个槽位指同一条内置规则（撞车）」掩盖成"完全一致"，
+    历史上 节后缀 槽位写错 scope 又恰好与 节名 撞在同一把钥匙上，就是这么骗过对账的。
+    单测 `slotsClaimEveryScopedBuiltinRuleExactlyOnce` / `defaultSlotsMatchGrammarRuleCounts` 会拦住。
+  - **一条内置规则只能有一个槽位主人**：主题里「逻辑符/运算符」「快捷变量/内存」这种一个概念两组配色键，
+    槽位只给其中**一个**类别（否则两类别指向同一条规则 = 撞车）。同理**同一个展示分组不能引用两个不同
+    scope**（会把两条规则合成一条正则，用户看不出、对账也分不清），所以 `@memory` 的每个片段各自成组。
+  - **同 scope 且正文完全相同**的重复定义合并成一个 UI 分组（不重复显示同一条规则）；
+    正文不同的（如帧率 vs 内置属性、路径点类型两份写法不同）保持分开。
+  - **顶层分组默认折叠（2026-09-15）**：分组名后缀只有两种含义——
+    `(顶层)` = 语法**顶层另一处**、正文与块内那份**不同**的副本（如比较符顶层多一个 `=`、路径点类型顶层多 `guard|保护`）；
+    `(重复定义)` = 与上一组**正文完全相同**、只是语法里写了两遍（合成一组，改动同时作用于两处）。
+    规则页默认**不显示** `(顶层)` 分组（内置语法在「键值对块内」和「顶层」各写了一份，并排显示像重复），
+    开关在规则页顶部（`SettingsManager.highlightRulesShowTopLevel`），类别里也有「另有 N 个顶层分组已折叠，点此展开」。
+    **折叠只影响显示**：那些规则照旧参与合并与高亮，`buildScreenItems` 只是过滤列表
+    （单测 `HighlightRulesScreenModelTest`；折叠后一个分组都不剩的类别仍回落到「还没有规则」占位）。
+  - **类别完整性（2026-09-15 重构）**：**规则页的类别与「自定义高亮」的类型是同一套词表**，
+    两边都从 `DarkThemeColors.targetScopes` 派生（`availableCategories` = `["ui","plainText"] + targetScopes.keys`，
+    `categoryScopes` 直接取 `targetScopes`）。**不要再手写类别列表**：历史上这里自造了 43 个类别，
+    拆出「音效常量/效果常量/生成常量/块注释/多行字符串/正斜杠分隔」这些自定义高亮里根本没有的名字，
+    而那些 scope（`support.constant.sound.ini`、`string.multiline.ini`、`keyword.control.ini`…）
+    在内置语法里出现 **0 次**，颜色永远不会生效。当前 = **43 个配色键 + ui + plainText = 45 个类别**，
+    其中 25 个有内置规则（443 条）；**没有任何规则的类别也要显示**（「还没有规则」+「+ 规则」按钮）。
+  - **归属校验（写规则必须真的能变色）**：每个 scope 用 `themeCategoryOfScope`
+    （= `SoraEditorInitializer.findCategoryForScopes` 的首命中规则）解析回来**必须还是它自己**。
+    三条单测钉死：`categoriesMatchCustomHighlightTypesExactly`（两页词表同集合同顺序）、
+    `everyCategoryScopeResolvesBackToItself`（类别持有它自己的 scope）、
+    `everyGrammarScopeIsOwnedByExactlyOneResolvingCategory`（语法里每个 scope 都有人管）。
+    已修正的错位：节名 `entity.name.section.ini` 由 `section` → `sectionBracket`、
+    点访问符 `punctuation.accessor.ini` 由 `decoration` → `operator`、
+    `storage.type.ini` 补上真实存在的 `type` 键；`boolean`/`constant` 并入 `team`（主题里本就同色）。
+  - **不参与 scope 着色的两个类型**：`ui`（编辑器符号匹配高亮）与 `plainText`（全局前景色）
+    在规则页显示「非 scope 着色」，不显示「+ 规则」「重置」（见 `HighlightRulesScreen`）。
+  - **主题必须有对应 scope 规则，否则该类别改不动颜色**：`applyScopeColors` 是**替换主题里已有规则**的
+    foreground，主题里没有这条 scope 规则 → 该类别写了规则也没有可替换的对象。
+    内置语法会产出的 36 个 scope 里，唯一缺的是 `punctuation.ignored.ini`（相邻双引号 `""` / 连续单引号 `''`
+    的装饰符，属「装饰符」类别）——2026-09-15 已给 `dark_vs/light_vs/pure/custom` 四个完整主题补上该规则
+    （颜色填各自 `plainText`，外观不变），现在 44 条 scope 规则 = 43 个配色键 + 装饰符。
+  - **类别 id 迁移**：旧规则文件的 `section→sectionBracket`、`boolean`/`constant`→`team`，
+    已删类别丢弃（`CATEGORY_ID_MIGRATION`，在 `parseRules` 白名单判断**之前**应用，否则旧 id 会被直接丢掉）。
+  - `declaredGroups()` 只返回**实际存在**的分组；空类别的显示入口由 UI 的占位组实现。
+  - 能拆字面量的拆成多条关键字规则（每条带 `source` + `sourceInstance`）；拆不出的整条按**正则**复刻
+    （数字/参数/括号/引号/色值/运算符/节名等，用户能看到并改）。
+  - 复刻机制有实质改动时上调 `HighlightRuleManager.DEFAULTS_VERSION`（当前 4）：启动时用新复刻替换旧的
+    默认规则（用户手写规则 `source` 为空，会保留）。
+- 热生效：规则变化 `revision++`（Compose 状态）→ `SoraCodeEditor` 的 `LaunchedEffect(highlightRulesRevision)`
+  就地重建语言；`ReadOnlyCodeEditor` 在创建时同样走合并语法。
+- 规则**优先于内置规则**：同一 token 出现在多个类别时，`availableCategories` 里靠前的类别胜出。
+
+### 10. 项目硬性要求（docs/项目要求.txt，保留的需求定义）
 
 - 返回逻辑：从哪个页面打开，返回到哪个页面（见约定 7）。
 - 页面已有全局标题栏，不额外新增。

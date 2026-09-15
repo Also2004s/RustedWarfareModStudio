@@ -19,6 +19,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.rwmodstudio.R
 import com.rwmodstudio.core.DarkThemeColors
+import com.rwmodstudio.core.HighlightRuleManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.translation.BehaviorVerifier
@@ -207,12 +208,16 @@ fun SoraCodeEditor(
     onSearchResultUpdate: ((count: Int, currentIndex: Int) -> Unit)? = null,
     onCanUndoRedoChange: ((canUndo: Boolean, canRedo: Boolean) -> Unit)? = null,
     onLitLinesChange: ((Set<Int>) -> Unit)? = null,
+    // 括号诊断问题列表回调（主线程，清空时回调空列表）：供宿主显示角标/跳转
+    onBracketIssues: ((List<BracketIssue>) -> Unit)? = null,
     onLightbulbToggle: ((line: Int, isLit: Boolean) -> Unit)? = null,
     onReady: ((CodeEditor) -> Unit)? = null,
     onToolbarAction: ((EditorToolbarAction) -> Unit)? = null,
     onSymbolInsert: ((String) -> Unit)? = null,
     rainbowSettingsTick: Int = 0,
     sectionHighlightTick: Int = 0,
+    // 自定义高亮规则修订号（HighlightRuleManager.revision）：变化时就地重建语言，规则即时生效
+    highlightRulesRevision: Int = HighlightRuleManager.revision,
     // 外部（如继承链对话框开合）触发重新应用主题/自定义颜色：扑灭其他实例
     // 创建配色方案时全局 ThemeRegistry 派发对本实例自定义颜色的清空。
     themeRefreshTick: Int = 0
@@ -615,6 +620,59 @@ fun SoraCodeEditor(
         }
     }
 
+    /**
+     * 构建编辑器语言：有自定义高亮规则（开发者模式→规则）时用合并语法的独立注册表，
+     * 否则走原单例注册表。规则变化后由 [highlightRulesRevision] 触发的重建复用本函数。
+     */
+    fun buildIniLanguage(): IniLanguage? {
+        // 只调一次：有自定义规则时拿到合并语法的注册表，否则 null → 走原单例注册表
+        val customRegistry = HighlightRuleManager.registryWithCustomRules(context)
+        Log.d(
+            TAG,
+            "buildIniLanguage: customGrammar=${customRegistry != null}, " +
+                "rules=${HighlightRuleManager.totalActiveRules()}, enabled=${HighlightRuleManager.enabled}"
+        )
+        val tmLanguage = try {
+            if (SettingsManager.rainbowBrackets) {
+                try {
+                    RainbowTextMateLanguage.create("source.ini", false, customRegistry)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create rainbow language, fallback to plain TextMate", e)
+                    TextMateLanguage.create("source.ini", customRegistry, false)
+                }
+            } else {
+                TextMateLanguage.create("source.ini", customRegistry, false)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create TextMate language", e)
+            null
+        } ?: return null
+        return IniLanguage(tmLanguage).apply {
+            this.completionProvider = completionProvider
+            this.currentSectionName = currentSectionName
+            this.sectionFilters = sectionFilters
+            this.sectionCompletionEnabled = sectionCompletionEnabled
+            this.bracketDiagnosticsEnabled = SettingsManager.bracketDiagnostics
+            this.bracketIssuesListener = onBracketIssues
+        }
+    }
+
+    // 自定义高亮规则变化（开发者模式→规则里增删改）：就地重建编辑器语言，无需重启 App。
+    // 仅修订号变化时执行，首次组合时跳过（初次创建已在 AndroidView factory 里做）。
+    var appliedRulesRevision by remember { mutableStateOf(highlightRulesRevision) }
+    LaunchedEffect(highlightRulesRevision) {
+        if (highlightRulesRevision == appliedRulesRevision) return@LaunchedEffect
+        appliedRulesRevision = highlightRulesRevision
+        val editor = editorRef.value ?: return@LaunchedEffect
+        val old = languageRef.value
+        val rebuilt = buildIniLanguage() ?: return@LaunchedEffect
+        if (active) editor.setEditorLanguage(rebuilt)
+        languageRef.value = rebuilt
+        old?.destroy()
+        refreshLineStyles(editor)
+        Log.d(TAG, "Custom highlight rules changed → language rebuilt (revision=$highlightRulesRevision)")
+    }
+
     // 前台/后台切换：非前台实例停用 TextMate 高亮（释放渲染），前台恢复语言。
     // 编辑器就绪后（editorRef 非 null）或 active 变化时执行。
     LaunchedEffect(active, editorRef.value) {
@@ -780,32 +838,13 @@ fun SoraCodeEditor(
                 // 替换默认补全组件：回车键不提交补全项，而是关闭列表让回车正常换行
                 replaceComponent(EditorAutoCompletion::class.java, NoEnterCommitAutoCompletion(this))
 
-                val tmLanguage = try {
-                    if (SettingsManager.rainbowBrackets) {
-                        try {
-                            RainbowTextMateLanguage.create("source.ini", false)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to create rainbow language, fallback to plain TextMate", e)
-                            TextMateLanguage.create("source.ini", false)
-                        }
-                    } else {
-                        TextMateLanguage.create("source.ini", false)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create TextMate language", e)
-                    null
-                }
-                if (tmLanguage != null) {
-                    val language = IniLanguage(tmLanguage).apply {
-                        this.completionProvider = completionProvider
-                        this.currentSectionName = currentSectionName
-                        this.sectionFilters = sectionFilters
-                        this.sectionCompletionEnabled = sectionCompletionEnabled
-                        this.bracketDiagnosticsEnabled = SettingsManager.bracketDiagnostics
-                    }
+                // 自定义高亮规则（开发者模式→规则）：有启用规则时用「内置 + 用户规则」合并语法的独立注册表，
+                // 否则返回 null，走原单例注册表（行为与历史完全一致）
+                val language = buildIniLanguage()
+                if (language != null) {
                     setEditorLanguage(language)
                     languageRef.value = language
-                    Log.d(TAG, "Language created, completionProvider=${completionProvider != null}")
+                    Log.d(TAG, "Language created, completionProvider=${completionProvider != null}, rules=${HighlightRuleManager.totalActiveRules()}")
                 } else {
                     Log.e(TAG, "No TextMate language set; highlighting will be disabled")
                 }

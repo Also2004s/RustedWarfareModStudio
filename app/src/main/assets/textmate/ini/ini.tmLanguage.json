@@ -8,19 +8,17 @@
       "name": "comment.line.ini"
     },
     {
-      "comment": "Section headers with underscore - [section_name]",
-      "match": "(\\[)(.+?)(_+.+?)(\\])",
+      "comment": "Section headers with underscore - [section_name]，按已知节名族白名单拆分（原子组不捕获，族名走规则级 name 与普通节名同色，后缀=_变体 红色）；global_resource/leg_arm 等多下划线族名不再被拦腰拆开，未知节名整段同色",
+      "match": "(?i)(\\[)(?>ai|core|graphics|attack|movement|action|hiddenaction|effect|animation|attachment|canbuild|decal|global_resource|resource|turret|projectile|leg_arm|leg|arm|placementrule|核心|图像|AI|攻击|运动|行动|隐藏行动|效果|动画|附属|可建造|贴花|全局资源|资源|炮塔|抛射体|腿|放置规则)(_+[^\\]]+?)(\\])",
+      "name": "entity.name.section.ini",
       "captures": {
         "1": {
           "name": "punctuation.definition.section.begin.ini"
         },
         "2": {
-          "name": "entity.name.section.prefix.ini"
-        },
-        "3": {
           "name": "entity.name.section.suffix.ini"
         },
-        "4": {
+        "3": {
           "name": "punctuation.definition.section.end.ini"
         }
       }
@@ -133,7 +131,7 @@
         },
         {
           "comment": "Comparison operators (logical_keywords2 color) - 比较运算符",
-          "match": "(<|>|<=|>=|==|!=)",
+          "match": "(<=|>=|==|!=|<|>)",
           "name": "keyword.operator.comparison.ini"
         },
         {
@@ -145,6 +143,11 @@
           "comment": "Arithmetic operators (logical_keywords2 color) - 算术运算符",
           "match": "([+\\-*/%$]|\\*\\*)",
           "name": "keyword.operator.arithmetic.ini"
+        },
+        {
+          "comment": "ROOT/CUSTOM/SHARED paths",
+          "match": "(ROOT|CUSTOM|SHARED|CORE|SHADOW):",
+          "name": "constant.language.path.ini"
         },
         {
           "comment": "Reference prefixes (reference color) - 引用前缀，包含self.resource和自身资源",
@@ -162,14 +165,14 @@
           "name": "constant.language.boolean.ini"
         },
         {
-          "comment": "Team values (boolean color)",
+          "comment": "Team values (team color) - 队伍值，走 constant.language.team.ini 供自定义高亮单独调色",
           "match": "\\b(own|notOwn|neutral|allyNotOwn|ally|enemy|any|己方|敌方|盟友|中立|所有|除自己外盟友)\\b",
-          "name": "constant.language.boolean.ini"
+          "name": "constant.language.team.ini"
         },
         {
-          "comment": "Waypoint types (boolean color)",
+          "comment": "Waypoint types (team color) - 路径点类型，走 constant.language.waypoint.ini 供自定义高亮单独调色",
           "match": "\\b(move|attackMove|attack|touchTarget|build|follow|建立|移动|攻击|移动攻击|靠近目标|跟随|创建)\\b",
-          "name": "constant.language.boolean.ini"
+          "name": "constant.language.waypoint.ini"
         },
         {
           "comment": "Movement types (uppercase_keywords color)",
@@ -192,9 +195,9 @@
           "name": "constant.language.boolean.ini"
         },
         {
-          "comment": "Function calls (boolean color)",
-          "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移)\\b",
-          "name": "constant.language.boolean.ini"
+          "comment": "Function calls (function color) - 函数调用，走 support.function.ini 供自定义高亮单独调色",
+          "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移|squareRoot|readUnitMemory|平方根|读取单位内存)\\b",
+          "name": "support.function.ini"
         },
         {
           "comment": "Reference targets (reference color)",
@@ -213,17 +216,17 @@
         },
         {
           "comment": "Parameter keywords with equals (args color)",
-          "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|指定时间内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
+          "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|几秒内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
           "name": "variable.parameter.ini"
         },
         {
           "comment": "Chinese functions - 自身检测",
-          "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|有全局标签)\\b",
+          "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|自身在水上|自身在液体上|自身在地面高度|自身在开阔地带|自身在地块类型上|自身到最高速度|自身在中立队伍|自身属于AI控制|自身能量空|自身能量满|自身弹药空|自身建造完成|自身资源大于|自身有父单位|自身有子单位|自身受到伤害|自身运输单位有标签|有全局标签|队伍获胜|队伍失败|队伍无单位|自身有活动的路径点)\\b",
           "name": "string.unquoted.value.ini"
         },
         {
           "comment": "Chinese functions - 单位数量",
-          "match": "\\b(队伍中此单位数量|敌人有此单位数量|全图中此单位数量)\\b",
+          "match": "\\b(队伍中此单位数量|敌人有此单位数量|盟友有此单位数量|中立有此单位数量|敌对中立拥有此单位数量|全图中此单位数量)\\b",
           "name": "string.unquoted.value.ini"
         },
         {
@@ -233,20 +236,13 @@
         },
         {
           "comment": "Chinese variables - 自身属性 (不包括自身资源/存活时间/自身自定义计时器)",
-          "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数)\\b",
+          "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数|自身弹药包括队列|自身能量包括队列|自身建造数量|自身资源价格|自身资源类型|自身最大移动速度|自身队列量|自身队伍id|自身运输数量)\\b",
           "name": "string.unquoted.value.ini"
         },
         {
-          "comment": "Chinese time functions - 存活时间, 自身自定义计时器 (reference color)",
-          "match": "\\b(存活时间|自身自定义计时器)(\\s*\\()",
-          "captures": {
-            "1": {
-              "name": "variable.other.reference.ini"
-            },
-            "2": {
-              "name": "punctuation.bracket.round.ini"
-            }
-          }
+          "comment": "Chinese time functions - 存活时间, 自身自定义计时器, 最后转换时间 (reference color)，不要求紧跟左括号",
+          "match": "\\b(存活时间|自身自定义计时器|最后转换时间)\\b",
+          "name": "variable.other.reference.ini"
         },
         {
           "comment": "Chinese parameters",
@@ -276,8 +272,8 @@
           "name": "punctuation.accessor.ini"
         },
         {
-          "comment": "Default value - 其他未匹配的值（只匹配单词字符）",
-          "match": "\\w+",
+          "comment": "Default value - 其他未匹配的值（只匹配单词字符；词边界按 Unicode 词字符判定，避免 ASCII 紧贴中文时只给 ASCII 部分着色）",
+          "match": "\\b\\w+\\b",
           "name": "string.unquoted.value.ini"
         }
       ]
@@ -293,14 +289,14 @@
       "name": "constant.language.boolean.ini"
     },
     {
-      "comment": "Team values (boolean color) - 翻译库: own=己方, neutral=中立, ally=盟友, enemy=敌方, any=所有, allyNotOwn=除自己外盟友",
+      "comment": "Team values (team color) - 翻译库: own=己方, neutral=中立, ally=盟友, enemy=敌方, any=所有, allyNotOwn=除自己外盟友；走 constant.language.team.ini 供自定义高亮单独调色",
       "match": "\\b(own|notOwn|neutral|allyNotOwn|ally|enemy|any|己方|敌方|盟友|中立|所有|除自己外盟友)\\b",
-      "name": "constant.language.boolean.ini"
+      "name": "constant.language.team.ini"
     },
     {
-      "comment": "Waypoint types (boolean color) - 翻译库: move=移动, build=建立, attack=攻击, attackMove=移动攻击, touchTarget=靠近目标, follow=跟随, created=创建, guard=保护",
+      "comment": "Waypoint types (team color) - 翻译库: move=移动, build=建立, attack=攻击, attackMove=移动攻击, touchTarget=靠近目标, follow=跟随, created=创建, guard=保护；走 constant.language.waypoint.ini 供自定义高亮单独调色",
       "match": "\\b(move|attackMove|attack|touchTarget|build|follow|guard|建立|移动|攻击|移动攻击|靠近目标|跟随|创建|保护)\\b",
-      "name": "constant.language.boolean.ini"
+      "name": "constant.language.waypoint.ini"
     },
     {
       "comment": "Movement types (uppercase_keywords color) - 翻译库: AIR=空中, HOVER=两栖, LAND=陆地, WATER=水面, OVER_CLIFF=跨悬崖, OVER_CLIFF_WATER=跨悬崖和水面",
@@ -333,14 +329,19 @@
       "name": "keyword.operator.logical.ini"
     },
     {
-      "comment": "Comparison operators (logical_keywords2 color)",
-      "match": "(<|>|<=|>=|==|!=|=)",
+      "comment": "Comparison operators (logical_keywords2 color)，含赋值=（长运算符在前避免 <=/>= 被截半）",
+      "match": "(<=|>=|==|!=|<|>|=)",
       "name": "keyword.operator.comparison.ini"
     },
     {
       "comment": "Arithmetic operators (logical_keywords2 color) - include $ for variable interpolation",
       "match": "([+\\-*/%$]|\\*\\*)",
       "name": "keyword.operator.arithmetic.ini"
+    },
+    {
+      "comment": "Comma (symbol3 color) - 逗号",
+      "match": "[,]",
+      "name": "punctuation.separator.comma.ini"
     },
     {
       "comment": "Special reference keywords - 空单位 (nullUnit)",
@@ -393,9 +394,9 @@
       "name": "constant.language.boolean.ini"
     },
     {
-      "comment": "Function calls (boolean color) - 翻译库中的函数",
-      "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移)\\b",
-      "name": "constant.language.boolean.ini"
+      "comment": "Function calls (function color) - 翻译库中的函数；走 support.function.ini 供自定义高亮单独调色",
+      "match": "\\b(select|createMarker|distance|distanceSquared|distanceBetween|directionBetween|getAsMarker|getOffsetAbsolute|getOffsetRelative|选择|创建标记|距离|距离方差|间距|之间方向|获取为标记|获取绝对偏移|获取相对偏移|squareRoot|readUnitMemory|平方根|读取单位内存)\\b",
+      "name": "support.function.ini"
     },
     {
       "comment": "Reference targets (reference color) - 翻译库中的引用目标，使用reference颜色而非boolean",
@@ -404,7 +405,7 @@
     },
     {
       "comment": "Parameter keywords with equals (args color) - 翻译库中的参数关键词",
-      "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|指定时间内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
+      "match": "\\b(thisActionTarget|eventSource|activeWaypointTarget|includes|type|greaterThan|lessThan|equalTo|withinRange|incompleteBuildings|factoryQueue|withinSeconds|laterThanSeconds|setFlag|hasFlag|withTag|unsetFlag|id|slot|empty|full|shield|energy|ammo|credits|x|y|dirOffset|maxSpawnLimit|spawnChance|recursionLimit|offsetHeight|offsetX|offsetY|offsetRandomX|offsetRandomY|offsetRandomXY|offsetDir|offsetRandomDir|xOffsetRelative|yOffsetRelative|setToTeamOfLastAttacker|gridAlign|skipIfOverlapping|addResources|transportedUnitsToTransfer|copyWaypointsFrom|alwaysStartDirAtZero|alwayStartDirAtZero|有标签|超过|少于|等于|范围内|未完成建筑|包含队列中的|几秒内|几秒后|设置标志|拥有标志|需标签|取消标志|空|满|护盾|能量|弹药|资金|偏移高度|偏移量x|偏移量y|偏移随机X|偏移随机Y|偏移随机XY|偏移角度|偏移随机角度|X轴相对偏移|Y轴相对偏移|所属攻击者|对齐网格|跳过条件|增加资源|载员至载具|复制路径来自|固定角度为零|朝向总是零度)\\s*==?",
       "name": "variable.parameter.ini"
     },
     {
@@ -414,22 +415,54 @@
     },
     {
       "comment": "Chinese functions - 自身检测 (翻译库)",
-      "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|有全局标签)\\b",
+      "match": "\\b(自身有标签|自身有资源|自身有标志|自身队伍有单位|自身队伍无单位|自身在移动|自身在攻击|自身在天上|自身在水中|自身在水下|自身在悬崖上|自身在水上|自身在液体上|自身在地面高度|自身在开阔地带|自身在地块类型上|自身到最高速度|自身在中立队伍|自身属于AI控制|自身能量空|自身能量满|自身弹药空|自身建造完成|自身资源大于|自身有父单位|自身有子单位|自身受到伤害|自身运输单位有标签|有全局标签|队伍获胜|队伍失败|队伍无单位|自身有活动的路径点)\\b",
       "name": "string.unquoted.value.ini"
     },
     {
       "comment": "Chinese functions - 单位数量 (翻译库)",
-      "match": "\\b(队伍中此单位数量|敌人有此单位数量|全图中此单位数量)\\b",
+      "match": "\\b(队伍中此单位数量|敌人有此单位数量|盟友有此单位数量|中立有此单位数量|敌对中立拥有此单位数量|全图中此单位数量)\\b",
       "name": "string.unquoted.value.ini"
     },
     {
       "comment": "Chinese variables - 自身属性 (翻译库) - excluding 自身资源/存活时间/自身自定义计时器",
-      "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数)\\b",
+      "match": "\\b(自身血量|自身最大血量|自身护盾|自身能量|自身速度|自身角度|自身高度|自身弹药|自身杀敌数|自身弹药包括队列|自身能量包括队列|自身建造数量|自身资源价格|自身资源类型|自身最大移动速度|自身队列量|自身队伍id|自身运输数量)\\b",
       "name": "string.unquoted.value.ini"
     },
     {
       "comment": "Chinese parameters (翻译库)",
       "match": "\\b(有标签|需标签|范围内|超过|少于)\\b",
+      "name": "string.unquoted.value.ini"
+    },
+    {
+      "comment": "Chinese time functions - 存活时间, 自身自定义计时器, 最后转换时间 (reference color)，不要求紧跟左括号",
+      "match": "\\b(存活时间|自身自定义计时器|最后转换时间)\\b",
+      "name": "variable.other.reference.ini"
+    },
+    {
+      "comment": "Chinese variables - 自身资源 (reference color)",
+      "match": "\\b(自身资源)\\b",
+      "name": "variable.other.reference.ini"
+    },
+    {
+      "comment": "Chained method calls like .获取相对偏移",
+      "match": "\\.(获取相对偏移|获取绝对偏移|获取为标记|之间方向|距离|距离方差|间距)(\\s*\\()",
+      "captures": {
+        "1": {
+          "name": "constant.language.boolean.ini"
+        },
+        "2": {
+          "name": "punctuation.bracket.round.ini"
+        }
+      }
+    },
+    {
+      "comment": "Dot accessor - 点访问符",
+      "match": "\\.",
+      "name": "punctuation.accessor.ini"
+    },
+    {
+      "comment": "Default value - 其他未匹配的值（只匹配单词字符；词边界按 Unicode 词字符判定，避免 ASCII 紧贴中文时只给 ASCII 部分着色）",
+      "match": "\\b\\w+\\b",
       "name": "string.unquoted.value.ini"
     }
   ],

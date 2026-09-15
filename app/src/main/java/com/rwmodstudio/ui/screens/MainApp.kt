@@ -62,6 +62,7 @@ import com.rwmodstudio.MainActivity
 import com.rwmodstudio.core.BookmarkManager
 import com.rwmodstudio.core.BrowserSpaceManager
 import com.rwmodstudio.core.DiffOp
+import com.rwmodstudio.core.HighlightRuleManager
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
@@ -95,7 +96,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO }
+enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -131,6 +132,12 @@ fun MainApp() {
 
     val scope = rememberCoroutineScope()
     var currentScreen by rememberSaveable(stateSaver = screenSaver) { mutableStateOf(Screen.HOME) }
+
+    // 自定义高亮规则（开发者模式→规则）：首帧前同步加载一次（幂等、文件小），
+    // 规则文件不存在时自动写入一份「内置语法复刻」作为默认规则；
+    // 保证编辑器创建语言时规则已就绪，且不出现「先内置后自定义」的闪烁
+    HighlightRuleManager.attachContext(context)
+    HighlightRuleManager.load(context)
 
     // ===== 自动检查更新（一天最多提示一次；用户关闭后该版本不再提示） =====
     LaunchedEffect(Unit) {
@@ -767,6 +774,7 @@ fun MainApp() {
                     Screen.PROJECT_MANAGER -> "项目管理"
                     Screen.TODO_LIST -> "待办"
                     Screen.MOD_INFO -> "模组信息"
+                    Screen.HIGHLIGHT_RULES -> "规则"
                 }
                 // 编辑器页的全局菜单栏改为浮层（渲染在 Screen.EDITOR 分支，随 topFold 上滑隐藏），
                 // 此处仅渲染非编辑器页的顶栏，始终可见、不参与折叠。
@@ -1266,8 +1274,12 @@ fun MainApp() {
                         },
                         onOpenCompletionTypes = {
                             pushScreen(Screen.COMPLETION_TYPES)
+                        },
+                        onOpenHighlightRules = {
+                            pushScreen(Screen.HIGHLIGHT_RULES)
                         }
                     )
+                    Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
                     Screen.COMPLETION_TYPES -> CompletionTypeScreen(
                         callableCategory = completionTypesCallableCat,
                         onCloseCallableCategory = { completionTypesCallableCat = null }

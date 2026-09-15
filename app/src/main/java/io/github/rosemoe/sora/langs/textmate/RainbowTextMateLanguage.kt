@@ -44,5 +44,29 @@ class RainbowTextMateLanguage private constructor(
                 collectIdentifiers
             )
         }
+
+        /**
+         * 用指定注册表创建（供「自定义高亮规则」使用：注册表里已注册
+         * 「内置 + 用户规则」合并语法；传 null 等同默认单例注册表）。
+         */
+        @JvmStatic
+        fun create(
+            scopeName: String,
+            collectIdentifiers: Boolean,
+            grammarRegistry: GrammarRegistry?
+        ): RainbowTextMateLanguage {
+            if (grammarRegistry == null) return create(scopeName, collectIdentifiers)
+            val themeRegistry = ThemeRegistry.getInstance()
+            val grammar = grammarRegistry.findGrammar(scopeName)
+                ?: throw IllegalArgumentException("Language with scope name $scopeName not found")
+            val configuration = grammarRegistry.findLanguageConfiguration(grammar.scopeName)
+            return RainbowTextMateLanguage(
+                grammar,
+                configuration,
+                grammarRegistry,
+                themeRegistry,
+                collectIdentifiers
+            )
+        }
     }
 }

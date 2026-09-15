@@ -432,6 +432,37 @@ object SettingsManager {
         get() = settings.getString("section_highlight_color", "#15F05E5A") ?: "#15F05E5A"
         set(value) = settings.edit().putString("section_highlight_color", value).apply()
 
+    /** 自定义高亮弹窗上次选中的高亮分类（remember 会在弹窗关闭时丢失，故持久化）。 */
+    var lastDarkTokenCategory: String
+        get() = settings.getString("last_dark_token_category", "section") ?: "section"
+        set(value) = settings.edit().putString("last_dark_token_category", value).apply()
+
+    /**
+     * 自定义代码高亮规则总开关（开发者模式→规则）。
+     * 关闭时完全不介入内置 grammar，编辑器走原单例注册表；规则本体见
+     * [HighlightRuleManager] / `RWmod/config/highlight_rules.json`。
+     */
+    var highlightRulesEnabled: Boolean
+        get() = settings.getBoolean("highlight_rules_enabled", true)
+        set(value) = settings.edit().putBoolean("highlight_rules_enabled", value).apply()
+
+    /**
+     * 已写入的「内置复刻默认规则」版本（[HighlightRuleManager.DEFAULTS_VERSION]）。
+     * 复刻机制改动后上调该版本，启动时会用新复刻替换旧的默认规则（用户手写规则保留）。
+     */
+    var highlightRulesDefaultsVersion: Int
+        get() = settings.getInt("highlight_rules_defaults_version", 0)
+        set(value) = settings.edit().putInt("highlight_rules_defaults_version", value).apply()
+
+    /**
+     * 规则页是否显示「顶层另一处写法」的分组（名字带 `(顶层)`）。
+     * 默认**隐藏**：内置语法把同一批规则在键值对块内和顶层各写了一遍，顶层那份多数只是写法不同
+     * （如 `比较符` 顶层多一个 `=`），并排显示两行会让人以为重复。隐藏只影响显示，规则本身照旧生效。
+     */
+    var highlightRulesShowTopLevel: Boolean
+        get() = settings.getBoolean("highlight_rules_show_top_level", false)
+        set(value) = settings.edit().putBoolean("highlight_rules_show_top_level", value).apply()
+
     /**
      * 编辑器字体族。
      * 可选值：system / system_mono / jetbrains_mono / lxgw_wenkai_regular
@@ -851,9 +882,9 @@ object SettingsManager {
     var devHsvPicker: Boolean
         get() = settings.getBoolean("dev_hsv_picker", true)
         set(value) = settings.edit().putBoolean("dev_hsv_picker", value).apply()
-    /** 继承链查看（编辑器更多菜单） */
+    /** 继承链查看（编辑器更多菜单，默认开启）。仅控制「查看」入口；继承链缓存预热不受此开关影响，始终执行。 */
     var devInheritanceView: Boolean
-        get() = settings.getBoolean("dev_inheritance_view", false)
+        get() = settings.getBoolean("dev_inheritance_view", true)
         set(value) = settings.edit().putBoolean("dev_inheritance_view", value).apply()
 
     // === 保存相关子开关 ===
