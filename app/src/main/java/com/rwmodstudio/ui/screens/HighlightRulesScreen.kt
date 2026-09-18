@@ -17,9 +17,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import com.rwmodstudio.core.CustomHighlightType
+import com.rwmodstudio.core.DarkThemeColors
 import com.rwmodstudio.core.HighlightRuleManager
 import com.rwmodstudio.core.HighlightRulesDefaults
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.ThemeState
+import com.rwmodstudio.ui.components.AppDialog
+import com.rwmodstudio.ui.components.DialogActionButton
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
 import com.rwmodstudio.ui.theme.RustedBackground
 import com.rwmodstudio.ui.theme.RustedError
@@ -45,6 +50,12 @@ fun HighlightRulesScreen() {
     var showResetConfirm by remember { mutableStateOf(false) }
     // 顶层另一处写法：默认隐藏（只影响显示，规则照旧生效）；点开后就地展开
     var showTopLevel by remember { mutableStateOf(SettingsManager.highlightRulesShowTopLevel) }
+    // 新建高亮类型（用户新增类型）：**类型管理放在规则页**，「自定义高亮」只负责显示与调色
+    var showNewType by remember { mutableStateOf(false) }
+    var newTypeName by remember { mutableStateOf("") }
+    var newTypeScope by remember { mutableStateOf("") }
+    // 删除用户新增类型前的确认（内置类型不给删）
+    var confirmDeleteTypeId by remember { mutableStateOf<String?>(null) }
 
     val allList = HighlightRuleManager.allCategories()
     val activeCount = HighlightRuleManager.totalActiveRules()
@@ -183,12 +194,12 @@ fun HighlightRulesScreen() {
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("显示「顶层」分组", fontSize = 13.sp, color = RustedOnBackground)
+                    Text("显示「顶层 / 重复定义」分组", fontSize = 13.sp, color = RustedOnBackground)
                     Text(
                         if (showTopLevel) {
-                            "已显示隐藏的 $hiddenTotal 个顶层分组（与上方同名，只是语法里另一处写法不同）"
+                            "已显示隐藏的 $hiddenTotal 个分组（顶层 / 重复定义，与上方内容重复）"
                         } else {
-                            "已折叠 $hiddenTotal 个顶层分组；折叠只是不显示，它们照样参与高亮"
+                            "已折叠 $hiddenTotal 个重复分组（顶层 / 重复定义）；折叠只是不显示，它们照样参与高亮"
                         },
                         fontSize = 10.sp,
                         color = RustedOnBackground.copy(alpha = 0.45f)
@@ -205,6 +216,39 @@ fun HighlightRulesScreen() {
                         checkedTrackColor = RustedPrimary.copy(alpha = 0.3f)
                     )
                 )
+            }
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 46.dp, end = 12.dp),
+                thickness = 0.5.dp,
+                color = RustedOnBackground.copy(alpha = 0.08f)
+            )
+            // 类型管理放在规则页：「自定义高亮」那边只负责显示与调色
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        newTypeName = ""
+                        newTypeScope = ""
+                        showNewType = true
+                    }
+                    .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    null,
+                    tint = RustedPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("新建高亮类型", fontSize = 13.sp, color = RustedPrimary)
+                    Text(
+                        "建一个自定义类型，在它下面写规则就能高亮任意写法；建好后可在「自定义高亮」里单独调色",
+                        fontSize = 10.sp,
+                        color = RustedOnBackground.copy(alpha = 0.45f)
+                    )
+                }
             }
         }
 
@@ -254,13 +298,27 @@ fun HighlightRulesScreen() {
                     // 类别来自主题配色表：`scope` 为空表示这个类型不参与 scope 着色
                     //（UI 高亮 / 普通文本），此时不能写规则，界面只展示说明
                     val colorable = category.scope.isNotBlank()
-                    Text(
-                        if (colorable) "${category.label} · ${category.scope}"
-                        else "${category.label} · 非 scope 着色",
-                        fontSize = 10.sp,
-                        color = RustedOnBackground.copy(alpha = 0.4f),
-                        modifier = Modifier.padding(start = 14.dp, top = 6.dp, bottom = 2.dp)
-                    )
+                    // 用户新增类型：新建与删除都在规则页（「自定义高亮」那边只负责调色）
+                    val isCustomType = ThemeState.darkTokenColors.customTypes.any { it.id == category.categoryId }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (colorable) "${category.label} · ${category.scope}"
+                            else "${category.label} · 非 scope 着色",
+                            fontSize = 10.sp,
+                            color = RustedOnBackground.copy(alpha = 0.4f),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isCustomType) {
+                            TextButton(onClick = { confirmDeleteTypeId = category.categoryId }) {
+                                Text("删除", fontSize = 11.sp, color = RustedSecondary)
+                            }
+                        }
+                    }
                     category.lists.forEach { list ->
                         val key = category.categoryId + "\u0000" + list.listName
                         val isExpanded = key in expanded
@@ -444,7 +502,7 @@ fun HighlightRulesScreen() {
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "另有 ${category.hiddenTopLevel} 个顶层分组已折叠（内置语法在另一处写法不同），点此展开",
+                                "另有 ${category.hiddenTopLevel} 个重复分组已折叠（内置语法在另一处写法相同/不同），点此展开",
                                 fontSize = 10.sp,
                                 color = RustedOnBackground.copy(alpha = 0.4f)
                             )
@@ -490,6 +548,106 @@ fun HighlightRulesScreen() {
             }
         )
     }
+
+    // 新建高亮类型：建完立刻持久化（类型属于「自定义高亮」的配色数据，和规则文件分开存）
+    if (showNewType) {
+        AppDialog(
+            onDismissRequest = { showNewType = false },
+            title = "新建高亮类型",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { showNewType = false }
+                DialogActionButton("创建") {
+                    val label = newTypeName.trim()
+                    if (label.isEmpty()) return@DialogActionButton
+                    val colors = ThemeState.darkTokenColors
+                    val created = CustomHighlightType(
+                        DarkThemeColors.newCustomTypeId(colors.customTypes),
+                        label,
+                        newTypeScope.trim()
+                    )
+                    // 立刻落盘 + 通知编辑器/规则页刷新（新类型马上出现在下面的类别列表里）
+                    ThemeState.applyDarkTokenColors(colors.copy(customTypes = colors.customTypes + created))
+                    rulesRevision = HighlightRuleManager.revision
+                    showNewType = false
+                    Toast.makeText(context, "已新建类型「$label」，往下找它的类别写规则", Toast.LENGTH_SHORT).show()
+                }
+            }
+        ) {
+            Column {
+                Text(
+                    "新类型会出现在下面「类别：规则」里，也会出现在「自定义高亮」的类型排里（可单独调色）。" +
+                        "在它下面写关键字或正则，就能高亮任意写法 —— 规则插在内置语法最前面。",
+                    fontSize = 11.5.sp,
+                    color = RustedOnBackground.copy(alpha = 0.65f)
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = newTypeName,
+                    onValueChange = { newTypeName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("类型名称", fontSize = 12.sp) },
+                    placeholder = { Text("例如：我的标记", fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RustedPrimary,
+                        unfocusedBorderColor = RustedOnBackground.copy(alpha = 0.2f),
+                        cursorColor = RustedPrimary
+                    )
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = newTypeScope,
+                    onValueChange = { newTypeScope = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("scope（可留空）", fontSize = 12.sp) },
+                    placeholder = { Text("留空 = 自动生成 user.custom.xxx", fontSize = 11.sp) },
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 12.sp,
+                        fontFamily = AppCodeFontFamily
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = RustedPrimary,
+                        unfocusedBorderColor = RustedOnBackground.copy(alpha = 0.2f),
+                        cursorColor = RustedPrimary
+                    )
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "scope 是语法里的标签名，带上同名标签的文本会归这个类型管；不懂就留空。",
+                    fontSize = 10.5.sp,
+                    color = RustedOnBackground.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+
+    // 删除用户新增类型：先清掉它名下的规则，再删类型，最后刷新页面
+    confirmDeleteTypeId?.let { id ->
+        val label = DarkThemeColors.labelOf(id, ThemeState.darkTokenColors)
+        AppDialog(
+            onDismissRequest = { confirmDeleteTypeId = null },
+            title = "删除类型",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { confirmDeleteTypeId = null }
+                DialogActionButton("删除", color = RustedError) {
+                    HighlightRuleManager.removeCategory(id)
+                    val colors = ThemeState.darkTokenColors
+                    ThemeState.applyDarkTokenColors(
+                        colors.copy(customTypes = colors.customTypes.filterNot { it.id == id })
+                    )
+                    rulesRevision = HighlightRuleManager.revision
+                    confirmDeleteTypeId = null
+                    Toast.makeText(context, "已删除类型「$label」", Toast.LENGTH_SHORT).show()
+                }
+            }
+        ) {
+            Text(
+                "确定删除类型「$label」？它下面写过的规则会一起消失，这个操作不能撤销。",
+                fontSize = 12.sp
+            )
+        }
+    }
 }
 
 /** 逐列表重置（按 categoryId + listName 定位） */
@@ -528,7 +686,7 @@ internal fun buildScreenItems(
     showTopLevel: Boolean
 ): List<CategoryVm> {
     val actualByKey = actual.associateBy { it.categoryId + "\u0000" + it.listName }
-    return HighlightRuleManager.availableCategories.map { info ->
+    return HighlightRuleManager.allCategoryInfos.map { info ->
         val names = actual
             .filter { it.categoryId == info.id }
             .map { it.listName }

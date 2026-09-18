@@ -267,7 +267,12 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         }
         // enum/type/relation 值经翻译库翻译：字典命中才显示中文（如 move→移动、own→己方），未命中保持英文原样；
         // 不改翻译引擎、不新增字典条目，保存反译依赖字典既有 zhToEn 映射。
-        val translated = translateDictValues(values, request.translationDict, param.type in setOf("enum", "type", "relation"))
+        // 该值为单引号包裹的参数类型，故把「是否带引号」一并交给场景闸（引号保护开关生效时须用英文）。
+        val quoted = param.type in quotedValueParamTypes
+        val translated = translateDictValues(
+            values, request.translationDict,
+            param.type in setOf("enum", "type", "relation"), quoted
+        )
         // 参数枚举值的中文说明：配置了 valueFile（如 addWaypoint_type/relation）时按
         // data.value.<valueFile>.<英文值> 查 value_desc.json，为每个值附带说明（如 回收/修理），
         // 未配置 valueFile 或未命中回退参数类型说明。
@@ -518,13 +523,57 @@ internal data class ParamValueSuggestion(
 )
 
 /**
+ * 场景闸：括号内（句中）该批值能否整体用中文 —— 两道闸，任一命中就整批保持英文。
+ *
+ * **闸1 · 整值专用词**（翻译引擎行为，2026-09-17 核实）：
+ * 引擎对「value 内部」只做 enToZh/zhToEn 逐词翻译（见 TranslationDict.compilePatterns 注释：
+ * 正则只用这两个表，不含 valueTranslations），而 LAND/WATER/AIR/HOVER/OVER_CLIFF/
+ * OVER_CLIFF_WATER/NONE/AUTO 这类值装载时被单独放进 valueTranslations，**仅当「整个 value 恰好
+ * 就是该值」时才翻译**（`运动类型: LAND` → 陆地）。于是同一批值在括号里引擎既不翻，
+ * 保存反译也认不回（留中文值给铁锈）。整批判定，避免同一列表中文/英文混排。
+ *
+ * **闸2 · 引号保护**（屏蔽词开关「引号内的词不翻译」，默认关）：
+ * 该开关打开时引擎把引号内内容整段占位保护 → 引号里的中文既不显示也不反译
+ * （实测 `type='移动'` 保存后原样留中文）。故 [quoted] 为真且开关生效时必须用英文。
+ *
+ * 反例（继续用中文是安全的，不要一起改）：move/attack/guard、own/ally/enemy 等普通词条在
+ * enToZh/zhToEn 里，句中双向都翻得动（`type=move` ↔ `type=移动`）。
+ *
+ * @param quoted 该值插入时是否会被单引号包裹（见 [quotedValueParamTypes]）
+ * @param quotedProtected 屏蔽词开关「引号内的词不翻译」当前是否生效
+ */
+internal fun canTranslateValuesInPhrase(
+    values: List<String>,
+    dict: TranslationDict,
+    quoted: Boolean = false,
+    quotedProtected: Boolean = false
+): Boolean {
+    if (values.any { it in dict.getSpecialValues() }) return false
+    if (quoted && quotedProtected) return false
+    return true
+}
+
+/**
  * enum/type/relation 参数值经翻译库英→中翻译（仅字典命中才变中文，未命中保持英文原样）。
  * 不修改翻译引擎、不新增字典条目；仅当 [translate] 为 true 且字典已加载时生效。
+ * 括号内属于「句中」，是否可用中文由 [canTranslateValuesInPhrase] 按场景判定（两道闸）；
+ * 中文含义统一由补全项副标题（value_desc.json，如 type= 的 陆地/建筑/空中）承担。
  */
-internal fun translateDictValues(values: List<String>, dict: TranslationDict?, translate: Boolean): List<String> {
+internal fun translateDictValues(
+    values: List<String>,
+    dict: TranslationDict?,
+    translate: Boolean,
+    quoted: Boolean = false
+): List<String> {
     if (!translate || dict?.isLoaded != true) return values
     // 语言总闸：翻译引擎开关关闭（即便字典仍存活）时不翻译，保持英文原样。
     if (!com.rwmodstudio.core.translation.CompletionShared.translationEngineEnabled()) return values
+    // 场景闸：整值专用词（LAND 等）／引号保护生效 → 整批保持英文
+    if (!canTranslateValuesInPhrase(
+            values, dict, quoted,
+            com.rwmodstudio.core.translation.CompletionShared.quotedValuesBlocked()
+        )
+    ) return values
     return values.map { dict.getValueTranslation(it) }
 }
 
@@ -543,9 +592,17 @@ internal val MUTUALLY_EXCLUSIVE_GROUPS: List<Set<String>> = listOf(
     setOf("incompletebuildings", "factoryqueue")
 )
 
-/** 是否为互斥条件参数（属于任一互斥组：超过/少于/等于/空的/满、几秒内/几秒后、包含队列中的） */
+/** 是否为互斥条件参数（属于任一互斥组：超过/少于/等于/空的/满、几秒内/几秒后/包含队列中的） */
 internal fun isMutuallyExclusiveParam(key: String): Boolean =
     MUTUALLY_EXCLUSIVE_GROUPS.any { key.lowercase() in it }
+
+/**
+ * 值会被单引号包裹的参数类型（唯一来源：[buildParamValueSuggestions] 与场景闸共用）。
+ * 引号内会被屏蔽词开关「引号内的词不翻译」整段保护 → 该开关打开时这些位置的补全值必须用英文。
+ * 代码表写法：需标签='fish'、队列项目取消(withActionTag="actionFire")、读取单位内存('攻击目标', type='unit')。
+ */
+internal val quotedValueParamTypes: Set<String> =
+    setOf("tag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName")
 
 /**
  * 构建 param= 后的值建议。
@@ -558,7 +615,7 @@ internal fun buildParamValueSuggestions(
     paramType: String,
     values: List<String>,
     typedAfterEq: String,
-    quoteTypes: Set<String> = setOf("tag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName"),
+    quoteTypes: Set<String> = quotedValueParamTypes,
     prefixLength: Int = typedAfterEq.length,
     details: Map<String, String> = emptyMap()
 ): List<ParamValueSuggestion> {

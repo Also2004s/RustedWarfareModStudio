@@ -129,7 +129,8 @@ fun CompletionTypeScreen(
                 ),
                 engine.getTranslationDict()
             )
-            // 真实补全判定聚合器：全部 Provider 默认选项（分类归属与运行时开关无关，与自动补全同源）
+            // 真实补全判定聚合器：默认选项 = 全部 Provider 开启（含图片路径），
+            // 分类归属与运行时开关无关，与自动补全同源
             val classifyAgg = ValueCompletionAggregator(
                 context,
                 sp,
@@ -902,7 +903,7 @@ private fun CallableCategoryBrowser(
 }
 
 /**
- * 构建「真实补全判定」聚合器：全部 Provider、默认选项（分类归属与运行时开关无关），
+ * 构建「真实补全判定」聚合器：全部 Provider、默认选项（= 全开，含图片路径；分类归属与运行时开关无关），
  * 供分类页与 MainApp 打开模拟 ini 时共用，保证与自动补全同源、不漂移。
  * 需要加载补全三表 + 翻译引擎，较慢，调用方应在 IO 线程。失败返回 null（调用方处理）。
  */

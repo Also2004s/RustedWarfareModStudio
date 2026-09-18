@@ -2,9 +2,12 @@ package com.rwmodstudio.feature.completion
 
 import android.content.Context
 import android.util.Log
+import com.rwmodstudio.core.KeyTemplate
+import com.rwmodstudio.core.KeyTemplateIndex
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
+import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.feature.completion.value.ProjectSoundCache
 import com.rwmodstudio.feature.completion.value.ValueCompletionAggregator
@@ -27,6 +30,22 @@ internal fun completionMatchLevel(query: String, candidate: String): Int {
         else -> 0
     }
 }
+
+/**
+ * 模板键的插入文本：
+ * - 插入文本里含模板原文（英文表，如 `builtFrom_{NUM}_name:`）→ 就地换成实例化后的键名；
+ * - 不含模板原文（中文表，如「修正除此标签:」）→ 退回「实例化键名 + 冒号」。
+ *
+ * 为什么中文表也必须落英文实例化键：中文名里**没有序号位**（「修正除此标签」里没有 X 的位置），
+ * 把中文名插进文件等于把带占位符的原文写进去，保存反译后仍然是 `mutatorX_ifUnitWithoutTags`
+ * 这类含占位符的键——等于没生效。所以模板键一律以英文实例化形态落盘，中文只用于列表显示。
+ */
+internal fun templateInsertText(baseInsertText: String, templateSource: String, keyName: String): String =
+    if (baseInsertText.contains(templateSource)) {
+        baseInsertText.replace(templateSource, keyName)
+    } else {
+        "$keyName:"
+    }
 
 /**
  * 英文节名 → 中文分类（core→核心 等）。供节名映射（mapSectionName）与跨节引用 `${core.X}` 归一化使用。
@@ -124,7 +143,17 @@ class CompletionProvider(
          * 带参函数参数内可嵌套表达式）。无参取值 getter（自身弹药/自身血量）为「被调用方」。
          * 供补全查看器的 DemoPanel 只展示调用方；非值补全或默认保留（true）。
          */
-        val isCallable: Boolean = true
+        val isCallable: Boolean = true,
+        /**
+         * 序号/参数模板键的原文（如 `builtFrom_{NUM}_name` / `arm#_[time]`）。
+         * 空串 = 普通项。非空时 [insertText] 已按用户当次输入实例化（占位符填了就用填入值，
+         * 没填就原地留空位），配合 [cursorOffset] 让光标停在空位上。
+         */
+        val keyTemplate: String = "",
+        /**
+         * 模板键留空位时的光标偏移（相对插入文本中键名起点）。-1 = 不定位（光标落插入末尾）。
+         */
+        val cursorOffset: Int = -1
     )
 
     enum class CompletionType { SECTION, KEY, VALUE, TEMPLATE }
@@ -185,6 +214,90 @@ class CompletionProvider(
     private val allDictKeys by lazy {
         (translationDict.getAllEnglishKeys() + translationDict.getAllChineseKeys()).toSet()
     }
+
+    /**
+     * 序号/参数模板键索引（`builtFrom_{NUM}_name` / `canBuild_#_pos` / `text_{LANG}` / `arm#_[time]`）。
+     * 从补全表键名里筛出模板键并预编译分段，匹配/渲染都是纯内存计算。
+     */
+    private val keyTemplateIndex by lazy {
+        KeyTemplateIndex(mergedCustom.flatMap { listOf(it.name, it.nameEn, it.label) })
+    }
+
+    /** 模板原文 → 补全项（保留 category / detail / 格式分类算好的 insertText，供实例化时复用） */
+    private val templateItemBySource by lazy {
+        val map = HashMap<String, CompletionItem>()
+        mergedCustom.forEach { item ->
+            listOf(item.name, item.nameEn, item.label).forEach { k ->
+                if (k.isNotBlank() && KeyTemplate.isTemplateKey(k)) map.putIfAbsent(k, item)
+            }
+        }
+        map
+    }
+
+    /**
+     * 把模板项按填入内容实例化：
+     * 占位符有值 → 原样替换；没值 → 原地留空位（`builtFrom_{NUM}_name` → `builtFrom__name:`），
+     * 并给出光标偏移（决策：光标直接停在序号空位，敲数字即成完整键）。
+     *
+     * @param keepTemplateLabel 用户尚未填入任何内容时，列表 label 保持模板原文（老板选的 B 方案）
+     */
+    private fun instantiateTemplateItem(
+        base: CompletionItem,
+        template: KeyTemplateIndex.Template,
+        fills: List<String>,
+        keepTemplateLabel: Boolean
+    ): CompletionItem {
+        val rendered = keyTemplateIndex.render(template, fills)
+        val name = rendered.key
+        if (name.isBlank()) return base
+        val insert = templateInsertText(base.insertText, template.source, name)
+        val label = if (keepTemplateLabel) base.label else name
+        return base.copy(
+            label = label,
+            insertText = insert,
+            keyTemplate = template.source,
+            cursorOffset = rendered.caretOffset ?: -1
+        )
+    }
+
+    /** 按用户输入前缀生成模板键候选（未填占位符的项留空位 + 定位光标）。 */
+    private fun buildTemplateCompletions(
+        wordPrefix: String,
+        enabledCategories: Set<String>?
+    ): List<CompletionItem> {
+        if (wordPrefix.isEmpty() || keyTemplateIndex.isEmpty) return emptyList()
+        val out = ArrayList<CompletionItem>()
+        val seen = HashSet<String>()
+        // ① 英文前缀（builtFrom_1_ / mutator1_ / arm1_ …）：能带出用户已经输入的序号
+        for (hit in keyTemplateIndex.matchPrefix(wordPrefix)) {
+            val src = hit.template.source
+            val base = templateItemBySource[src] ?: continue
+            if (enabledCategories != null && base.category.none { it in enabledCategories }) continue
+            // 用户已填入内容（如 builtFrom_1_）→ 列表显示实例化后的键；未填 → 保持模板原文（B 方案）
+            val anyFilled = hit.fills.any { it.isNotEmpty() }
+            val item = instantiateTemplateItem(base, hit.template, hit.fills, keepTemplateLabel = !anyFilled)
+            if (!seen.add(item.insertText.ifEmpty { item.label })) continue
+            out.add(item)
+        }
+        // ② 中文显示名（中文键视图下用户敲「修正」「从此建造」…）。
+        // 中文名里没有序号位，取不到用户输入的序号 → 一律给「留空位 + 光标定位」形态，
+        // 插入的仍是**英文实例化键**（插中文名等于把带占位符的原文写进文件，保存反译后原样是 mutatorX_xxx）。
+        for (item in mergedCustom) {
+            val src = templateSourceOf(item) ?: continue
+            val template = keyTemplateIndex.templateByName(src) ?: continue
+            if (completionMatchLevel(wordPrefix, item.label) <= 0) continue
+            if (enabledCategories != null && item.category.none { it in enabledCategories }) continue
+            val shaped = instantiateTemplateItem(item, template, emptyList(), keepTemplateLabel = true)
+            if (!seen.add(shaped.insertText.ifEmpty { shaped.label })) continue
+            out.add(shaped)
+        }
+        return out
+    }
+
+    /** 取补全项对应的模板原文（name / nameEn / label 任一命中模板判定即认），非模板返回 null。 */
+    private fun templateSourceOf(item: CompletionItem): String? =
+        listOf(item.name, item.nameEn, item.label)
+            .firstOrNull { it.isNotBlank() && KeyTemplate.isTemplateKey(it) }
 
     fun getCompletions(
         textBeforeCursor: String,
@@ -301,17 +414,22 @@ class CompletionProvider(
             // 此时回退取整个多行块的归属属性键（如 复制与）作为 keyPart、以当前行作为值前缀，
             // 让复制与 的 ini/template 文件补全在续行也能触发。
             val multilineOwner = multilineValueOwnerKey(textBeforeCursor)
-            val (keyPart, rawValuePrefix) = if (multilineOwner != null) {
+            val (keyPart, rawValuePrefixRaw) = if (multilineOwner != null) {
                 multilineOwner to currentLine
             } else {
                 splitKeyValueLine(currentLine)
             }
+            // 单行写完的多行值块（`复制与:"""a.ini,ROOT:/b.ini"""`）：剥掉首尾三引号边界，
+            // 否则引号混进"已输入前缀"，文件/路径类补全一条都匹配不到。
+            val rawValuePrefix = stripTripleQuotes(rawValuePrefixRaw)
             if (keyPart.isNotEmpty()) {
                 // 值补全只替换当前正在输入的"片段"，而非从 ':' 到光标的全部内容。
                 // 以 ','、'，'、'(' 或空白作为分隔，找到最后一个分隔符后的可替换前缀。
                 // 例如 "防御建筑模版(偏移量x=10," 只需替换空串（光标紧跟在 ',' 后），
                 // "防御建筑模版(偏移量x=10,偏移量y" 只需替换 "偏移量y"。
-                val replaceablePrefix = replaceableValuePrefix(rawValuePrefix)
+                // 例外：`定义单位内存` 的段内空格是「类型 变量名」的合法分隔，不按空格切。
+                val splitOnSpace = !CompletionShared.isDefineUnitMemoryProperty(keyPart)
+                val replaceablePrefix = replaceableValuePrefix(rawValuePrefix, splitOnSpace)
                 val valuePrefix = replaceablePrefix.trim()
                 val textAfterCursorInLine = textAfterCursor.takeWhile { it != '\n' }
                 // 优先使用文件级符号缓存（EditorScreen 后台维护，含继承链 ∪ 当前文件），
@@ -471,11 +589,23 @@ class CompletionProvider(
 
         val enabledCategories = mappedSection?.let { sectionFilters[it] }
 
+        // 序号/参数模板键（builtFrom_{NUM}_ / canBuild_#_ / action_#_ / text_{LANG} / arm#_[time]）：
+        // 按用户当次输入实例化——填了序号就出完整键，没填就把占位符留成空位并定位光标。
+        val templateResults = buildTemplateCompletions(wordPrefix, enabledCategories)
+        results.addAll(templateResults)
+
         // 自动补全主源：只从自定义补全表（native + user）查询
         // 前缀命中优先，子串包含兜底（≥2字符），保证「中间命中」也能弹出且前缀项置顶
+        // 已被模板路覆盖的模板原文条目要排除，否则「builtFrom_」场景同一键会出现两遍（模板原文 + 留空位形态）
+        val coveredTemplates = templateResults.mapNotNull { it.keyTemplate.takeIf { t -> t.isNotEmpty() } }.toSet()
         val customResults = mergedCustom
             .map { it to completionMatchLevel(wordPrefix, it.label) }
             .filter { it.second > 0 && (enabledCategories == null || it.first.category.any { c -> c in enabledCategories }) }
+            .filter {
+                it.first.name !in coveredTemplates &&
+                    it.first.nameEn !in coveredTemplates &&
+                    it.first.label !in coveredTemplates
+            }
             .sortedWith(
                 compareByDescending<Pair<CompletionItem, Int>> { it.second }
                     .thenBy { it.first.label }
@@ -582,9 +712,16 @@ class CompletionProvider(
             if (enabledCategories != null && !item.category.any { c -> c in enabledCategories }) continue
             // 当前节已出现的属性名不再提示（仅检测当前文件当前节）
             if (existingKeys.isNotEmpty() && itemAppearsInSection(item, existingKeys)) continue
-            if (item.label in seen) continue
-            seen.add(item.label)
-            results.add(item.copy(detail = if (showDetail) item.detail else ""))
+            // 序号模板键：空行时用户尚未输入，占位符留空位 + 光标定位；label 保持模板原文
+            val templateSource = listOf(item.name, item.nameEn, item.label)
+                .firstOrNull { KeyTemplate.isTemplateKey(it) }
+            val shaped = templateSource
+                ?.let { keyTemplateIndex.templateByName(it) }
+                ?.let { instantiateTemplateItem(item, it, emptyList(), keepTemplateLabel = true) }
+                ?: item
+            if (shaped.label in seen) continue
+            seen.add(shaped.label)
+            results.add(shaped.copy(detail = if (showDetail) item.detail else ""))
         }
 
         return sortCompletions(results)
@@ -1058,10 +1195,28 @@ internal fun multilineValueOwnerKey(textBeforeCursor: String): String? {
 
 /**
  * 计算 ':' 后当前可替换的片段：以 ,、，、空格、Tab、( 为分隔，取最后一个分隔符之后的部分。
+ *
+ * @param splitOnSpace 是否把空格/Tab 也当分隔符。默认 true（多数值：值与值之间用逗号分隔，
+ * 空格不是合法分隔符，打了空格只是"开始下一段"的手势）。
+ * 传 false 用于「段内空格是合法语法」的键 —— 目前只有 `定义单位内存`（`类型 变量名, 类型 变量名`）：
+ * 那里的空格是「类型」与「变量名」之间的分隔，不能当成"换下一段"。
  */
-internal fun replaceableValuePrefix(rawValuePrefix: String): String {
-    val lastDelimIdx = rawValuePrefix.lastIndexOfAny(charArrayOf(',', '，', ' ', '\t', '('))
+internal fun replaceableValuePrefix(rawValuePrefix: String, splitOnSpace: Boolean = true): String {
+    val delimiters = if (splitOnSpace) charArrayOf(',', '，', ' ', '\t', '(') else charArrayOf(',', '，', '(')
+    val lastDelimIdx = rawValuePrefix.lastIndexOfAny(delimiters)
     return if (lastDelimIdx >= 0) rawValuePrefix.substring(lastDelimIdx + 1) else rawValuePrefix
+}
+
+/**
+ * 剥掉值前缀首尾的三引号边界（单行写完的多行值块 `复制与:"""a.ini,ROOT:/b.ini"""`）。
+ * 不剥的话引号会混进"已输入前缀"，导致文件/路径类补全一条都匹配不到（弹窗空白）。
+ * 只剥边界上的整组 `"""`，值中间的引号不动。
+ */
+internal fun stripTripleQuotes(rawValuePrefix: String): String {
+    val start = rawValuePrefix.trimStart()
+    val head = if (start.startsWith("\"\"\"")) start.removePrefix("\"\"\"") else start
+    val tail = head.trimEnd()
+    return if (tail.endsWith("\"\"\"")) tail.removeSuffix("\"\"\"") else head
 }
 
 /**

@@ -96,7 +96,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES }
+enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, RECYCLE_BIN }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -454,6 +454,9 @@ fun MainApp() {
     // 编辑器页顶部两栏（全局菜单栏 + Tab 栏）显示状态：由编辑区滚动方向驱动，仅在编辑器页生效
     var editorTopBarsShown by remember { mutableStateOf(true) }
     var browserStartPath by rememberSaveable { mutableStateOf("") }
+    // 文件浏览器的「自由浏览」开关：仅侧边栏「文件浏览」入口置 true（上限放开到外部存储根，
+    // 可一路返回直到 RWmod 的上级目录）；首页打开项目、查重后打开等入口置回 false，行为保持原样。
+    var browserRootUnbounded by remember { mutableStateOf(false) }
     // 打开外部传入的文件（外部 Intent / 保存确认后共用入口）
     fun openExternalFile(name: String, path: String) {
         editorJumpLine = -1
@@ -624,6 +627,7 @@ fun MainApp() {
             BrowserSpaceManager.resetSpace(BrowserSpaceManager.projectKey(folderPath), folderPath)
             projectRoot = folderPath
             browserStartPath = folderPath
+            browserRootUnbounded = false
             currentScreen = Screen.BROWSER
             return
         }
@@ -654,6 +658,7 @@ fun MainApp() {
                             BrowserSpaceManager.resetSpace(BrowserSpaceManager.projectKey(folderPath), folderPath)
                             projectRoot = folderPath
                             browserStartPath = folderPath
+                            browserRootUnbounded = false
                             currentScreen = Screen.BROWSER
                         } catch (e: Exception) {
                             Log.e(TAG, "registerProject failed", e)
@@ -680,6 +685,7 @@ fun MainApp() {
         when (currentScreen) {
             Screen.HOME -> scope.launch { drawerState.open() }
             Screen.BROWSER -> currentScreen = Screen.HOME
+            Screen.RECYCLE_BIN -> currentScreen = popScreen(Screen.HOME)
             Screen.EDITOR -> { /* EditorScreen handles its own back */ }
             Screen.PROJECT_MANAGER -> {
                 val target = popScreen(Screen.HOME)
@@ -732,8 +738,23 @@ fun MainApp() {
                 }
                 Spacer(Modifier.height(6.dp))
                 Text("导航", Modifier.padding(horizontal = 14.dp).padding(bottom = 2.dp), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = RustedPrimary.copy(alpha = 0.7f))
-                DrawerItem(Icons.Default.Home, "首页", currentScreen == Screen.HOME) { cacheEditorStateBeforeLeave(); clearBackStack(); currentScreen = Screen.HOME; scope.launch { drawerState.close() } }
-                DrawerItem(Icons.Default.FolderOpen, "文件浏览", currentScreen == Screen.BROWSER) { cacheEditorStateBeforeLeave(); clearBackStack(); currentScreen = Screen.BROWSER; scope.launch { drawerState.close() } }
+                // 导航区（老板指定）：文件浏览占原「首页」的位置，回收站紧随其后；
+                // 「首页」入口移除（其余页面用顶栏返回/返回键都能回首页）。
+                DrawerItem(Icons.Default.FolderOpen, "文件浏览", currentScreen == Screen.BROWSER) {
+                    cacheEditorStateBeforeLeave()
+                    clearBackStack()
+                    // 该入口定位为「自由浏览」：清掉项目根（退出项目模式）并把上限放开到外部存储根，
+                    // 于是可以一路返回直到 RWmod 的上级目录；其他入口不受影响。
+                    projectRoot = ""
+                    browserRootUnbounded = true
+                    currentScreen = Screen.BROWSER
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem(Icons.Default.DeleteOutline, "回收站", currentScreen == Screen.RECYCLE_BIN) {
+                    cacheEditorStateBeforeLeave()
+                    pushScreen(Screen.RECYCLE_BIN)
+                    scope.launch { drawerState.close() }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text("工具", Modifier.padding(horizontal = 14.dp).padding(bottom = 2.dp), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = RustedPrimary.copy(alpha = 0.7f))
                 DrawerItem(Icons.Default.Settings, "设置", currentScreen == Screen.SETTINGS) { cacheEditorStateBeforeLeave(); pushScreen(Screen.SETTINGS); scope.launch { drawerState.close() } }
@@ -744,7 +765,6 @@ fun MainApp() {
                 Text("外观", Modifier.padding(horizontal = 14.dp).padding(bottom = 2.dp), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = RustedPrimary.copy(alpha = 0.7f))
                 DrawerItem(if (ThemeState.isDark) Icons.Default.LightMode else Icons.Default.DarkMode, if (ThemeState.isDark) "切换浅色" else "切换深色", false) { ThemeState.toggle(); scope.launch { drawerState.close() } }
                 Spacer(Modifier.weight(1f))
-                Text("v${BuildConfig.VERSION_NAME}", Modifier.padding(14.dp), fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.2f))
             }
         }
     ) {
@@ -775,6 +795,7 @@ fun MainApp() {
                     Screen.TODO_LIST -> "待办"
                     Screen.MOD_INFO -> "模组信息"
                     Screen.HIGHLIGHT_RULES -> "规则"
+                    Screen.RECYCLE_BIN -> "回收站"
                 }
                 // 编辑器页的全局菜单栏改为浮层（渲染在 Screen.EDITOR 分支，随 topFold 上滑隐藏），
                 // 此处仅渲染非编辑器页的顶栏，始终可见、不参与折叠。
@@ -936,7 +957,7 @@ fun MainApp() {
                             // 屏蔽系统相册扫描项目内图片
                             NoMediaHelper.excludeFromMediaStore(context, File(path))
                             BrowserSpaceManager.resetSpace(BrowserSpaceManager.projectKey(path), path)
-                            projectRoot = path; browserStartPath = path; clearBackStack(); currentScreen = Screen.BROWSER
+                            projectRoot = path; browserStartPath = path; browserRootUnbounded = false; clearBackStack(); currentScreen = Screen.BROWSER
                         },
                         onOpenFile = { n, p -> openFileForEdit(n, p) },
                         onOpenFolder = { name, path -> checkProjectDedup(name, path) },
@@ -947,7 +968,11 @@ fun MainApp() {
                     )
                     Screen.BROWSER -> FileBrowserScreen(
                         startPath = browserStartPath,
-                        rootPath = defaultPath,
+                        // 自由浏览入口（侧边栏「文件浏览」）：上限放宽到外部存储根，
+                        // 因此可以一路返回直到 RWmod 的上级目录；其余入口仍以 defaultPath 为上限。
+                        rootPath = if (browserRootUnbounded) {
+                            android.os.Environment.getExternalStorageDirectory().absolutePath
+                        } else defaultPath,
                         projectRoot = projectRoot,
                         onFileSelected = { n, p ->
                             openFileForEdit(n, p)
@@ -974,6 +999,7 @@ fun MainApp() {
                         onStartPathChange = { browserStartPath = it },
                         onCreateModInfo = { n, p -> openModInfoPage(n, p) }
                     )
+                    Screen.RECYCLE_BIN -> RecycleBinScreen()
                     Screen.MOD_INFO -> {
                         val modInfoPath = selectedFile?.second ?: ""
                         if (modInfoPath.isEmpty()) {

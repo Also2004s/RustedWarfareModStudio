@@ -73,6 +73,18 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        val prop = request.findProperty()
+        // 打了空格 / Tab：空格不是合法分隔符——
+        // type=images（贴花列表图像，可多值，如 `carFloor.png, carBody.png*3`）→ 只弹「,」；
+        // 其余单值图片路径（官方示例与真实项目用法全为单值，322 处 image 无一多值）→ 值已写完，不弹。
+        if (needsCommaSeparator(request)) {
+            val isMulti = prop != null && prop.type.lowercase().replace(" ", "") == "images"
+            return if (isMulti) {
+                listOf(commaSeparatorItem("图片分隔符（值与值之间用逗号分隔）"))
+            } else {
+                emptyList()
+            }
+        }
         // 项目根用 request 携带的当前项目根（与 ProjectImageCache 刷新路径保持一致），兜底 defaultModPath
         val projectPath = request.projectRoot.ifBlank { SettingsManager.defaultModPath() }
 

@@ -26,9 +26,25 @@ object ThemeState {
         SettingsManager.bgColor = color
     }
 
+    init {
+        // 用户新增的高亮类型要同步给「规则」页：类别白名单、排序、显示名都从那边取。
+        // 放在 init 里保证任何时候访问 ThemeState 之后，规则页拿到的类别表都是最新的。
+        syncCustomCategories(darkTokenColors)
+    }
+
+    /** 用户新增类型 → 规则页类别表（内置类型不走这里，它们在 DarkThemeColors 的常量表里） */
+    private fun syncCustomCategories(colors: DarkThemeColors) {
+        HighlightRuleManager.updateCustomCategories(
+            colors.customTypes.map {
+                HighlightRuleManager.CategoryInfo(it.id, it.label, it.effectiveScope)
+            }
+        )
+    }
+
     fun applyDarkTokenColors(colors: DarkThemeColors) {
         darkTokenColors = colors
         SettingsManager.darkTokenColors = colors.toJson()
+        syncCustomCategories(colors)
     }
 
     fun applyHighlightTheme(theme: String) {

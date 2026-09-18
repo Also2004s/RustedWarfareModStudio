@@ -376,10 +376,34 @@ object SoraEditorInitializer {
                 }
                 continue
             }
-            val category = findCategoryForScopes(scopes) ?: continue
+            val category = findCategoryForScopes(scopes, darkTokenColors) ?: run {
+                // 「连续引号」（punctuation.ignored.ini）已并入普通文本（2026-09-18）：它是语法标记
+                // `"""` / `'''` 多行引号边界的「不上色」结构（scope 名就是 *ignored*），不是可配置类型，
+                // 颜色永远跟随正文。4 个主题文件里这个 scope 写死 #FFFFFF，不在这里接管的话，
+                // 浅色/纯净主题下多行引号会白底白字。
+                if (scopes.any { scopeMatches(it, "punctuation.ignored.ini") }) "plainText" else null
+            } ?: continue
             val userColor = colorForCategory(darkTokenColors, category) ?: continue
             if (settingsObj.has("foreground")) {
                 settingsObj.put("foreground", userColor)
+            }
+        }
+        // 用户新增的高亮类型（见 CustomHighlightType）：主题模板里**没有**它们的 scope 规则，
+        // 只替换是改不到的 → 这里追加一条，否则「自定义高亮」里调了色、编辑器里也不会变。
+        val existingScopes = HashSet<String>()
+        for (i in 0 until settings.length()) {
+            val rule = settings.optJSONObject(i) ?: continue
+            existingScopes += parseScopes(rule.opt("scope"))
+        }
+        darkTokenColors.customTypes.forEach { t ->
+            val itsScope = t.effectiveScope
+            if (existingScopes.none { scopeMatches(it, itsScope) }) {
+                settings.put(
+                    JSONObject().apply {
+                        put("scope", itsScope)
+                        put("settings", JSONObject().put("foreground", t.color.uppercase()))
+                    }
+                )
             }
         }
         return obj.toString()
@@ -393,7 +417,11 @@ object SoraEditorInitializer {
         }
     }
 
-    private fun findCategoryForScopes(scopes: List<String>): String? {
+    /**
+     * scope → 配色键（按 `targetScopes` 顺序首命中，与 `HighlightRuleManager.themeCategoryOfScope` 同一套规则）。
+     * 内置类型都没命中时，再看**用户新增类型**（见 [CustomHighlightType]）。
+     */
+    private fun findCategoryForScopes(scopes: List<String>, colors: DarkThemeColors): String? {
         for ((category, targets) in DarkThemeColors.targetScopes) {
             for (scope in scopes) {
                 for (target in targets) {
@@ -402,6 +430,10 @@ object SoraEditorInitializer {
                     }
                 }
             }
+        }
+        colors.customTypes.forEach { t ->
+            val itsScope = t.effectiveScope
+            if (scopes.any { scopeMatches(it, itsScope) }) return t.id
         }
         return null
     }
@@ -448,7 +480,8 @@ object SoraEditorInitializer {
             "bracketRound" -> colors.bracketRound
             "bracketCurly" -> colors.bracketCurly
             "variable" -> colors.variable
-            else -> null
+            // 用户新增的高亮类型：颜色独立存在 customTypes 里（内置字段装不下可变数量）
+            else -> colors.customTypes.firstOrNull { it.id == category }?.color
         }?.uppercase()
     }
 }

@@ -1,0 +1,55 @@
+[core]
+allowCaptureWhenNeutralByAI:true
+autoTriggerCooldownTime:2s
+autoTriggerCheckRate:every8Frames
+@global also:390
+@global god:500
+[hiddenAction_禁用原版]
+autoTriggerOnEvent:newWaypointGivenByPlayer
+requireConditional:if self.isControlledByAI
+clearActiveWaypoint:true
+#——「全局设定」——#
+[global_resource_AI阶段]
+hidden:false
+[global_resource_倍率]
+hidden:true
+[global_resource_时间]
+hidden:false
+[global_resource_AI难度]
+hidden:true
+[global_resource_概率]
+hidden:true
+
+
+#——「安危判断」——#
+[hiddenAction_空危]
+@define neo:600
+autoTrigger:true
+requireConditional:if not self.tags(includes="危险") and not self.tags(includes="喷气机") and not self.tags(includes="武直") and self.isControlledByAI and (numberOfUnitsInTeam(withTag="拦截", withinRange=${also})<numberOfUnitsInEnemyTeam(withTag="拦截", withinRange=999) or (select(self.hasActiveWaypoint(type='attack'), (numberOfUnitsInTeam(withTag="拦截", withinRange=${also})+numberOfUnitsInAllyNotOwnTeam(withTag="拦截", withinRange=${also}))*0.25+(numberOfUnitsInTeam(withTag="重拦", withinRange=${also})+numberOfUnitsInAllyNotOwnTeam(withTag="重拦", withinRange=${also}))*0.25, 0)+numberOfUnitsInTeam(withTag="蚊子", withinRange=180)*0.3+numberOfUnitsInTeam(withTag="空对地", withinRange=${neo})+numberOfUnitsInAllyNotOwnTeam(withTag="空对地", withinRange=${neo})<numberOfUnitsInEnemyTeam(withTag="拦截", withinRange=999)*0.25+numberOfUnitsInEnemyTeam(withTag="重拦", withinRange=999)*0.25+numberOfUnitsInEnemyTeam(withTag="家", withinRange=285)*3+numberOfUnitsInEnemyTeam(withTag="对空", withinRange=300)+numberOfUnitsInEnemyTeam(withTag="防空", withinRange=300)*2+numberOfUnitsInEnemyTeam(withTag="中防空", withinRange=375)*5+numberOfUnitsInEnemyTeam(withTag="大防空", withinRange=485)*12) and (self.hasActiveWaypoint(type='move') or numberOfUnitsInEnemyTeam(withTag="家", withinRange=285)+numberOfUnitsInEnemyTeam(withTag="对空", withinRange=300)+numberOfUnitsInEnemyTeam(withTag="防空", withinRange=300)+numberOfUnitsInEnemyTeam(withTag="中防空", withinRange=375)+numberOfUnitsInEnemyTeam(withTag="大防空", withinRange=435)<1) or (select(self.hasActiveWaypoint(type='attack'), (numberOfUnitsInTeam(withTag="拦截", withinRange=${also})+numberOfUnitsInAllyNotOwnTeam(withTag="拦截", withinRange=${also}))*0.25+(numberOfUnitsInTeam(withTag="重拦", withinRange=${also})+numberOfUnitsInAllyNotOwnTeam(withTag="重拦", withinRange=${also}))*0.25, 0)+numberOfUnitsInTeam(withTag="蚊子", withinRange=180)*0.3+numberOfUnitsInTeam(withTag="空对地", withinRange=300)+numberOfUnitsInAllyNotOwnTeam(withTag="空对地", withinRange=300)+numberOfUnitsInTeam(withTag="轰炸", withinRange=300)*3+numberOfUnitsInAllyNotOwnTeam(withTag="轰炸", withinRange=300)*3<numberOfUnitsInEnemyTeam(withTag="拦截", withinRange=810)*0.25+numberOfUnitsInEnemyTeam(withTag="重拦", withinRange=810)*0.25+numberOfUnitsInEnemyTeam(withTag="家", withinRange=${neo})*4+numberOfUnitsInEnemyTeam(withTag="对空", withinRange=${neo})+numberOfUnitsInEnemyTeam(withTag="防空", withinRange=${neo}, incompleteBuildings=true)*2+numberOfUnitsInEnemyTeam(withTag="中防空", withinRange=${neo})*5+numberOfUnitsInEnemyTeam(withTag="大防空", withinRange=${neo})*12) and numberOfUnitsInEnemyTeam(withTag="家", withinRange=285)+numberOfUnitsInEnemyTeam(withTag="对空", withinRange=300)+numberOfUnitsInEnemyTeam(withTag="防空", withinRange=300)+numberOfUnitsInEnemyTeam(withTag="中防空", withinRange=375)+numberOfUnitsInEnemyTeam(withTag="大防空", withinRange=435)>0) and numberOfUnitsInTeam(withTag="空对地", withinRange=${neo})+numberOfUnitsInAllyNotOwnTeam(withTag="空对地", withinRange=${neo})+numberOfUnitsInTeam(withTag="轰炸", withinRange=${neo})*3+numberOfUnitsInAllyNotOwnTeam(withTag="轰炸", withinRange=${neo})*3<10
+temporarilyAddTags:危险
+#——「逃跑模块」——#
+[hiddenAction_逃跑]
+autoTrigger:true
+requireConditional:if self.tags(includes="危险") and not self.tags(includes="喷气机") and not self.tags(includes="武直") and self.isFlying and self.isControlledByAI and (not self.hasActiveWaypoint(type='move') or activeWaypointTarget.hp>0)
+temporarilyRemoveTags:危险
+clearAllWaypoints:true
+addWaypoint_type:move
+addWaypoint_target_nearestUnit_team:ally
+addWaypoint_target_nearestUnit_tagged:空厂
+addWaypoint_maxTime:5s
+[hiddenAction_在进攻中]
+autoTrigger:true
+requireConditional:if self.isFlying and numberOfUnitsInEnemyTeam(withTag="轰炸目标", withinRange=400)+numberOfUnitsInEnemyTeam(withTag="轰炸建筑", withinRange=500)>0 and numberOfUnitsInEnemyTeam(withTag="激光防御塔", withinRange=500, greaterThan=0) and numberOfUnitsInEnemyTeam(withTag="拦截", withinRange=810, greaterThan=6)
+temporarilyAddTags:需要拦截保护
+[hiddenAction_没在进攻]
+autoTrigger:true
+requireConditional:if not (numberOfUnitsInEnemyTeam(withTag="轰炸目标", withinRange=400)+numberOfUnitsInEnemyTeam(withTag="轰炸建筑", withinRange=500)>0 and numberOfUnitsInEnemyTeam(withTag="激光防御塔", withinRange=500, greaterThan=0) and numberOfUnitsInEnemyTeam(withTag="拦截", withinRange=810, greaterThan=6))
+temporarilyRemoveTags:需要拦截保护
+#——「编号设定」——#
+[global_resource_空军编号]
+hidden:true
+[resource_编号]
+hidden:true
+[hiddenAction_编号设定]
+autoTriggerOnEvent:created
+setResourcesWithLogic:空军编号=self.resource.空军编号+1, 编号=self.resource.空军编号

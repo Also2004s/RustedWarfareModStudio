@@ -1,44 +1,73 @@
 # RustedWarfareModStudio 项目长期笔记
 
-## 报告格式约定（老板要求，2026-09-01）
+> 过程细节见 `.workbuddy/memory/YYYY-MM-DD.md`（append-only）。本文件只留长期有效的规矩。
 
-- **docs/ 下所有报告用「用户视角三层式」**：①为什么（大白话成因+触发条件）②改之前（用户现象）③改之后（用户变化）；每条标严重度；按功能名组织；技术细节放末尾单独一节。样板：`docs/bug-audit-round2-2026-09-01.md` 效果版章节。
+## 老板定下的硬规矩
+- **报告（docs/ 下）用「用户视角三层式」**：①为什么（大白话+触发条件）②改之前（手机上的现象）③改之后。标严重度 🔴🟡🟢，按功能名组织，**主栏禁一切代码术语**（NPE/缓存/mimeType…），技术细节压到文末「给开发者看」。样板 `docs/bug-audit-round2-2026-09-01.md`。
+- **禁止擅自加兜底**（2026-09-17）：任何「回退/静默兼容/出错返原值/找不到就跳过/旧数据兼容」分支，必须先提出并得到同意。判据：**有数据或需求证明它必须存在吗？** 没有就不写。血的教训：给模板键加兜底把功能堵死，老板原话「我不理解你这么喜欢搞兜底干嘛」。
+- **不要把能自己判定的事抛回去问老板**：范围以显式证据为准，没证据就是没有；结论自己焊死，别留选择题。
+- **「安装」= 构建并装 debug 包**（`com.rwmodstudio.debug`）。没明说"正式版"就绝不碰 `com.rwmodstudio`。严格按字面范围执行，不自行扩大。
+- **用户报的问题一定真实存在**：先信用户先自查。①查设备实际装的哪个包 ②APK 构建时间 ≥ 源码修改时间 ③grep 确认修复在源码。**老板报"没生效"的第一检查点 = 他验证的是哪个包**（日常开正式版）。
 
-## 关键约定 / 易误解点（重要）
+## 编码 / 架构约定
+- **原子写只用于「用户数据」**（编辑文件/设置/历史/待办）；**可再生缓存**（翻译/继承/查重/补全表）直接 writeText。
+- **热路径禁锁**：`TaskProgressManager` 无锁；`isFresh` 的 libVersion 直读 @Volatile。
+- **一切生成文件只能在 `RWmod/` 分类子目录下**，路径走 `RwmodPaths`，不硬编码。
+- **验证码机制**：改 `VerifyManager` 的 `xxx_CODE` = 下次启动强制重生对应数据。改会重置用户配置的验证码（`SECTION_FILTERS_CODE`、`MOCK_INI_CODE` 等）**先问老板**。
+- 弹窗统一用 `AppDialog`（`ui/components/CommonUiComponents.kt`），底部用 `DialogActionButton`；无 weight 子项 → `heightIn(max)+verticalScroll`，含 `LazyColumn(weight(1f))` → 必须固定 `height(...)`。
+- `loadBlocklist` 只在主线程同步调；MainActivity onCreate 四行顺序已验证，别动。
+- **同一文件禁止并行 Edit**（会丢改动且工具报成功），必须串行。
+- **GitHub 是超级旧版**，`git diff` 无意义，改动判断靠会话内清单 + 调用链。
+- **mod-info.txt 是特殊文件**：补全按文件名启用，不能把 mod/music 注册成全局节。
+- **两个包共用同一份 `/sdcard/RWmod` 配置**（路径不带包名，2026-09-17 更正）：`settings.json`/`highlight_rules.json`/翻译/待办全共享。只更一个包且不 bump `DEFAULTS_VERSION`，另一个会"以为已刷新"而跳过。
 
-- **用户报的问题一定真实存在（2026-09-01 血泪教训）**：凡是用户反馈 bug，**先信用户、先自查自己**——不要用"你装的是旧版"这类借口搪塞。排查顺序：① 查设备上实际装的是哪个包（正式 `com.rwmodstudio` vs 测试 `com.rwmodstudio.debug`，**测试版是 debug 包**，用 `adb shell dumpsys package com.rwmodstudio.debug` 看 lastUpdateTime）；② 验证 APK 构建时间 ≥ 源码修改时间；③ 源码里 grep 修复是否真的在。上次就是因为只查正式包时间戳、断定"设备是旧版"，被用户纠正——**凡事先思考自己的问题**。
-- **翻译引擎反向翻译的「归一化」是设计行为，不是 bug**：`self.` 前缀丢失、空括号 `()` 丢失、注释前空格规整，均为有意设计——反向翻译统一返回「翻译库样式（裸英文）」，补全 label 与保存还原共用同一预期。**不要再当成 bug 去"修复"**。翻译引擎目前没有问题。
-- **保存流程优化方向（用户想法，未实施）**：保存时只对 diff 内容做翻译替换，而非整篇反向翻译覆盖。属未来优化，非当前任务。
-- **「翻译功能没了/缓存不加载/进度弹窗不显示」第一检查点 = `devTranslationEngine` 开关**（2026-09-01 实测）：该开关关闭后翻译引擎不加载、`SearchTranslationCache.prepareIfNeeded` 不预热、相关 TaskProgressManager 弹窗全不显示——**设计行为，不是 bug**。它是 FileSettings 代理属性（`grep -n "devTranslationEngine"` 单文件可能匹配不到），用全仓 grep。另有 `devDebugTaskProgress`（进度浮窗总开关，默认 true）。
-- **`loadBlocklist` 只能在主线程同步调**（TranslationEngine.load 的 loadMutex 内也会调它，屏蔽词加载依赖翻译字典先就绪）：**不要**把它挪到后台协程，会与 load 并发竞态。MainActivity onCreate 四行顺序（SettingsManager.init → loadBlocklist → ArrayReader.init → cleanupStale）是 HEAD 验证过的，别动。
-- **原子写只用于「用户数据」，不用于「可再生的缓存/输出」**（2026-09-01 多线程失效教训）：编辑的文件/设置/历史/待办用 atomicWriteText；翻译缓存/继承缓存/查重输出/补全表用直接 writeText——它们损坏了重新生成即可，原子写（tmp+rename+锁）在高频写盘时把多线程加速完全掩盖。**判断"要不要原子写"的标准是"数据是否可再生"**。
-- **热路径禁锁**：`TaskProgressManager` 保持无锁（每文件 update 都调，加锁全项目进度更新串行）；`isFresh` 里的 libVersion 判定直接读 @Volatile 字段（会话内恒定），不要加 TTL+synchronized（每文件调用串行化预热）。
-- **GitHub 是超级旧版**：`git diff` 对比 GitHub 无意义（含大量非本对话改动）；判断"谁改的/改了什么"只能靠会话内改动清单（38 点）+ 代码调用链，不能靠 git diff。
-- **mod-info.txt 是「特殊文件」（2026-09-01 老板纠正）**：它的补全（[mod] 的 title/description/tags/minVersion/thumbnail + [music] 的 sourceFolder/whenUsingUnitsFromThisMod_playExclusively）应该**按文件名判断启用**（仅打开的文件名是 mod-info.txt 时），**不能**把 mod/music 注册成全局节（sectionEnToZh/DEFAULT_SECTION_FILTERS）——会污染普通 ini 的补全。**改验证码（SECTION_FILTERS_CODE 等）= 强制重置所有用户的该配置**，属用户敏感操作，必须先问老板。首页缩略图已支持 mod-info.txt 的 thumbnail: 键优先（HomeScreen.resolveThumbnailFile，老板确认保留）；补全重做「先不做」，等老板发话。
+## 自定义高亮维护（`ini.tmLanguage.json` / `HighlightRuleManager`）
+- **每改一次正文就必须把 `DEFAULTS_VERSION` +1**（不是改一批 bump 一次）——它是"要不要重刷默认规则"的唯一开关。踩坑：一天改 3 次只 bump 一次 → 手机生效的停在第一版。
+- 每张词表在 **键值区 + 文件顶层各一份**，必须逐字一致，否则按 signature 裂成两个 UI 分组。手法：锚点片段 + `replace_all`。
+- **别动槽位/条数**：同 scope 内插新规则要排在"兜底词"之前，插中间会让 instance 编号错位。扩写现有正文即可。
+- **加词三关**：①不许重复定义（同一词挂两个 UI 分组 = 改色打架）②归类看语义（返回判断结果的进「函数」，取数值/名字的进「内置属性」）③范围锚定不扩散。
+- **类型顺序的唯一来源 = `DarkThemeColors.labels` + `targetScopes`（两表键序必须逐项一致）**（2026-09-18 按真实项目实测重排）：`ui`/`plainText` 置顶 → 其余按出现次数降序 → 节族（节括号/节后缀）→ 数字 → 符号组（组内不按次数）→ 注释最末。**别在任何页面里另排一套顺序**（单测 `labelsAndTargetScopesShareTheSameOrder` / `categoryOrderFollowsMeasuredFrequencyLayout` 钉死）。
+- **函数 vs 属性值的判定规则（2026-09-18 老板亲定，为此骂过我两次，别自己猜）**：
+  - **函数 = 计算 / 工具类**：`int`（取整，老板口头说的"ini"就是它）、`rnd`、`min`、`max`、`sin`、`cos`、`squareRoot`/平方根、
+    `select`/选择、`createMarker`/创建标记、`distance`/距离、`getOffsetRelative`/获取相对偏移、
+    `readUnitMemory`/读取单位内存，以及 `eventData`/事件数据、`debugPassthrough`/调试通行。
+  - **属性值 = 状态判断 / 计数 / 取状态**：`队伍中此单位数量`、`自身有标签`、`自身在天上`、`游戏地图高度/宽度`、
+    `自身连接数`、`核武启用`、`队伍获胜`… **它们的中英文都归「属性值」**（中文原本就在那边，是对的）。
+  - ⚠️ **不能凭"后面有没有括号"判断** —— 状态类同样带括号调用（`队伍中此单位数量(需标签="x")`）。
+    判定依据是语义（算东西 = 函数，问状态 = 属性值），不是写法。
+  - 拿不准就问老板。**这是 RW 语义，我不懂，一次都别自己拍。**
+  - 历史坑：v5 那次「函数 +85」把 48 个英文状态词（isXxx/hasXxx/numberOfXxx）误塞进函数，v8 已挪回属性值；
+    同时补进词表里原本缺失的计算函数 int/rnd/min/max/sin/cos（真实项目用了 398 次却没高亮）。（2026-09-18 统一，共 10 处）：`keyword`=属性、`value`=属性值、`decoration`=连续引号、`type`=内存类型、`memory`=内存/变量、`shortcutVariable`=变量名、`movement`=移动类型、`team`=枚举值、`reference`=单位标记、`sectionBracket`=节前缀。
+  **⚠️ 命名权在老板，不在我**（2026-09-18 被骂过一次）：我一度自作主张把 `sectionBracket` 改成「节名与括号」、`reference` 改成「引用目标」，理由是"更准确"——老板不接受。**我的职责是核实「这个类型到底管什么」并把依据摆出来，名字怎么叫由他定**；觉得不妥就提一次，他坚持就照办，别用"语义更准"顶回去。
+  **改 `labels` 只影响显示**（规则文件存的是字段名）；**别改 `HighlightRulesDefaults` 的 displayGroup**——那是落进用户规则文件的分组名，改了会让老用户看到新旧两套分组名。
+- **4 个死类别已删（2026-09-18 二次处理，老板「把这个处理掉」）**：`property`（属性/常量）/ `quote`（字符串引号）/ `modifier`（修饰符）scope 在语法里 **0 次**、整类空转 → **从 labels/targetScopes 整体移除**（此前只从调色盘排除、规则页保留，现已彻底删）；`decoration`（连续引号）**并入普通文本**——不再是独立类型，`SoraEditorInitializer.applyScopeColors` 对 `punctuation.ignored.ini` 强制取正文色（4 个主题写死 #FFFFFF，不接管会浅色主题白底白字）。SLOTS 删 quote 2 槽 + decoration 4 槽（98 时代 → 90），`nonColorableCategories` = 空集。**代价：bump `DEFAULTS_VERSION`（每轮都要）**。⚠️ ghost scope 还有 14 处在**活类别**里（value 正斜杠 / string multiline / **movement 4 缺 3** / memory 3 缺 2 / sectionBracket prefix / comment block+标记），主题里另有约 21 条死配色 —— 登记未清（老板说其他不用管）。
+- ⚠️ **统计 ini 高亮必须分层模拟**（2026-09-18 踩坑）：`ini.tmLanguage.json` 的「键值对」是 `begin`/`end` 块（顶层 `patterns[5]`），**块内自有 37 条规则，进入块后顶层规则不参与匹配**（注释 `(#|;).*$` 只在顶层）。把两层规则**摊平**会得出「颜色值不可达」的错结论 —— 分层后 `颜色:#FF0000` 正常上色，全项目命中 322 次。脚本 `.workbuddy/tools/hl_usage_scan.py`（已按分层实现，传目录可重跑）。
+- **调色盘 = 规则页（2026-09-18 更新）**：`DarkThemeColors.colorableCategories` 是「自定义高亮」可调色类型的唯一来源；`nonColorableCategories` **已清空**（4 个死类别删的删、并的并），调色盘与规则页现在完全一致（25 项）。
+- **`decoration`（连续引号）已并入普通文本（2026-09-18 二次处理）**：scope 名 `punctuation.ignored.ini`，语法用它圈 `"""` / `'''` 多行引号的边界（实测只吃**前两个**引号，第 3 个无 scope 走默认色）。它**不再是独立类型**（labels/targetScopes/SLOTS 里都删了）；着色由 `SoraEditorInitializer.applyScopeColors` 主循环特判接管——scope 命中 `punctuation.ignored.ini` 就取 `plainText` 色。
+  **踩过的坑（仍然有效）**：4 个主题文件里给它写死 `#FFFFFF`，取色逻辑不接管的话 ⇒ 深色主题看不出、**浅色/纯净主题下这三个引号变白字**（白底白字）。别再把它的颜色写死成某个固定值。
+- 统计真实项目各类型出现次数的脚本：`.workbuddy/tools/hl_usage_scan.py`（按语法真实规则顺序逐行扫描，TextMate 近似语义）。
+- 算缺口：脚本只生成候选集，**最终事实逐词 `grep -o -F 词 | wc -l`**。
+- **关键字边界必须 `\b`**：joni 按 Unicode 判词字符（汉字也是），用 `(?<![A-Za-z0-9_])` 会让中文词钻进更长词里单独上色。
 
-## 架构现状（编辑器多实例）
+## sora-editor 陷阱
+- `applyEditorTheme` → `getColorScheme` → `ThemeRegistry.setTheme` 无条件 dispatch → 各实例 `colors.clear()+applyDefault()`（含背景）。「重建方案」污染其它实例，「仅 setColor」不会。自定义颜色走 `SoraCodeEditor.applyEditorColors(...)`，实例重新激活时在 `LaunchedEffect(active, editorRef.value)` 恢复。
+- 主题解析：tm4e-core `IThemeSource.fromInputStream` + `RawThemeReader.readTheme`，配色走 `Theme.match(ScopeStack.from(scope))`。事件拦截是 `markAsConsumed()`。
+- 单测：JVM 可读 assets 做文本断言；`org.json` 在 JVM stub **是空实现，不能解析 JSON**。
 
-- 最多 5 个 EditorScreen 实例并存（`openPaths` MRU），前台 1 个渲染高亮，后台 4 个 `active=false` 停高亮但状态保留。
-- 实例销毁落盘统一走 `DisposableEffect.onDispose` → `onDisposeFlush`，无 delay 依赖。
-- 任意保存行为触发 `flushInactiveInstances()` 收尾（其它实例写盘并移除，只留前台）。
-- MOD 文件写盘统一用 `AtomicWrite.atomicWrite`（.tmp + rename），**per-path 锁**（2026-09-01 从全局锁改为 per-path：全局锁会把查重/预热等并行写不同文件的场景串行化导致性能退化；同路径才需串行防 tmp 冲突）。
+## 翻译引擎 / 补全（2026-09-17 核实）
+- **整值专用词**（`specialValues` 9 组）只进 `valueTranslations`，不进 enToZh/zhToEn ⇒ 只在整值恰好命中时生效；括号内 `type=LAND` 保持英文，写成 `type=陆地` 反译不回来。
+- 补全语言按场景：整值位置可中文，括号内整值词必须英文（`canTranslateValuesInPhrase` 场景闸）；引号闸只对 enum/type/relation 生效，`tag/actionTag/attachmentSlot` 等项目自定义名必须原样保留。
+- **反译的「归一化」是设计行为不是 bug**（统一返回裸英文形态）。
+- 模板键**一律以英文实例化形态落盘**，中文名只用于列表显示；插入时占位符原地留空 + 光标停在空位。占位符判定口径：**数据里有实例证明该位被替换才纳入**（全量 34 条 = 已生效 32 + 待做 2 条 mutatorX）。见 `计划-序号模板键补全.md`、`docs/模板键覆盖排查-2026-09-17.md`。
+- **未修（待老板定）**：属性整值补全的 label 与匹配都用中文 → 英文前缀匹配不到；修法需 bump `MOCK_INI_CODE`。
 
-## sora-editor 主题陷阱（改主题/多实例必读）
-
-- **全局派发会重置所有实例颜色**：`applyEditorTheme` → `getColorScheme` → `ThemeRegistry.setTheme` 会**无条件 dispatchThemeChange** 给所有存活 `TextMateColorScheme`，触发 `setTheme` → `colors.clear()` + `applyDefault()`，把各实例自定义颜色（含背景 `WHOLE_BACKGROUND`）清空回退默认主题色。所以「重建方案（`editor.colorScheme = 新 scheme`）」会污染其它实例；「仅对现有方案 `setColor`」不会。
-- **约定**：写自定义颜色统一走 `SoraCodeEditor.kt` 的 `applyEditorColors(...)`（对现有 scheme 重放颜色）；实例重新激活（切回）时在 `LaunchedEffect(active, editorRef.value)` 里对它调 `applyEditorColors` 恢复背景/高亮，不要再重建方案。
-- **主题文件解析**：tm4e-core（随 `language-textmate:0.24.6` 内嵌）提供 `IThemeSource.fromInputStream` + `RawThemeReader.readTheme` 自动分派 JSON 与 plist(.tmTheme)，无需自写解析器。配色映射可走 `org.eclipse.tm4e.core.theme.Theme.match(ScopeStack.from(scope))` + `getColor(attrs.foregroundId)`。
-- **事件拦截**：`io.github.rosemoe.sora.event.EditorKeyEvent` 拦截方法是 `markAsConsumed()`（**不是** `handle()`，实测 javap 验证 0.24.6）。
-
-## material3 1.2.1 API 陷阱（改 M3 组件必读）
-
-- `RectangleShape` 在 **`androidx.compose.ui.graphics`** 包（不在 `foundation.shape`）。
-- `ModalDrawerSheet` **没有 `drawerElevation`**（1.3 才有），1.2.1 用 `drawerTonalElevation`。
-- `NavigationDrawerItemDefaults.colors()` 只有 8 个参数（selected/unselected × container/icon/label/badge），**没有 `disabledContainerColor`**。
+## material3 1.2.1
+- `RectangleShape` 在 `androidx.compose.ui.graphics`；`ModalDrawerSheet` 用 `drawerTonalElevation`；`NavigationDrawerItemDefaults.colors()` 只 8 个参数。
 
 ## 环境
-
-- JDK: `tools/jdk/jdk-17.0.19+10`；构建：`export JAVA_HOME=<项目>/tools/jdk/jdk-17.0.19+10 && ./gradlew.bat installDebug`
-- 设备 V2505A（Android 16，vivo，安装需先开 USB 安装权限）。
-- **Agent 内构建的守护进程坑**：多次出现 "Gradle build daemon has been stopped" / "Could not delete kotlin-classes"，根因是残留 GradleDaemon/KotlinCompileDaemon 抢锁。可靠配方：`jps -l` 找到 GradleDaemon/KotlinCompileDaemon PID → `taskkill /F /PID ...` 全清 → 删 `~/.gradle/daemon/8.14.5/registry.bin` → 前台 + `--no-daemon` 跑 `assembleDebug`（别与 `--stop` 混用、别后台跑）。APK 用 `adb install -r` 直装（`C:\Users\Also2\AppData\Local\Android\Sdk\platform-tools\adb.exe`）。
-- **Kotlin 增量编译对「修改后文件被新增文件引用」可能报 unresolved**（如新增的 HighlightThemeManager 引用 ThemeState.applyPresets，但编译报 unresolved；ThemeState.kt 实际存在该方法）。解法：`./gradlew <task> --rerun-tasks` 强制全量重编。同样的症状：`./gradlew ... | tail -20` 截断管道会让 head/tail 提前退出导致 Gradle 变孤儿（记忆里「管道截断」坑）——**输出重定向到文件** `> build.log 2>&1` 再 tail，比管道安全。
+- bash 缺 coreutils：命令前加 `export PATH="/d/Git/usr/bin:/d/Git/bin:$PATH"`（否则命令静默无输出）。`xargs -I{}` 不可用。
+- 删除文件可能被沙箱拦（SIGTERM，无回显）→ 走审批。**老板要求：要删就直接删，不要先备份。**
+- JDK `tools/jdk/jdk-17.0.19+10`；守护进程残留抢锁 → `jps -l` + `taskkill /F /PID` → 删 `~/.gradle/daemon/8.14.5/registry.bin` → `--no-daemon` 前台跑，输出重定向到文件再 tail。
+- 设备 V2505A（Android 16, vivo）；adb `C:\Users\Also2\AppData\Local\Android\Sdk\platform-tools\adb.exe`。
+- **不要对老板真机做手势自动化**（会被识别成长按弹删除）；验证 UI 只用 `screencap` + `uiautomator dump`。
+- 回收站 = `RWmod/exports` 目录本身；侧边栏「文件浏览 / 回收站」，`browserRootUnbounded` 只由侧边栏置 true。

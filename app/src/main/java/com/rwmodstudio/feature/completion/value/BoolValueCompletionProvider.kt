@@ -32,6 +32,8 @@ class BoolValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 单值（布尔值只有一个真/假）：打空格 → 值已写完，不弹
+        if (needsCommaSeparator(request)) return emptyList()
         val prefix = request.valuePrefix
         // 数据源优先（bool.json 的 true/false 统一经 translateValueName 交给翻译引擎译成 真/假）；
         // 注意此处不传 translationDict：load 已翻译则 translateValueName 会再反向翻译一次（真→true），

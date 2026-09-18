@@ -17,12 +17,12 @@
 - Kotlin 2.2.0 + Jetpack Compose（Compose BOM 2024.06.00）
 - Gradle 8.14.5 / Android Gradle Plugin 8.11.1 / JDK 17
 - sora-editor 0.24.6（TextMate）
-- minSdk 26（Android 8.0）/ targetSdk 34 / compileSdk 36
+- minSdk 21（Android 5.0）/ targetSdk 34 / compileSdk 36
 
 ```powershell
 # 本机构建使用仓库自带 JDK
 $env:JAVA_HOME = "D:\ALSO2004\android-tool\RustedWarfareModStudio\tools\jdk\jdk-17.0.19+10"
-.\gradlew.bat assembleDebug    # Debug（约 21MB）
+.\gradlew.bat assembleDebug    # Debug（约 23MB）
 .\gradlew.bat assembleRelease  # Release（R8 + 资源压缩，约 4.3MB，对外发布用）
 ```
 
@@ -53,4 +53,10 @@ app/src/main/
 
 ## 开发状态
 
-当前版本 `1.3.2`（versionCode 22）。已完成：编辑器/语法高亮、代码补全、翻译引擎与查重、文件管理、`.rwmod` 打包/解压、设置与开发者模式、版本对比、继承链解析、项目标签扫描、坐标可视化、待办、本地配置导入/导出。
+当前版本 `1.5.0`（versionCode 30）。
+
+已完成：编辑器/语法高亮（含自定义高亮规则）、代码补全（含补全类型分类）、翻译引擎与查重、
+文件管理（含回收站）、`.rwmod` 打包/解压、设置与开发者模式、版本对比、继承链解析、
+项目标签/资源/内存扫描、坐标可视化、待办、mod-info 支持、本地配置导入/导出。
+
+开发约定与已知问题见根目录 `AGENTS.md`；历次排查与审计报告见 `docs/`。

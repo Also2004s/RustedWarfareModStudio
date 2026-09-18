@@ -6,8 +6,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -512,7 +510,7 @@ private fun BrowserPanel(
     var newName by remember { mutableStateOf("") }
     var ctxMenuFile by remember { mutableStateOf<File?>(null) }
     var ctxMenuBounds by remember { mutableStateOf<Rect?>(null) }
-    // 多选：向左滑动文件条目进入多选模式，顶部出现批量操作栏
+    // 多选：入口是长按文件条目后悬浮菜单里的「多选」（左滑已不再触发，避免误触）
     var multiSelectMode by remember { mutableStateOf(false) }
     var selectedFiles by remember { mutableStateOf(setOf<String>()) }
     var delMulti by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -642,12 +640,7 @@ private fun BrowserPanel(
                     ctxMenuBounds = bounds
                 },
                 isSelected = multiSelectMode && selectedFiles.contains(f.absolutePath),
-                multiSelectMode = multiSelectMode,
-                onSwipeLeft = {
-                    // 左滑条目 → 进入多选模式并选中该条目
-                    multiSelectMode = true
-                    selectedFiles = selectedFiles + f.absolutePath
-                }
+                multiSelectMode = multiSelectMode
             )
         } }
     }
@@ -699,9 +692,11 @@ private fun BrowserPanel(
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                             // 仅 .ini/.txt/.template 文件可添加书签（文件夹不可）
                             if (file.isFile && file.extension.lowercase() in setOf("ini", "txt", "template")) {
+                                // 同一个值只算一次：isBookmarked 会读收藏文件、并逐条检查文件是否存在，避免重复读盘
+                                val bookmarked = BookmarkManager.isBookmarked(file.absolutePath)
                                 FloatingMenuItem(
-                                    if (BookmarkManager.isBookmarked(file.absolutePath)) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                    if (BookmarkManager.isBookmarked(file.absolutePath)) "取消书签" else "书签",
+                                    if (bookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                    if (bookmarked) "取消书签" else "书签",
                                     onClick = {
                                         val added = BookmarkManager.toggle(file.absolutePath, file.name)
                                         android.widget.Toast.makeText(context, if (added) "已添加书签" else "已取消书签", android.widget.Toast.LENGTH_SHORT).show()
@@ -793,8 +788,7 @@ private fun FileEntry(
     onClick: () -> Unit,
     onLongClick: (Rect) -> Unit,
     isSelected: Boolean = false,
-    multiSelectMode: Boolean = false,
-    onSwipeLeft: () -> Unit = {}
+    multiSelectMode: Boolean = false
 ) {
     val isDir = file.isDirectory
     val df = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
@@ -846,21 +840,7 @@ private fun FileEntry(
                 val sz = coords.size
                 entryBounds = Rect(pos, Size(sz.width.toFloat(), sz.height.toFloat()))
             }
-            // 向左滑动条目 → 进入多选（detectHorizontalDragGestures 仅在水平滑动超过阈值时触发，
-            // 不影响列表纵向滚动与点击/长按）
-            .pointerInput(Unit) {
-                var dragTotal = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dragTotal = 0f },
-                    onDragEnd = {
-                        if (dragTotal < -40.dp.toPx()) onSwipeLeft()
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        dragTotal += dragAmount
-                    }
-                )
-            }
+            // 左滑不再进入多选（老板要求）：多选入口统一走长按悬浮窗里的「多选」
             .combinedClickable(onClick = onClick, onLongClick = {
                 entryBounds?.let { onLongClick(it) }
             }),

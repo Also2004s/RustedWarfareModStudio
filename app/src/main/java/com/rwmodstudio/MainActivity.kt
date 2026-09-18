@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.rwmodstudio.core.FileClipboardManager
 import com.rwmodstudio.core.InheritanceCache
 import com.rwmodstudio.core.LocalConfigManager
+import com.rwmodstudio.core.RecycleBin
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.TaskProgressManager
@@ -107,6 +108,13 @@ class MainActivity : ComponentActivity() {
         // 单一协程串行执行所有后台初始化，避免并发操作 TaskProgressManager 导致状态覆盖
         (application as RwModApplication).applicationScope.launch(Dispatchers.IO) {
             try {
+                // 回收站超限清理：首页删除的文件/文件夹先移入 RWmod/exports/recycle，
+                // 若累计超过 25MB，则本次启动整体清空（只清 recycle 子目录，不动 exports 下其它内容）。
+                try {
+                    RecycleBin.purgeIfOversize()
+                } catch (e: Exception) {
+                    Log.e(TAG, "RecycleBin purge failed", e)
+                }
                 if (needsExtra) {
                     TaskProgressManager.start("加载附件表")
                     loadExtraItemsVerified(applicationContext, TranslationEngine.getInstance())

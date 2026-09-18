@@ -3,6 +3,7 @@ package com.rwmodstudio.core
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -66,23 +67,31 @@ class HighlightRuleManagerTest {
     }
 
     @Test
-    fun keywordUsesAsciiBoundariesNotUnicodeWordBoundary() {
-        // 中文关键字：不能用 \b（汉字也算词字符，\b 会判死），必须用 ASCII 边界
+    fun keywordUsesWordBoundaryLikeBuiltinGrammar() {
+        // 边界必须与内置语法（`\b(a|b|c)\b`）完全一致：
+        // 引擎按 Unicode 判词字符，**汉字也是词字符**（`\b距离\b` 不命中「控制距离」里的「距离」）。
+        // 用只认 ASCII 的边界会把规则放宽 —— 中文关键字钻进更长的中文词里单独上色（用户报的异常渲染）。
         val cn = HighlightRuleManager.keywordToRegexPiece("自身有活动的路径点")
-        assertTrue(cn.contains("自身有活动的路径点"), "关键字本体应保留: $cn")
-        assertTrue(!cn.contains("\\b"), "中文关键字不应使用 \\b: $cn")
-        assertTrue(cn.contains("(?<![A-Za-z0-9_])"), "应带左侧 ASCII 边界: $cn")
-        assertTrue(cn.contains("(?![A-Za-z0-9_])"), "应带右侧 ASCII 边界: $cn")
+        assertEquals("\\b自身有活动的路径点\\b", cn)
+        // 非词字符收尾（如 `:`）时不能补 \b，否则语义反转成「后面必须紧跟词字符」
+        assertEquals("\\bROOT:", HighlightRuleManager.keywordToRegexPiece("ROOT:"))
 
-        // 语义验证：中文关键字在真实上下文里命中，且不会被 ASCII 标识符黏住
-        val cnRegex = Regex(cn)
+        // 语义验证（JVM 侧用 (?U) 打开 Unicode 词字符，与引擎口径一致）
+        val cnRegex = Regex("(?U)$cn")
         assertTrue(cnRegex.containsMatchIn("需要条件: if 自身有活动的路径点(type='移动')"), "带参调用应命中")
         assertTrue(cnRegex.containsMatchIn("自身有活动的路径点"), "裸关键字应命中")
         assertTrue(!cnRegex.containsMatchIn("自身有活动的路径点X"), "右侧紧跟 ASCII 字母不应命中")
+        assertTrue(!cnRegex.containsMatchIn("检查自身有活动的路径点吗"), "左侧紧贴汉字不应命中（与内置一致）")
 
-        // ASCII 关键字：点号转义 + 两侧 ASCII 边界（notify 里的 if 不命中）
+        // 回归：用户报的「控制距离」——「距离」是函数关键字，但不能在「控制距离」里被单独上色
+        val distance = Regex("(?U)" + HighlightRuleManager.keywordToRegexPiece("距离"))
+        assertTrue(!distance.containsMatchIn("也执行动作:控制距离, 撤退"), "整行只有长词「控制距离」时不应命中")
+        assertTrue(distance.containsMatchIn("距离 10"), "裸「距离」应命中")
+        assertTrue(!distance.containsMatchIn("控制距离"), "「控制距离」里的「距离」不应命中")
+
+        // ASCII 关键字：点号转义 + 两侧词边界（notify 里的 if 不命中）
         val en = HighlightRuleManager.keywordToRegexPiece("self.hasActiveWaypoint")
-        assertEquals("(?<![A-Za-z0-9_])self\\.hasActiveWaypoint(?![A-Za-z0-9_])", en)
+        assertEquals("\\bself\\.hasActiveWaypoint\\b", en)
         val ifRegex = Regex(HighlightRuleManager.keywordToRegexPiece("if"))
         assertTrue(ifRegex.containsMatchIn("if 自身在移动"))
         assertTrue(!ifRegex.containsMatchIn("notify"), "不应命中 notify 里的 if")
@@ -90,6 +99,20 @@ class HighlightRuleManagerTest {
         // 正则元字符关键字整体转义
         val meta = HighlightRuleManager.keywordToRegexPiece("a+b(c)|d")
         assertTrue(meta.contains("a\\+b\\(c\\)\\|d"), "元字符应被转义: $meta")
+        assertTrue(!meta.contains("(?<"), "不应再使用 ASCII 边界: $meta")
+    }
+
+    @Test
+    fun keywordPieceNeverAddsCaptureGroup() {
+        // 内置规则靠 captures 编号给节括号/节后缀上色，用户规则多一层捕获组会把编号整体挪位。
+        // 括号必须全部转义（`\(`），不能以分组形式出现。
+        assertEquals("\\b距离\\b", HighlightRuleManager.keywordToRegexPiece("距离"))
+        assertEquals("\\ba\\(b\\b", HighlightRuleManager.keywordToRegexPiece("a(b"))
+        assertEquals("@memory\\b", HighlightRuleManager.keywordToRegexPiece("@memory"))
+        listOf("距离", "a(b", "@memory", "self.x").forEach { kw ->
+            val piece = HighlightRuleManager.keywordToRegexPiece(kw)
+            assertTrue(!piece.contains("(?<"), "不能出现分组语法（会挪位 captures 编号）: $piece")
+        }
     }
 
     @Test
@@ -367,8 +390,9 @@ class HighlightRuleManagerTest {
         val scopes = scopedRuleNames(grammar)
         assertTrue(scopes.size in 80..100, "内置带 scope 规则应约 90 条，实际 ${scopes.size}")
         val known = HighlightRulesDefaults.SCHEMA_SCOPES
-        // 允许未登记的只有语法文件自身的 scopeName（`"name": "ini"`），它不是配色规则
-        val allowedSkips = setOf("ini")
+        // 允许未登记的：语法文件自身的 scopeName（`"name": "ini"`），以及「连续引号」边界 ——
+        // punctuation.ignored.ini 是「不上色」结构，已并入普通文本着色，故意不设槽位（EXCLUDED_FROM_SLOTS）
+        val allowedSkips = setOf("ini") + HighlightRulesDefaults.EXCLUDED_FROM_SLOTS
         val skipped = scopes.filter { it !in known }.distinct()
         assertTrue(
             skipped.all { it in allowedSkips },
@@ -382,8 +406,8 @@ class HighlightRuleManagerTest {
             "布尔 scope 规则数异常：${counts["constant.language.boolean.ini"]}"
         )
         assertTrue(
-            (counts["string.unquoted.value.ini"] ?: 0) in 1..12,
-            "值高亮 scope 规则数异常：${counts["string.unquoted.value.ini"]}"
+            (counts["string.unquoted.value.ini"] ?: 0) in 1..16,
+            "属性值 scope 规则数异常：${counts["string.unquoted.value.ini"]}"
         )
     }
 
@@ -500,6 +524,49 @@ class HighlightRuleManagerTest {
     }
 
     @Test
+    fun highlightWordlistsCoverAttachmentTable() {
+        // 附件表（extra_completions.json / extra_translation_supplement.txt）与代码参考库里的
+        // 值写法，必须都能在内置高亮词表里找到归属，否则它们会掉进「兜底词」没颜色。
+        // 文本断言（JVM 单测不解析 JSON，见类注释）。
+        val grammar = loadBaseGrammar()
+        // 每张词表新增的锚点串必须各出现 **2 次**：键值区一份、文件顶层一份，且逐字一致
+        // （正文不一致会按 signature 裂成两个 UI 分组）。
+        val anchors = listOf(
+            "|核武启用|正在游戏的地图高度|正在游戏的地图宽度",
+            "|自身最大速度|自身最大能量|玩家名称|队伍名称)",
+            "|接近单位|全局检查第一个单位|空单位|globalSearchForFirstUnit|thisActionIndex",
+            // 函数词表（v8/v9 之后）：工具函数 + 事件数据 / 调试通行（它们是函数）+ 计算函数 int/rnd/min/max/sin/cos
+            "|int|rnd|min|max|sin|cos|direction|distanceBetweenSquared|debug|length|lowercase|uppercase|str|substring)",
+            // 逻辑布尔的英文写法（isXxx / hasXxx / numberOfXxx …）单独成组，与中文「自身检测」分开
+            "completed|globalTeamTags|gound|hasActiveWaypoint|hasParent",
+            // 自动触发事件按语言拆组
+            "创建|完成且激活|销毁|杀死任何单位",
+            "created|completeAndActive|destroyed|killedAnyUnit",
+            "|移动速度|最大转弯速度|ammoIncludingQueued|builtAmount|energyIncludingQueued"
+        )
+        anchors.forEach { anchor ->
+            val n = Regex(Regex.escape(anchor)).findAll(grammar).count()
+            assertEquals(2, n, "锚点「${anchor.take(20)}…」应出现 2 次（键值区 + 顶层），实际 $n")
+        }
+        // 附件表数据源里的函数/取值写法，逐个点名（防止将来有人误删词表条目）
+        listOf(
+            "gound", "isReversing", "isTransportUnloading", "isEnergyRecharging",
+            "maxEnergy", "maxspeed", "playerName", "teamName", "numberOfConnections",
+            "numberOfQueuedWaypoints", "mapWidth", "mapHeight", "nukesEnabled",
+            "eventData", "debugPassthrough", "globalSearchForFirstUnit", "thisActionIndex"
+        ).forEach { kw ->
+            assertTrue(grammar.contains(kw), "高亮词表缺附件表条目：$kw")
+        }
+        // 反例守护：这些词在「引用前缀」组（`xxx.` 链式写法）里已有一份，
+        // 值/属性表里**不得再重复定义**——否则同一个词挂在两个 UI 分组下，改色会互相打架。
+        val addedText = anchors.joinToString("")
+        listOf("speed", "resource", "teamId", "timeAlive", "customTimer", "lastConverted", "isMoving", "isInMap")
+            .forEach { kw ->
+                assertFalse(addedText.contains(kw), "「$kw」在引用前缀组已定义，本次不得重复添加")
+            }
+    }
+
+    @Test
     fun slotsClaimEveryScopedBuiltinRuleExactlyOnce() {
         // 对账口径：内置每条带 scope 的规则由「它自己的 scope + 它是该 scope 内第几条」唯一确定。
         // 槽位必须与这个钥匙集合**一一对应**——撞车（两个槽位指同一条）等于漏复刻，
@@ -515,7 +582,8 @@ class HighlightRuleManagerTest {
         val slotKeys = HighlightRulesDefaults.debugSlots().map { it.scope to it.instance }
         val duplicates = slotKeys.groupingBy { it }.eachCount().filterValues { it > 1 }
         assertTrue(duplicates.isEmpty(), "槽位撞车（两个槽位指向同一条内置规则）: $duplicates")
-        val missing = keys.toSet() - slotKeys.toSet()
+        val missing = (keys.toSet() - slotKeys.toSet())
+            .filterNot { it.first in HighlightRulesDefaults.EXCLUDED_FROM_SLOTS }
         assertTrue(missing.isEmpty(), "有内置规则没被任何槽位认领（漏复刻）: ${missing.map { "${it.first}#${it.second}" }}")
         val extra = slotKeys.toSet() - keys.toSet()
         assertTrue(extra.isEmpty(), "槽位指向语法里不存在的规则: ${extra.map { "${it.first}#${it.second}" }}")
@@ -574,6 +642,98 @@ class HighlightRuleManagerTest {
             HighlightRuleManager.availableCategories.map { it.id },
             "规则页类别必须与自定义高亮类型同集合、同顺序"
         )
+    }
+
+    @Test
+    fun labelsAndTargetScopesShareTheSameOrder() {
+        // 界面顺序只在 DarkThemeColors 一处定义：labels 的键序必须与 targetScopes 完全一致
+        //（ui / plainText 置顶 + 其余按真实项目实测的出现次数降序）。
+        // 只改一张表会让「自定义高亮」页与「规则」页的顺序悄悄漂移，这条拦住。
+        assertEquals(
+            listOf("ui", "plainText") + DarkThemeColors.targetScopes.keys.toList(),
+            DarkThemeColors.labels.keys.toList(),
+            "labels 的键序必须与 targetScopes 一致（含置顶的 ui / plainText）"
+        )
+    }
+
+    @Test
+    fun customHighlightTypesExtendTheTypeTable() {
+        // 「自定义高亮」→「新建类型」：用户类型追加在内置之后，显示名/scope 走 customTypes，
+        // 颜色独立存储（DarkThemeColors 的固定字段装不下可变数量）。
+        val custom = CustomHighlightType("custom_1", "我的标记", "")
+        val colors = DarkThemeColors.Default.copy(customTypes = listOf(custom))
+        val builtin = DarkThemeColors.colorableCategoriesOf(DarkThemeColors.Default)
+
+        assertEquals(
+            DarkThemeColors.colorableCategories,
+            builtin,
+            "没有自定义类型时，可调色类型必须与内置完全一致（老数据行为不变）"
+        )
+        assertEquals(
+            builtin + "custom_1",
+            DarkThemeColors.colorableCategoriesOf(colors),
+            "自定义类型追加在内置类型之后"
+        )
+        assertEquals("我的标记", DarkThemeColors.labelOf("custom_1", colors))
+        assertEquals("UI 高亮", DarkThemeColors.labelOf("ui", colors), "内置类型仍走 labels")
+        // 不填 scope → 自动生成专属 scope（不与内置 scope 撞车）；填了则原样使用
+        assertEquals(setOf("user.custom.custom_1"), DarkThemeColors.scopesOf("custom_1", colors))
+        assertEquals(
+            setOf("my.scope.ini"),
+            DarkThemeColors.scopesOf("custom_1", colors.copy(customTypes = listOf(custom.copy(scope = "my.scope.ini"))))
+        )
+        assertEquals(DarkThemeColors.targetScopes["value"], DarkThemeColors.scopesOf("value", colors))
+        // 颜色独立存 customTypes；内置类型不从这里取色
+        assertEquals(
+            "#123456",
+            DarkThemeColors.customColorOf(
+                "custom_1",
+                colors.copy(customTypes = listOf(custom.copy(color = "#123456")))
+            )
+        )
+        assertTrue(DarkThemeColors.customColorOf("ui", colors) == null, "内置类型没有 customTypes 颜色")
+        // 自动生成的 scope 必须落在一个 users 专属命名空间里，避免覆盖内置
+        assertTrue(
+            custom.effectiveScope.startsWith("user.custom."),
+            "自动生成的 scope 必须在 user.custom. 命名空间下：${custom.effectiveScope}"
+        )
+    }
+
+    @Test
+    fun colorableCategoryListMatchesLabelsExactly() {
+        // 2026-09-18：4 个「调了没反应」的类型已处理完毕 ——
+        //   property「属性/常量」/ quote「字符串引号」/ modifier「修饰符」的 scope 在语法里一条规则
+        //   都没有（整类空转）→ 从类型表整体移除；decoration「连续引号」并入普通文本着色
+        //   （SoraEditorInitializer.applyScopeColors 接管），不再单独立类型。
+        // ⇒ 排除名单清空，调色盘 = labels 键序本身（含置顶的 ui / plainText）。
+        val all = listOf("ui", "plainText") + DarkThemeColors.targetScopes.keys
+        assertEquals(
+            all,
+            DarkThemeColors.colorableCategories,
+            "调色盘必须与 labels/targetScopes 同一顺序"
+        )
+        listOf("property", "quote", "modifier", "decoration").forEach { id ->
+            assertFalse(id in DarkThemeColors.labels, "$id 已删除，不该再出现在类型表")
+            assertFalse(id in DarkThemeColors.targetScopes, "$id 已删除，不该再认领 scope")
+            assertFalse(id in DarkThemeColors.colorableCategories, "$id 不该出现在调色盘")
+        }
+    }
+
+    @Test
+    fun categoryOrderFollowsMeasuredFrequencyLayout() {
+        // 2026-09-18 按真实项目（`人机的玩笑`，27,501 行 / 148,898 个 token）实测重排后的分区结构：
+        // 其他内容（按出现次数降序）→ 节族 → 数字 → 符号组 → 注释（最末）。
+        // 符号组**统一成一组、组内不按出现次数**（老板定的）。
+        val ids = DarkThemeColors.targetScopes.keys.toList()
+        // 「连续引号」（decoration）已并入普通文本、不再是独立类型（2026-09-18）⇒ 符号组 6 项
+        val symbols = listOf("comma", "bracket", "bracketRound", "bracketCurly", "operator", "logical")
+        assertEquals("comment", ids.last(), "注释必须固定在最末")
+        assertEquals(symbols, ids.dropLast(1).takeLast(symbols.size), "符号组必须连续、顺序固定，且紧挨注释之前")
+        assertTrue(ids.indexOf("sectionSuffix") > ids.indexOf("sectionBracket"), "节括号必须在节后缀之前")
+        assertTrue(ids.indexOf("number") > ids.indexOf("sectionSuffix"), "数字必须排在节族之后")
+        assertTrue(ids.indexOf("number") < ids.indexOf("comma"), "数字必须排在符号组之前")
+        // 节族必须排在符号组与注释之前（老板明确要求）
+        assertTrue(ids.indexOf("sectionBracket") < ids.indexOf("comma"), "节族必须排在符号组之前")
     }
 
     @Test
@@ -653,10 +813,13 @@ class HighlightRuleManagerTest {
         val owned: List<Pair<String, Set<String>>> = HighlightRuleManager.categoryScopes
             .filter { it.value.isNotEmpty() }
             .map { it.key to it.value }
-        val unowned = grammarScopes.filter { scope -> owned.none { scope in it.second } }
+        // 「连续引号」边界（punctuation.ignored.ini）已并入普通文本，故意无类别认领（EXCLUDED_FROM_SLOTS）
+        val unowned = grammarScopes.filter {
+            scope -> owned.none { scope in it.second } && scope !in HighlightRulesDefaults.EXCLUDED_FROM_SLOTS
+        }
         assertTrue(unowned.isEmpty(), "内置语法用了这些 scope，但没有任何类别认领（颜色改不了）：$unowned")
         // 认领它的那个类别，必须就是主题首命中的类别
-        grammarScopes.forEach { scope ->
+        grammarScopes.filter { it !in HighlightRulesDefaults.EXCLUDED_FROM_SLOTS }.forEach { scope ->
             val owner = owned.first { scope in it.second }.first
             assertEquals(
                 owner,

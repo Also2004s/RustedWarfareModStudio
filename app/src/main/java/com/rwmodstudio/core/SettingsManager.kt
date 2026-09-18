@@ -333,6 +333,19 @@ object SettingsManager {
         get() = settings.getString("default_path", "") ?: ""
         set(value) = settings.edit().putString("default_path", value).apply()
 
+    // ===== 启动游戏包选择 =====
+
+    /** 原版铁锈战争包名 */
+    const val GAME_PKG_ORIGINAL = "com.corrodinggames.rts"
+
+    /** 铁锈战争极速版（民间汉化重打包，包名 io.github.rwjs）*/
+    const val GAME_PKG_RWJS = "io.github.rwjs"
+
+    /** 启动游戏使用的包名；空 = 每次弹窗询问（只装一个包时直接启动那一个） */
+    var launchGamePackage: String
+        get() = settings.getString("launch_game_package", "") ?: ""
+        set(value) = settings.edit().putString("launch_game_package", value).apply()
+
     /** 上次自动弹出更新提示的日期（yyyy-MM-dd），用于"一天最多提示一次" */
     var lastUpdatePromptDate: String
         get() = settings.getString("last_update_prompt_date", "") ?: ""

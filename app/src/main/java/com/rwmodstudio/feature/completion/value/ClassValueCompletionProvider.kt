@@ -17,6 +17,8 @@ class ClassValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 单值（唯一合法值 CustomUnitMetadata）：打空格 → 值已写完，不弹
+        if (needsCommaSeparator(request)) return emptyList()
         val prefix = request.valuePrefix
         // 唯一合法值：专有名词，无中文翻译，不做汉化
         val value = "CustomUnitMetadata"

@@ -73,6 +73,16 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
                     )
                 }
         }
+        // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）的资源名 LHS
+        // （顶层 `=` 之前）：补全后紧跟 `=`
+        val prop = request.findProperty()
+        val isResourceNameLhs =
+            prop != null && isResourceNameValueType(prop.type) &&
+                currentSegmentRhs(request.textBeforeCursor) == null
+        // 价格/资源可填多组（`价格: 资金=5, 能量=5`）：在「资源名=」左侧打了空格 → 只提示「,」
+        if (isResourceNameLhs && needsCommaSeparator(request)) {
+            return listOf(commaSeparatorItem("资源分隔符（值与值之间用逗号分隔）"))
+        }
         // 属性型：按前缀过滤，替换整个值片段
         val allResources = collectResourceNames(request)
         val matching = allResources
@@ -83,12 +93,6 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
                     .thenComparator { a, b -> resourceComparator.compare(a.first, b.first) }
             )
             .map { it.first }
-        // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）的资源名 LHS
-        // （顶层 `=` 之前）：补全后紧跟 `=`
-        val prop = request.findProperty()
-        val isResourceNameLhs =
-            prop != null && isResourceNameValueType(prop.type) &&
-                currentSegmentRhs(request.textBeforeCursor) == null
         return matching.map { name ->
             val translated = translateValueName(request.translationDict, name)
             val insert = if (isResourceNameLhs) "$translated=" else translated

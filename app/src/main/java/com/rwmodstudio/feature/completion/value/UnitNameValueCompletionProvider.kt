@@ -75,6 +75,16 @@ class UnitNameValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 打了空格 / Tab：空格不是合法分隔符——
+        // 列表属性（可建造 名称、死亡产生单位、覆盖单位…）→ 只提示「,」（选中时吞掉空格成 `a,b`）；
+        // 单值单位名（核心 name、convertTo 等）→ 值已写完，不再补单位名
+        if (needsCommaSeparator(request)) {
+            return if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) {
+                listOf(commaSeparatorItem("单位名分隔符（值与值之间用逗号分隔）"))
+            } else {
+                emptyList()
+            }
+        }
         val source = request.unitNames
         if (source.isEmpty()) return emptyList()
 

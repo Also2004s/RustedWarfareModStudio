@@ -65,6 +65,18 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         val fileName = resolveFileName(request) ?: return emptyList()
+        // 打了空格 / Tab：空格不是合法分隔符——
+        // 多值枚举（transportUnitsRequireMovementType / convertTo_keepCurrentFields /
+        // whenBuilding_temporarilyConvertTo_keepFields）→ 只弹「,」；
+        // setUnitStats（fields values）段内空格是「字段 += 值」的合法分隔，不拦截，落入下方原逻辑；
+        // 其余单值枚举 → 值已写完，不弹。
+        if (needsCommaSeparator(request) && fileName != "setUnitStats") {
+            return if (isMultiValueEnumProperty(request)) {
+                listOf(commaSeparatorItem("枚举分隔符（值与值之间用逗号分隔）"))
+            } else {
+                emptyList()
+            }
+        }
         val data = ValueDataLoader.load(request.context, fileName, request.translationDict)
         val prefix = request.valuePrefix
         return data.data
@@ -81,6 +93,26 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
                     valueType = "string"
                 )
             }
+    }
+
+    /**
+     * 可一次填多个的枚举属性（依据 code_reference 官方示例）：
+     * - 被运输单位类型限制: 空中, 水面
+     * - 转换时保留字段: 装甲, maxEnergy, 生命值（fields：字段名之间逗号分隔，段内无空格）
+     * - whenBuilding_temporarilyConvertTo_keepFields: 生命值, maxEnergy（同上）
+     * 注意：设置单位状态（setUnitStats，fields values）**不在其中** —— 它的段内空格是
+     * 「字段 += 值」的合法分隔（`护盾值 += 20`），打空格弹「,」会拦住运算符输入。
+     */
+    private val multiValueEnumProperties = setOf(
+        "transportunitsrequiremovementtype",
+        "convertto_keepcurrentfields",
+        "whenbuilding_temporarilyconvertto_keepfields"
+    )
+
+    private fun isMultiValueEnumProperty(request: ValueCompletionRequest): Boolean {
+        val prop = request.findProperty()
+        val names = listOfNotNull(request.propertyName, prop?.name, prop?.name_en, request.toEnglishName())
+        return names.any { it.trim().lowercase() in multiValueEnumProperties }
     }
 
     private fun resolveFileName(request: ValueCompletionRequest): String? {

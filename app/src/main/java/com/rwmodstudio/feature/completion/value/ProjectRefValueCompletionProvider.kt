@@ -77,6 +77,16 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             return buildFileItems(request)
         }
         val kind = projectRefKind(prop.type) ?: return emptyList()
+        // 打了空格 / Tab：空格不是合法分隔符——
+        // 多值引用（effect/action/attachment/projectile）→ 只弹「,」（选完吞掉空格成 `a,b`）；
+        // 单值引用（turret/decal/animation）→ 值已写完，不弹。
+        if (needsCommaSeparator(request)) {
+            return if (kind in multiValueRefKinds) {
+                listOf(commaSeparatorItem("项目引用分隔符（值与值之间用逗号分隔）"))
+            } else {
+                emptyList()
+            }
+        }
         val source = when (kind) {
             "turret" -> request.turretNames
             "projectile" -> request.projectileNames
@@ -105,6 +115,14 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
     /** valuePrefix 是否以 CUSTOM: 开头 */
     private fun prefixIsCustomPrefixed(prefix: String): Boolean =
         prefix.lowercase().startsWith("custom:")
+
+    /**
+     * 可按逗号填多个的引用类别（依据 code_reference 的官方示例 + 真实项目用法）：
+     * 效果（死亡效果: shockwave, CUSTOM:pieces*3）、行动（也执行动作: addCredits, playSound）、
+     * 附属槽位（附属添加于槽位: drop1, drop2）、抛射体（在寿命结束时刷抛射体: a(...), b(...)）。
+     * 单值引用（炮塔/贴花/动画/可建造）不在其中：官方示例全为单值，不提示逗号。
+     */
+    private val multiValueRefKinds = setOf("effect", "action", "attachment", "projectile")
 
     /**
      * 音效路径属性判定：硬编码名单精确匹配 + type 初筛兜底。
@@ -141,6 +159,10 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
      * 输入/点击 ROOT: 后才列出跨目录项目音频（ROOT:/相对路径）。
      */
     private fun buildSoundItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 多值音效（攻击/移动/选择指令音效，官方说明写明"用,隔开"）：打了空格 → 只提示「,」
+        if (needsCommaSeparator(request)) {
+            return listOf(commaSeparatorItem("音效分隔符（值与值之间用逗号分隔）"))
+        }
         val prefix = request.valuePrefix
         val inRoot = prefix.trim().lowercase().startsWith("root:")
         // ROOT: 态用「去掉 ROOT: 前缀」的子串；默认态用输入子串
@@ -193,6 +215,10 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
      * 输入/点击 ROOT: 后才列出跨目录项目文件（ROOT:/相对路径），且 ROOT: 前缀选项默认置顶。
      */
     private fun buildFileItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 复制与 可一次抄多个文件（`复制与: ROOT:xx.template, yy.ini`）：打了空格 → 只提示「,」
+        if (needsCommaSeparator(request)) {
+            return listOf(commaSeparatorItem("文件分隔符（值与值之间用逗号分隔）"))
+        }
         val prefix = request.valuePrefix
         val inRoot = prefix.trim().lowercase().startsWith("root:")
         // ROOT: 态用「去掉 ROOT: 前缀」的子串；默认态用输入子串

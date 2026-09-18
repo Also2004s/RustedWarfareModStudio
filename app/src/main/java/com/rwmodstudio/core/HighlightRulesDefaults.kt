@@ -50,13 +50,17 @@ object HighlightRulesDefaults {
         slot("value", "自身检测", "string.unquoted.value.ini", 0),
         slot("value", "单位数量", "string.unquoted.value.ini", 1),
         slot("value", "自身属性", "string.unquoted.value.ini", 2),
-        slot("value", "中文参数", "string.unquoted.value.ini", 3),
-        slot("value", "兜底单词", "string.unquoted.value.ini", 4),
-        slot("value", "自身检测(顶层)", "string.unquoted.value.ini", 5),
-        slot("value", "单位数量(顶层)", "string.unquoted.value.ini", 6),
-        slot("value", "自身属性(顶层)", "string.unquoted.value.ini", 7),
-        slot("value", "中文参数(顶层)", "string.unquoted.value.ini", 8),
-        slot("value", "兜底单词(顶层)", "string.unquoted.value.ini", 9),
+        slot("value", "自身检测（英文）", "string.unquoted.value.ini", 3),
+        slot("value", "自动触发事件（中文）", "string.unquoted.value.ini", 4),
+        slot("value", "自动触发事件（英文）", "string.unquoted.value.ini", 5),
+        slot("value", "兜底单词", "string.unquoted.value.ini", 6),
+        slot("value", "自身检测(顶层)", "string.unquoted.value.ini", 7),
+        slot("value", "单位数量(顶层)", "string.unquoted.value.ini", 8),
+        slot("value", "自身属性(顶层)", "string.unquoted.value.ini", 9),
+        slot("value", "自身检测（英文）(顶层)", "string.unquoted.value.ini", 10),
+        slot("value", "自动触发事件（中文）(顶层)", "string.unquoted.value.ini", 11),
+        slot("value", "自动触发事件（英文）(顶层)", "string.unquoted.value.ini", 12),
+        slot("value", "兜底单词(顶层)", "string.unquoted.value.ini", 13),
 
         // ══ 引用前缀（同 scope 6 条：引用前缀/自身资源/时间函数 × 键值区+顶层）══
         slot("reference", "引用前缀", "variable.other.reference.ini", 0),
@@ -108,7 +112,7 @@ object HighlightRulesDefaults {
         slot("value", "键值冒号（beginCaptures[2]）", "punctuation.separator.ini", 0, regexOnly = true),
 
         // ══ 队伍 / 路径点 / 布尔（同一配色键：主题里 constant.language.boolean 与 team/waypoint 同色）══
-        // 类别 id 用主题配色键 `team`（界面显示「队伍/路径点」）。内置语法里布尔常量与队伍值共用一套颜色，
+        // 类别 id 用主题配色键 `team`（界面显示「枚举值」）。内置语法里布尔常量与队伍值共用一套颜色，
         // 拆成「布尔常量」「队伍/路径点」两个类别会出现「改了布尔常量其实改了队伍色」的错位（见 AGENTS.md §9）。
         // 不带后缀的 = 键值块内那份（**默认显示**）；`(顶层)` = 顶层另一处写法不同的那份（**默认隐藏**）；
         // `(重复定义)` = 与上一组正文完全相同、只是语法里写了两遍（合成一组，改动会同时作用于两处）
@@ -125,10 +129,8 @@ object HighlightRulesDefaults {
         slot("team", "特殊值(重复定义)", "constant.language.boolean.ini", 5),
         slot("team", "帧率(重复定义)", "constant.language.boolean.ini", 6),
         slot("team", "内置属性(重复定义)", "constant.language.boolean.ini", 7),
-        // 剩余两条：`.获取相对偏移(...)` 链式方法调用的**返回值**（captures[1]，布尔配色）
-        // 以及顶层那份的 captures[1]。同 scope 同正文的重复定义会合并成一组。
-        slot("team", "链式方法返回值(重复定义)", "constant.language.boolean.ini", 8, regexOnly = true),
-        slot("team", "链式方法返回值", "constant.language.boolean.ini", 9, regexOnly = true),
+        // 「链式方法返回值」2 槽已删（2026-09-18 老板裁决）：它匹配 `.获取相对偏移(` 链式调用的函数名
+        // 却挂在枚举值下，而函数词表的 \b 边界天然覆盖点号后的函数名 —— 纯多余且错色。
 
         // ══ 移动（2 条）══
         slot("movement", "移动类型", "constant.language.uppercase.ini", 0),
@@ -141,15 +143,15 @@ object HighlightRulesDefaults {
         slot("path", "路径前缀", "constant.language.path.ini", 0),
         slot("path", "路径前缀(重复定义)", "constant.language.path.ini", 1),
 
-        // ══ 字符串 / 引号（各 2 条）/ 装饰符（4 条）══
+        // ══ 字符串（单/双各 2 条）══
+        // 「字符串引号」（quote）类别已删（2026-09-18，其声明的 scope 在语法里 0 次、整类空转）——
+        // 单引号字符串改挂「字符串」类别（单双引号调色统一，targetScopes 的 string 本就含 single）。
+        // 「相邻/连续引号」（decoration）4 槽已删：punctuation.ignored.ini 是「不上色」结构，
+        //   已并入普通文本着色（SoraEditorInitializer.applyScopeColors 接管），列入 EXCLUDED_FROM_SLOTS 故意不复刻。
         slot("string", "双引号字符串", "string.quoted.double.ini", 1),
         slot("string", "双引号字符串(顶层)", "string.quoted.double.ini", 0),
-        slot("quote", "单引号字符串", "string.quoted.single.ini", 1),
-        slot("quote", "单引号字符串(顶层)", "string.quoted.single.ini", 0),
-        slot("decoration", "相邻双引号", "punctuation.ignored.ini", 0),
-        slot("decoration", "连续单引号", "punctuation.ignored.ini", 1),
-        slot("decoration", "相邻双引号(重复定义)", "punctuation.ignored.ini", 2),
-        slot("decoration", "连续单引号(重复定义)", "punctuation.ignored.ini", 3),
+        slot("string", "单引号字符串", "string.quoted.single.ini", 1),
+        slot("string", "单引号字符串(顶层)", "string.quoted.single.ini", 0),
 
         // ══ 运算符（逻辑 2 / 比较 2 / 赋值 1 / 算术 2 / 点访问符 2）══
         // 「逻辑符」是主题里与 operator 分开的另一组配色键，也指向 keyword.operator.logical.ini；
@@ -179,10 +181,10 @@ object HighlightRulesDefaults {
         // 漏掉任何一处，「方括号」类别的自定义都改不干净（剩下的内置捕获会把颜色抢回去）
         slot("bracket", "方括号(顶层)", "punctuation.bracket.square.ini", 2, regexOnly = true),
         // 顶层那份圆括号（`([\(\)])`）与 …#2 的正文逐字相同 → 归到「圆括号(重复定义)」
-        slot("bracketRound", "圆括号(重复定义)", "punctuation.bracket.round.ini", 2, regexOnly = true),
-        slot("bracketRound", "链式方法调用的括号(capt[2])", "punctuation.bracket.round.ini", 3, regexOnly = true),
+        // 「圆括号(重复定义)#2」与「链式方法调用的括号(capt[2])#3」两槽已随链式规则删除（2026-09-18）：
+        // 链式规则删了，它 captures 里的圆括号染色由主规则（instance 0/1）接管，无视觉差异。
         // ══ 节名（规则级 name=entity.name.section.ini，靠 captures 给节括号/节后缀上色）══
-        // 类别 id 用主题配色键 `sectionBracket`（界面显示「节括号」）：主题里 entity.name.section.ini
+        // 类别 id 用主题配色键 `sectionBracket`（界面显示「节前缀」）：主题里 entity.name.section.ini
         // 就是归 sectionBracket 上色的，原来放在单独的「节」类别下写了规则也不会变色。
         // 节名整条规则 `(\[)(.+?)(\])` —— 规则级 name 与 captures[2] 都是 entity.name.section.ini，
         // 是**同一条内置规则**（该 scope 内第 0 条），所以节名只占 1 个槽位
@@ -205,7 +207,16 @@ object HighlightRulesDefaults {
     const val DUPLICATE_MARK = "(重复定义)"
 
     /** 该分组是否是「顶层另一处写法」——界面默认隐藏这类分组（可在规则页打开显示） */
-    fun isTopLevelGroup(listName: String): Boolean = listName.endsWith(TOP_LEVEL_MARK)
+    /** 「重复定义」分组标记：与另一处正文完全相同的第二份（生成端已并入同一个分组显示） */
+    const val REPEAT_MARK = "(重复定义)"
+
+    /**
+     * 默认折叠的分组：`(顶层)` 与 `(重复定义)`。
+     * 内置语法在键值块内和顶层各写一份词表，两处生效位置不同、缺一不可，但并排显示只会像重复；
+     * 折叠只影响显示，规则照旧生效、照旧参与高亮。
+     */
+    fun isTopLevelGroup(listName: String): Boolean =
+        listName.endsWith(TOP_LEVEL_MARK) || listName.endsWith(REPEAT_MARK)
 
     /** 参数关键字规则所在 scope（只有它里面那条带 `==?` 的规则归「参数」类别） */
     private const val PARAM_SCOPE = "variable.parameter.ini"
@@ -234,8 +245,15 @@ object HighlightRulesDefaults {
         val instance: Int
     )
 
-    /** 复刻槽位总数（应等于内置带 scope 的规则条数） */
+    /** 复刻槽位总数（应等于内置带 scope 的规则条数，不含 [EXCLUDED_FROM_SLOTS]） */
     internal val slotCount: Int get() = SLOTS.size
+
+    /**
+     * **故意不复刻**的内置 scope：「连续引号」边界（`punctuation.ignored.ini`，标记 `"""` / `'''`
+     * 多行引号、本意「不上色」）。它已并入普通文本着色（`SoraEditorInitializer.applyScopeColors`
+     * 强制取正文色），用户对它改色/写规则都无意义 ⇒ 对账时这些规则**不计入「漏复刻」**。
+     */
+    internal val EXCLUDED_FROM_SLOTS: Set<String> = setOf("punctuation.ignored.ini")
 
     @Volatile
     private var cached: List<HighlightRuleManager.HighlightRuleCategory>? = null
@@ -294,18 +312,17 @@ object HighlightRulesDefaults {
         val buckets = LinkedHashMap<String, MutableList<HighlightRuleManager.HighlightRule>>()
         val bucketOrder = mutableListOf<String>()
         val unmatched = mutableListOf<String>()
-        // 规则正文签名的首次归属分组：**同 scope 且正文完全相同**的重复定义合并成一组
-        // （用户不需要看到两遍一样的词），正文不同的（哪怕同 scope，如帧率 vs 内置属性）保持分开
-        val signatureToGroup = HashMap<String, String>()
+        // 同类别内一个词只生成一条规则：同一段词表在语法里可能有两份（键值块内 / 顶层），
+        // 替换引擎按正文定位、两处同时生效（见 HighlightRuleManager.buildMergedGrammarRaw）——
+        // 用户在规则页只看到一个词，编辑一处两处都变。
+        val seenByCategory = HashMap<String, HashSet<String>>()
         SLOTS.forEach { slotDef ->
             val body = instanceBodies.firstOrNull { it.first == (slotDef.scope to slotDef.instance) }?.second
             if (body == null) {
                 unmatched.add("${slotDef.displayGroup}(${slotDef.scope}#${slotDef.instance})")
                 return@forEach
             }
-            val signature = slotDef.categoryId + "\u0000" + slotDef.scope + "\u0000" + body
-            val groupLabel = signatureToGroup[signature] ?: slotDef.displayGroup
-            signatureToGroup[signature] = groupLabel
+            val groupLabel = slotDef.displayGroup
             val key = slotDef.categoryId + "\u0000" + groupLabel
             val bucket = buckets.getOrPut(key) {
                 bucketOrder.add(key)
@@ -314,7 +331,7 @@ object HighlightRulesDefaults {
             val keywords = if (slotDef.regexOnly) null else literalAlternates(body)
             if (keywords != null) {
                 keywords.forEach { keyword ->
-                    if (bucket.none { it.pattern == keyword && it.sourceInstance == slotDef.instance }) {
+                    if (seenByCategory.getOrPut(slotDef.categoryId) { HashSet() }.add(keyword)) {
                         bucket.add(
                             HighlightRuleManager.HighlightRule(
                                 keyword,
@@ -379,7 +396,9 @@ object HighlightRulesDefaults {
         val builtinKeys = instanceKeys(builtin)
         val slotKeys = SLOTS.map { it.scope to it.instance }
         val dupSlots = slotKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-        val missing = builtinKeys - slotKeys.toSet()
+        // 「不上色」结构（连续引号边界）故意不复刻，不计入漏复刻
+        val missing = (builtinKeys - slotKeys.toSet()).filterNot { it.first in EXCLUDED_FROM_SLOTS }
+        val excluded = (builtinKeys - slotKeys.toSet()).filter { it.first in EXCLUDED_FROM_SLOTS }
         val extra = slotKeys.toSet() - builtinKeys.toSet()
         val covered = defaults.flatMap { it.rules }
             .filter { it.source.isNotBlank() }
@@ -394,6 +413,7 @@ object HighlightRulesDefaults {
             append("parity: 内置规则=${builtin.size}, 已复刻=${covered.size}, 槽位=${slotCount}, 分组(有规则的)=$groups, ")
             append("关键字=$kw, 正则=$rx → $rated")
             if (missing.isNotEmpty()) append("\n漏复刻: " + missing.joinToString(", ") { "${it.first}#${it.second}" })
+            if (excluded.isNotEmpty()) append("\n故意不复刻(不上色结构, ${excluded.size} 条): " + excluded.joinToString(", ") { "${it.first}#${it.second}" })
             if (dupSlots.isNotEmpty()) append("\n槽位撞车: " + dupSlots.joinToString(", ") { "${it.first}#${it.second}" })
             if (extra.isNotEmpty()) append("\n多余槽位: " + extra.joinToString(", ") { "${it.first}#${it.second}" })
             // 每个 scope 的内置条数：排查「少复刻」时用来对账（应与语法文件逐 scope 统计一致）
@@ -477,6 +497,9 @@ object HighlightRulesDefaults {
     internal fun literalAlternates(body: String): List<String>? {
         val inner = when {
             body.startsWith("\\b(") && body.endsWith(")\\b") -> body.substring(3, body.length - 3)
+            // 参数词表的形态：\b(...)\s*==?（参数名后跟 =）—— 不认这种形态的话，
+            // 参数类别在规则页一条词条都生成不出（整个类别是空的）
+            body.startsWith("\\b(") && body.endsWith(")\\s*==?") -> body.substring(3, body.length - 7)
             body.startsWith("(") && body.endsWith(")") -> body.substring(1, body.length - 1)
             else -> return null
         }

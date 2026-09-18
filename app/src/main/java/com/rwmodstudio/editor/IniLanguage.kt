@@ -440,6 +440,33 @@ private class SectionCompletionItem(
 }
 
 /**
+ * 序号/参数模板键补全项：插入后把光标停在**占位符空位**处，用户直接敲数字即成完整键。
+ *
+ * 例：核心节输入 `builtFrom_` 选中后插入 `builtFrom__name:`，光标落在 `builtFrom_` 之后
+ * （`cursorOffset` = 10），敲 `1` 得到 `builtFrom_1_name:`，不用回头找位置。
+ * 已填满占位符的项不走这里（cursorOffset < 0，用 SimpleCompletionItem，光标落行尾即为期望位置）。
+ */
+private class KeyTemplateCompletionItem(
+    label: CharSequence,
+    desc: CharSequence?,
+    prefixLength: Int,
+    private val commitText: String,
+    private val cursorOffset: Int
+) : CompletionItem(label, desc, null) {
+
+    init {
+        this.prefixLength = prefixLength
+    }
+
+    override fun performCompletion(editor: io.github.rosemoe.sora.widget.CodeEditor, text: Content, line: Int, column: Int) {
+        val startColumn = column - this.prefixLength
+        text.replace(line, startColumn, line, column, commitText)
+        val caret = (startColumn + cursorOffset).coerceIn(startColumn, startColumn + commitText.length)
+        editor.setSelection(line, caret)
+    }
+}
+
+/**
  * 包装 TextMateLanguage，保留 INI 语法高亮，并接入项目自定义补全。
  */
 class IniLanguage(private val delegate: TextMateLanguage) : EmptyLanguage() {
@@ -528,10 +555,14 @@ class IniLanguage(private val delegate: TextMateLanguage) : EmptyLanguage() {
             } else {
                 prefixLength
             }
-            val baseItem = if (item.type == CompletionProvider.CompletionType.SECTION) {
-                SectionCompletionItem(label, item.detail, prefixLength, commit)
-            } else {
-                SimpleCompletionItem(label, item.detail, itemPrefixLength, commit)
+            val baseItem = when {
+                item.type == CompletionProvider.CompletionType.SECTION ->
+                    SectionCompletionItem(label, item.detail, prefixLength, commit)
+                // 模板键留空了占位符 → 插入后把光标定位到空位处（老板决策：敲数字即成品）
+                item.cursorOffset >= 0 ->
+                    KeyTemplateCompletionItem(label, item.detail, itemPrefixLength, commit, item.cursorOffset)
+                else ->
+                    SimpleCompletionItem(label, item.detail, itemPrefixLength, commit)
             }
             baseItem.apply {
                 kind = when (item.type) {

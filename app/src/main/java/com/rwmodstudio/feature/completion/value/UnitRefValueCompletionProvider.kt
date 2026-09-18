@@ -52,6 +52,9 @@ class UnitRefValueCompletionProvider : BaseValueCompletionProvider() {
             return (logicItems + memItems).distinctBy { it.label }
         }
 
+        // 非点链的单值单位标记：打空格 → 值已写完，不弹
+        if (needsCommaSeparator(request)) return emptyList()
+
         // 统一调用源：self + unit/marker/event × logicboolean + unit 型内存变量（内存.变量），
         // 与 设置单位内存:目标= 等 kvp RHS / +号菜单 / 演示面板同源（与 +号无关，统一即可）
         return unitMarkerItems(

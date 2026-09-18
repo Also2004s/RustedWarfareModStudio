@@ -480,6 +480,7 @@ fun SettingsScreen(
             var replayImportDir by remember { mutableStateOf(SettingsManager.replayImportDir) }
             var rwmodImportDir by remember { mutableStateOf(SettingsManager.rwmodImportDir) }
             var mapImportDir by remember { mutableStateOf(SettingsManager.mapImportDir) }
+            var gamePkgSel by remember { mutableStateOf(SettingsManager.launchGamePackage) }
 
             Box(
                 modifier = Modifier
@@ -521,6 +522,44 @@ fun SettingsScreen(
                         onSave = { SettingsManager.mapImportDir = mapImportDir },
                         onReset = { mapImportDir = SettingsManager.defaultMapImportDir(); SettingsManager.mapImportDir = mapImportDir }
                     )
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+                    Spacer(Modifier.height(10.dp))
+                    // 启动游戏包选择：指定后编辑器「启动游戏」按钮直接启动该包；
+                    // 「每次询问」时两个包都装了才弹窗选择（只装一个直接启动那一个）
+                    Text(
+                        text = "启动游戏",
+                        fontSize = 14.sp,
+                        color = RustedOnBackground,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                    Text(
+                        text = "编辑器「启动游戏」按钮使用的包，每次询问会在启动时弹窗选择",
+                        fontSize = 11.sp,
+                        color = RustedOnBackground.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = gamePkgSel.isEmpty(),
+                            onClick = { gamePkgSel = ""; SettingsManager.launchGamePackage = "" },
+                            label = { Text("每次询问", fontSize = 12.sp) }
+                        )
+                        FilterChip(
+                            selected = gamePkgSel == SettingsManager.GAME_PKG_ORIGINAL,
+                            onClick = { gamePkgSel = SettingsManager.GAME_PKG_ORIGINAL; SettingsManager.launchGamePackage = SettingsManager.GAME_PKG_ORIGINAL },
+                            label = { Text("原版", fontSize = 12.sp) }
+                        )
+                        FilterChip(
+                            selected = gamePkgSel == SettingsManager.GAME_PKG_RWJS,
+                            onClick = { gamePkgSel = SettingsManager.GAME_PKG_RWJS; SettingsManager.launchGamePackage = SettingsManager.GAME_PKG_RWJS },
+                            label = { Text("极速版", fontSize = 12.sp) }
+                        )
+                    }
                 }
             }
         }
@@ -632,11 +671,14 @@ fun SettingsScreen(
     }
 
     if (showFontPicker) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showFontPicker = false },
-            title = { Text("编辑器字体") },
-            text = {
-                LazyColumn(Modifier.fillMaxWidth().height(420.dp)) {
+            title = "编辑器字体",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { showFontPicker = false }
+            }
+        ) {
+            LazyColumn(Modifier.fillMaxWidth().height(420.dp)) {
                     items(FONT_FAMILY_OPTIONS.size) { index ->
                         val key = FONT_FAMILY_OPTIONS[index]
                         Row(
@@ -665,12 +707,7 @@ fun SettingsScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showFontPicker = false }) { Text("取消") }
-            }
-        )
+        }
     }
 
     if (showBlockDialog) {
@@ -681,11 +718,48 @@ fun SettingsScreen(
             if (!eng.isLoaded) eng.load(context)
             blockEngineReady = true
         }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showBlockDialog = false },
-            title = { Text("翻译屏蔽词") },
-            text = {
-                Column(Modifier.height(460.dp)) {
+            title = "翻译屏蔽词",
+            actions = {
+                DialogActionButton("重置默认", color = RustedError) {
+                    val ok = engine.resetBlocklist(context)
+                    if (ok) {
+                        android.widget.Toast.makeText(context, "已重置为默认屏蔽词", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        android.widget.Toast.makeText(context, "重置屏蔽词失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    val bl = TranslationBlocklist.load(context)
+                    blockKeys = bl.keys
+                    localBlockKeys = bl.keys
+                    blockVariables = bl.blockVariables
+                    blockAtTokens = bl.blockAtTokens
+                    blockFileNames = bl.blockFileNames
+                    blockQuotedDictWords = bl.blockQuotedDictWords
+                    forcePercentVariables = bl.forcePercentVariables
+                }
+                DialogActionButton("取消", color = RustedOnBackground) { showBlockDialog = false }
+                DialogActionButton("保存") {
+                    blockKeys = localBlockKeys
+                    val ok1 = engine.updateBlocklistKeys(context, localBlockKeys)
+                    val ok2 = engine.updateBlocklistFlags(
+                        context,
+                        blockVariables,
+                        blockAtTokens,
+                        blockFileNames,
+                        blockQuotedDictWords,
+                        forcePercentVariables
+                    )
+                    if (ok1 && ok2) {
+                        android.widget.Toast.makeText(context, "屏蔽词保存成功", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        android.widget.Toast.makeText(context, "屏蔽词保存失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    showBlockDialog = false
+                }
+            }
+        ) {
+            Column(Modifier.height(460.dp)) {
                     Text("以下 key 对应的 value 不会被翻译。", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                     Spacer(Modifier.height(8.dp))
                     Card(
@@ -753,57 +827,17 @@ fun SettingsScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {
-                Row {
-                    TextButton(onClick = {
-                        val ok = engine.resetBlocklist(context)
-                        if (ok) {
-                            android.widget.Toast.makeText(context, "已重置为默认屏蔽词", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            android.widget.Toast.makeText(context, "重置屏蔽词失败", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                        val bl = TranslationBlocklist.load(context)
-                        blockKeys = bl.keys
-                        localBlockKeys = bl.keys
-                        blockVariables = bl.blockVariables
-                        blockAtTokens = bl.blockAtTokens
-                        blockFileNames = bl.blockFileNames
-                        blockQuotedDictWords = bl.blockQuotedDictWords
-                        forcePercentVariables = bl.forcePercentVariables
-                    }) { Text("重置默认", color = RustedError) }
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = {
-                        blockKeys = localBlockKeys
-                        val ok1 = engine.updateBlocklistKeys(context, localBlockKeys)
-                        val ok2 = engine.updateBlocklistFlags(
-                            context,
-                            blockVariables,
-                            blockAtTokens,
-                            blockFileNames,
-                            blockQuotedDictWords,
-                            forcePercentVariables
-                        )
-                        if (ok1 && ok2) {
-                            android.widget.Toast.makeText(context, "屏蔽词保存成功", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            android.widget.Toast.makeText(context, "屏蔽词保存失败", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                        showBlockDialog = false
-                    }) { Text("保存") }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showBlockDialog = false }) { Text("取消") }
-            }
-        )
+        }
 
         if (showBlockSubDialog) {
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = { showBlockSubDialog = false },
-                title = { Text("特殊内容屏蔽") },
-                text = {
-                    Column {
+                title = "特殊内容屏蔽",
+                actions = {
+                    DialogActionButton("确定", color = RustedOnBackground) { showBlockSubDialog = false }
+                }
+            ) {
+                Column {
                         Text("选择需要额外保护的文本片段类型。", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                         Spacer(Modifier.height(8.dp))
                         BlockSwitch("\${} 变量", blockVariables) { blockVariables = it }
@@ -822,29 +856,24 @@ fun SettingsScreen(
                             Icon(Icons.Default.ChevronRight, null, tint = RustedOnBackground.copy(alpha = 0.5f))
                         }
                     }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showBlockSubDialog = false }) { Text("确定") }
                 }
-            )
-        }
+            }
     }
 
     if (showInternalFilterDialog) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showInternalFilterDialog = false },
-            title = { Text("内部过滤内容") },
-            text = {
-                Column {
+            title = "内部过滤内容",
+            actions = {
+                DialogActionButton("确定", color = RustedOnBackground) { showInternalFilterDialog = false }
+            }
+        ) {
+            Column {
                     Text("以下选项开启后，对应片段将无视屏蔽词强制参与翻译。", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                     Spacer(Modifier.height(8.dp))
                     BlockSwitch("跳过%{}变量", forcePercentVariables) { forcePercentVariables = it }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showInternalFilterDialog = false }) { Text("确定") }
             }
-        )
     }
 
     if (showPickFromDict) {
@@ -871,11 +900,20 @@ fun SettingsScreen(
             }
         }
 
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showPickFromDict = false },
-            title = { Text("从翻译库选择屏蔽词") },
-            text = {
-                Column(Modifier.height(400.dp)) {
+            title = "从翻译库选择屏蔽词",
+            actions = {
+                DialogActionButton("取消", color = RustedOnBackground) { showPickFromDict = false }
+                DialogActionButton("添加 (${selected.size})") {
+                    if (selected.isNotEmpty()) {
+                        localBlockKeys = (localBlockKeys + selected).distinct()
+                    }
+                    showPickFromDict = false
+                }
+            }
+        ) {
+            Column(Modifier.height(400.dp)) {
                     OutlinedTextField(
                         value = pickSearch,
                         onValueChange = { pickSearch = it },
@@ -922,19 +960,7 @@ fun SettingsScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (selected.isNotEmpty()) {
-                        localBlockKeys = (localBlockKeys + selected).distinct()
-                    }
-                    showPickFromDict = false
-                }) { Text("添加 (${selected.size})") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPickFromDict = false }) { Text("取消") }
-            }
-        )
+        }
     }
 
     if (showLocalConfigSearch) {

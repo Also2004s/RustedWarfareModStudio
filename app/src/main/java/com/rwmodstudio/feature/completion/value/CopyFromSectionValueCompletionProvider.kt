@@ -29,6 +29,8 @@ class CopyFromSectionValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 单值（引用一个节）：打空格 → 值已写完，不弹
+        if (needsCommaSeparator(request)) return emptyList()
         val prefix = request.valuePrefix
         val currentBase = sectionBaseFromCategory(request.sectionName)
         // 复制节(@copyFromSection)=引用任意节，值是【完整节名】（带英文基名前缀，如 projectile_scoutBotProjectileSplit）；

@@ -33,7 +33,8 @@ RustedWarfareModStudio（应用名「铁锈工坊」，包名 `com.rwmodstudio`�
 - `settings.gradle.kts` 配置阿里云镜像（google/central/gradle-plugin/public），保留原始源作备用，**不要移除镜像**。
 - `local.properties` 存放 SDK 路径、release 签名信息与 `DEFAULT_AI_API_KEY`（默认 AI 密钥，注入 BuildConfig；`.gitignore` 已忽略，**不得提交**，源码内不得出现明文密钥）。
 - `gradle.properties`：`android.overridePathCheck=true`、`android.suppressUnsupportedCompileSdk=36`。
-- 版本号在 `app/build.gradle.kts`：`versionCode = 27`、`versionName = "1.3.6"`（发布时必须递增，只增不减）。
+- 版本号在 `app/build.gradle.kts`：`versionCode = 30`、`versionName = "1.5.0"`（发布时必须递增，只增不减）。
+  - `compileSdk = 36`、`minSdk = 21`、`targetSdk = 34`（targetSdk 落后于 compileSdk，属已知待跟进项）。
 
 常用命令（PowerShell）：
 ```powershell
@@ -94,7 +95,7 @@ app/src/main/
 | `UpdateChecker.kt` / `UpdateDownloader.kt` | 检查更新（GitHub Releases，直连失败自动切 `gh-proxy` 镜像）/ APK 下载 |
 | `FileSettings.kt` / `ThemeState.kt` / `ThemeManager.kt` / `DarkThemeColors.kt` / `TodoManager.kt` | 文件键值存储 / 主题 / 待办 |
 | `HighlightRuleManager.kt` | 自定义代码高亮规则（开发者模式→规则）：`RWmod/config/highlight_rules.json` 读写、按 `source` 原文**原位替换**内置规则（手写规则才插到最前）、`revision++` 通知编辑器重建语言、复刻保真度自检 |
-| `HighlightRulesDefaults.kt` | 内置语法复刻：`SLOTS` 表逐条对应内置语法里每条带 scope 的配色片段（规则级 `name` + 捕获里的具名 `name`，含重复定义，共 **92** 条），生成默认规则（首次运行播种 / 「重置为内置规则」用）；`parityReport` 对账并写到 `RWmod/cache/defaults_report.txt`（必须 92/92 且逐条对账「无人认领=0 原文不一致=0」） |
+| `HighlightRulesDefaults.kt` | 内置语法复刻：`SLOTS` 表逐条对应内置语法里每条带 scope 的配色片段（规则级 `name` + 捕获里的具名 `name`，含重复定义，共 **90** 条），生成默认规则（首次运行播种 / 「重置为内置规则」用）；`parityReport` 对账并写到 `RWmod/cache/defaults_report.txt`（必须 90/90 且逐条对账「无人认领=0 原文不一致=0」） |
 
 ### core/translation/ 关键模块
 
@@ -142,6 +143,7 @@ app/src/main/
 - 值补全：光标在 `:` 后时触发，只替换当前片段（以 `,`/`(`/空白为分隔），经 `ValueCompletionAggregator` 聚合各 Provider（布尔/枚举/图片/内存/资源/标签/单位名/产生单位等）。
 - 翻译库兜底：遍历 `allDictKeys`（字典英+中 key），**跳过**自定义补全表（`mergedCustom` 按 label 去重、用户表优先）中已存在的 `name`/`nameEn`/`label`，也跳过结果中已加入的项，命中项插入 `category=["翻译库"]` 的 KEY 补全。
 - 排序：值补全 > 非 values/特定值 > values/特定值；用户表项置顶。
+- **「补全类型分类」页 / 模拟 ini 的归类 = 真实补全判定**：`ValueCompletionAggregator.realCompletionClassify` 与生产补全同一组 Provider、同顺序、首中即定，无第二份名单。判定用的聚合器构造为 `ValueCompletionOptions()`（全默认 = **全 Provider 开启**，与运行时 `devValueCompletion*` 开关无关）；因此**默认构造里任一开关为 false 都会让对应分类恒为 0 条**（2026-09-16 修的就是 `imageEnabled` 默认 false 导致「图片路径」0 条）。改分类相关开关默认值后必须 bump `VerifyManager.MOCK_INI_CODE`，否则已生成的 `mock_ini.ini` 不刷新。
 
 ### 5. 节名解析（EditorScreen.kt）
 
@@ -163,7 +165,7 @@ app/src/main/
 
 - 导航：`ModalNavigationDrawer`（侧边栏）+ `Scaffold` 全局 `topBar`。**所有页面自带全局标题栏，不要再额外加标题栏**。
 - 返回：`backStack` 记录嵌套导航，"从哪个页面打开，就返回哪个页面"（`pushScreen`/`popScreen`/`clearBackStack`）。
-- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST / HIGHLIGHT_RULES。
+- 页面枚举 `Screen`：HOME / BROWSER / EDITOR / CODE_REF / SETTINGS / TRANSLATION / CUSTOM / DEVELOPER / COMPLETION_TYPES / COORD_VISUAL / VERSION_COMPARE / PROJECT_MANAGER / TODO_LIST / MOD_INFO / HIGHLIGHT_RULES / RECYCLE_BIN。
 - 关键状态用 `rememberSaveable`（`selectedFile`、`currentScreen`、`saveAndExit` 等）防止配置变更丢失。
 - 编辑器工作区（`workspace` 内存缓冲，含文本/光标/滚动/修改标记）与存活实例仅在编辑器内存活，离开编辑器按三口径处理（`onBack(discard, saveAll)` + 离场统一效应）：**明确保存**（返回确认框「保存」/保存并退出）→ 全部实例落盘并销毁工作区；**明确不保存** → 丢弃不落盘并销毁；**直接返回**（返回键无修改、抽屉/工具页一切未做选择的离开）→ 自动保存开启时全部落盘并销毁，未开启时暂存（`holdPaths`，不落盘，下次打开恢复）。
 
@@ -187,10 +189,27 @@ app/src/main/
     只扫顶层会导致它们既替换不了又不起作用）；某条内置规则的复刻规则被清空/禁用时该内置规则被删除。
     用户在界面里手写的规则不带 `source`，合成一条插到 patterns **最前**（优先级最高）。
   - **禁止**把全部用户规则整批插到最前：那会改变规则顺序/优先级，着色就和内置不一样了。
-  - 关键字边界走 `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])`，**不能用 `\b`**（汉字也是词字符）。
+  - **已知边界（2026-09-16 全量对账确认，未修）**：同一条内置规则的**多个具名捕获**被复刻成多组
+    （如 `@memory` 一条正则带 7 个 captures、节名规则带 3 个），而合并端只能按「整条 match/begin」
+    定位替换，且 instance 号按「规则对象的第一个 name」计（复刻端按**每个捕获自己的 scope** 计），
+    两边口径不同 → 有 **6 个组改了不生效**（节名（白名单族名）、内存声明·中括号（完整）、
+    方括号(顶层)、圆括号(顶层)×2、圆括号(重复定义)）。**默认渲染不受影响**（定位失败 = 保留内置原文）。
+    要修只能改成「按 captures 的 name 改写」而不是整条正文替换，属设计层改动，动前先问。
+    对账工具：`.workbuddy/hl-verify/`（见其 README）。
+  - 关键字边界走 `\b…\b`，**不能用 ASCII 边界** `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])`
+    （2026-09-16 血泪）：引擎（joni/Oniguruma）按 **Unicode** 判词字符，**汉字也是词字符**，
+    ASCII 边界只拦 `[A-Za-z0-9_]`，等于把规则放宽——中文关键字会钻进更长的中文词里单独上色
+    （「控制距离」里的「距离」被当函数关键字上色）。`\b` 与内置语法完全等价；首尾字符不是词字符时不加 `\b`。
   - 装法：换掉 `GrammarRegistry` 内部的 tm4e `Registry`（反射）以绕过 `_ensureGrammarCache`，再 `loadGrammar` +
     `languageConfigurationToGrammar`。**不要另起子注册表**：token 颜色按注册表 id 空间编码，子注册表会导致着色失效。
-  - 开关关闭或无规则时返回 null → 编辑器走原单例语法（零介入）。
+  - **⚠️ 已知缺陷（2026-09-16 审计发现，当前未修复，勿按「设计如此」理解）**：
+    开关关闭或没有生效规则时 `registryWithCustomRules()` 返回 null，调用方把 null 直接传给
+    sora 的 `TextMateLanguage.create(...)` —— 该重载**不做 null 判断**，会抛 NPE 并被 catch 吞掉，
+    **编辑器拿不到任何语言 → 完全失去语法高亮**（而不是「走原单例语法」）。
+    另一条路径（revision 变化时）会 `?: return@LaunchedEffect`，**保留旧语言 → 开关关不掉**。
+    且 `installIntoRegistry` 用反射换掉了单例 `GrammarRegistry` 内部 registry，
+    `invalidateRegistry()` 只清缓存引用、**不会把内置语法放回**，故该状态**进程内不可逆**。
+    详细定位与修法见 `docs/bug-audit-2026-09-16.md` 与 `docs/修复回归风险核查-2026-09-16.md`。
 - **语法诊断（手动触发）**：规则页顶部的「生成语法诊断」按钮会把内置语法与合并后的语法写到
   `RWmod/cache/grammar_base.json` / `grammar_merged.json`，并输出规则条数/被改写条数到
   `RWmod/cache/highlight_rule_report.txt`（结构对齐才是"与内置一致"的根证据）。**不要再做成开关**。
@@ -201,9 +220,9 @@ app/src/main/
     节括号 `punctuation.definition.section.begin/end.ini`、节后缀 `entity.name.section.suffix.ini`、
     `@memory` 快捷键的 5 个片段、键名 `keyword.key.ini`、冒号 `punctuation.separator.ini`
     **全都只出现在捕获里** —— 早期收集器只读规则级 name，把这一整批漏了（18 条），
-    界面上就成了「内置语法里没有这个高亮类型」。**共 92 条，一条都不能少**。
+    界面上就成了「内置语法里没有这个高亮类型」。**当前 90 条，一条都不能少**。
   - **验收指标**：`RWmod/cache/defaults_report.txt` 的 `parity:` 行必须是
-    `内置规则=N, 已复刻=N … → 完全一致`（当前 92/92），且紧邻的 `逐条对账小结:` 必须是
+    `内置规则=N, 已复刻=N … → 完全一致`（当前 90/90），且紧邻的 `逐条对账小结:` 必须是
     `无人认领=0 原文不一致=0`。对账按 `(scope, 该 scope 内第几条)` 这把**钥匙集合**比，
     **不许用 `distinct()` 计数**——去重会把「两个槽位指同一条内置规则（撞车）」掩盖成"完全一致"，
     历史上 节后缀 槽位写错 scope 又恰好与 节名 撞在同一把钥匙上，就是这么骗过对账的。
@@ -225,8 +244,46 @@ app/src/main/
     `categoryScopes` 直接取 `targetScopes`）。**不要再手写类别列表**：历史上这里自造了 43 个类别，
     拆出「音效常量/效果常量/生成常量/块注释/多行字符串/正斜杠分隔」这些自定义高亮里根本没有的名字，
     而那些 scope（`support.constant.sound.ini`、`string.multiline.ini`、`keyword.control.ini`…）
-    在内置语法里出现 **0 次**，颜色永远不会生效。当前 = **43 个配色键 + ui + plainText = 45 个类别**，
-    其中 25 个有内置规则（443 条）；**没有任何规则的类别也要显示**（「还没有规则」+「+ 规则」按钮）。
+    在内置语法里出现 **0 次**，颜色永远不会生效。当前 = **23 个配色键 + ui + plainText = 25 个类别**，
+    全部有内置规则（死类别 property/quote/modifier/decoration 已于 2026-09-18 移除）；
+    **没有任何规则的类别也要显示**（「还没有规则」+「+ 规则」按钮）。
+  - **类别顺序（2026-09-18 按真实项目实测重排）**：顺序**只在 `DarkThemeColors.labels` + `targetScopes`
+    两处定义**（两表键序必须一致，单测 `labelsAndTargetScopesShareTheSameOrder` 钉死），
+    「自定义高亮」页与「规则」页都从它派生，**不要在任何页面里另排一套顺序**。
+    布局 = `ui`/`plainText` 置顶 → 其余按出现次数降序（实测对象 = `人机的玩笑`：27,501 行 / 148,787 个 token）
+    → 节族（节括号 / 节后缀）→ 数字 → 符号组（逗号 / 方括号 / 圆括号 / 花括号 / 操作符 / 逻辑符，
+    **组内不按次数**）→ 注释（最末）；分区结构由单测 `categoryOrderFollowsMeasuredFrequencyLayout` 看守。
+    重排前已核实：各类别**零重复 scope**、跨类前缀不重叠 ⇒ 重排不改变任何 token 的配色归属。
+    显示名两轮共改 10 处（2026-09-18）：`keyword` 关键字→**属性**、`value` 值高亮→**属性值**、
+    `type` 类型→**内存类型**、`memory` 内存/快捷键→**内存/变量**、
+    `shortcutVariable` 快捷变量→**变量名**、`movement` 移动/层级→**移动类型**、`team` 队伍/路径点→**枚举值**、
+    `reference` 引用前缀/目标→**单位标记**、`sectionBracket` 节括号→**节前缀**。
+    命名原则：**以用户看得懂为准，不追求与 scope 名一一对应**（`type` 真实项目里只出现在 `@memory 变量:float[]`
+    的类型位；`movement` 原名的「层级」scope 语法里根本不存在；`team` 覆盖布尔/帧率/队伍/路径点动作/内置属性名）。
+  - **调色盘 = 规则页（2026-09-18 更新）**：`DarkThemeColors.colorableCategories` 是「自定义高亮」可调色类型的
+    **唯一来源**（= `labels` 键序 − `nonColorableCategories`，后者**已清空**）。
+    历史上排除过的 4 个"调了没反应"的类型已全部处理（2026-09-18）：
+    `property`（属性/常量）/ `quote`（字符串引号）/ `modifier`（修饰符）的 scope 在语法里 **0 次**（整类空转）→
+    **从类型表整体移除**；`decoration`（连续引号）是语法标记 `"""`/`'''` 边界的「不上色」scope →
+    **并入普通文本**着色（`SoraEditorInitializer.applyScopeColors` 对 `punctuation.ignored.ini` 强制取正文色，
+    否则 4 个主题里写死的 #FFFFFF 会在浅色/纯净主题下白底白字）。
+    ⇒ 调色盘与规则页现在**完全一致**（25 项），不再有"规则页有、调色盘没有"的类型。
+    单测 `colorableCategoryListMatchesLabelsExactly` 钉死。
+  - **用户新增高亮类型（2026-09-18）**：**新建与删除都在规则页**（「规则」卡片的「新建高亮类型」；
+    用户类型的类别卡片上多一枚「删除」）；「自定义高亮」**只负责显示与调色**，不放任何类型管理入口。
+    数据 = `DarkThemeColors.customTypes`（`List<CustomHighlightType>`，**默认空表** ⇒ 旧 `settings.json` / 旧预设行为不变）
+    + `CustomHighlightType.effectiveScope`（scope 留空自动生成 `user.custom.<id>`，专属命名空间，不与内置 scope 撞车）。
+    闭环：新建类型 → 规则页给它写规则（规则会带上该类型的 scope）→ 规则插进语法最前 → 主题按该类型颜色上色。
+    **凡"遍历/显示全部类型"的地方必须走 `colorableCategoriesOf` / `labelOf` / `scopesOf`，不能只看 `labels` / `targetScopes`**；
+    `SoraEditorInitializer.applyScopeColors` 对用户类型是**追加**主题规则（主题模板里没有这些 scope，只"替换已有规则"改不到）；
+    `HighlightRuleManager.infoOf` 是规则白名单，漏了用户类型会让它的规则在 `parseRules` 里被丢掉。
+    类型表的同步点在 `ThemeState`（`init` + `applyDarkTokenColors`）。
+    删除类型走 `HighlightRuleManager.removeCategory(id)`（**先删它名下的规则再删类型**，否则规则文件里会留下一批
+    永远加载不回来的死规则）；**只用于用户类型**，内置类别的规则是内置语法的复刻，删了外观会变。
+  - **统计高亮用量的口径必须分层**：顶层 `patterns` 里 index 5 是「键值对 begin/end 块」（`begin` 到行尾 `$`），
+    它**内部有自己的一套 patterns（37 条）**，进入块后**顶层规则不参与块内匹配**（注释 `(#|;).*$` 只在顶层）。
+    把两层规则摊平会得出「颜色值永远不可达」的错结论（真实 322 次命中）。
+    脚本：`.workbuddy/tools/hl_usage_scan.py`（已按分层实现，传目录即可重跑）。
   - **归属校验（写规则必须真的能变色）**：每个 scope 用 `themeCategoryOfScope`
     （= `SoraEditorInitializer.findCategoryForScopes` 的首命中规则）解析回来**必须还是它自己**。
     三条单测钉死：`categoriesMatchCustomHighlightTypesExactly`（两页词表同集合同顺序）、
@@ -241,7 +298,7 @@ app/src/main/
     foreground，主题里没有这条 scope 规则 → 该类别写了规则也没有可替换的对象。
     内置语法会产出的 36 个 scope 里，唯一缺的是 `punctuation.ignored.ini`（相邻双引号 `""` / 连续单引号 `''`
     的装饰符，属「装饰符」类别）——2026-09-15 已给 `dark_vs/light_vs/pure/custom` 四个完整主题补上该规则
-    （颜色填各自 `plainText`，外观不变），现在 44 条 scope 规则 = 43 个配色键 + 装饰符。
+    （颜色填各自 `plainText`，外观不变），现在每个完整主题都是 44 条 scope 规则。
   - **类别 id 迁移**：旧规则文件的 `section→sectionBracket`、`boolean`/`constant`→`team`，
     已删类别丢弃（`CATEGORY_ID_MIGRATION`，在 `parseRules` 白名单判断**之前**应用，否则旧 id 会被直接丢掉）。
   - `declaredGroups()` 只返回**实际存在**的分组；空类别的显示入口由 UI 的占位组实现。

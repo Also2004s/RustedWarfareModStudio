@@ -107,7 +107,9 @@ object HighlightRuleManager {
      * 之前这里手写了一套 43 个类别，拆出了「音效常量/效果常量/生成常量/块注释/多行字符串」这些
      * 自定义高亮里根本没有的名字，而那些 scope 在内置语法里出现 0 次，颜色永远不会生效。
      *
-     * 顺序即 UI 展示顺序，也决定同一 token 多类别命中时的优先级（与主题首命中一致）。
+     * 顺序 = `DarkThemeColors.labels` / `targetScopes` 的键序（**唯一来源**；2026-09-18 按真实项目实测的
+     * 出现次数重排，见单测 `categoryOrderFollowsMeasuredFrequencyLayout`），也就是 UI 展示顺序；
+     * `themeCategoryOfScope` 的首命中优先级同样走这张表，两个页面不会再各排一套顺序。
      */
     val availableCategories: List<CategoryInfo> = buildList {
         // 不参与 scope 着色的两个类型：UI 高亮（编辑器符号匹配）、普通文本（全局前景色）。
@@ -121,6 +123,31 @@ object HighlightRuleManager {
 
     /** 类别 id → 定义（UI 与语法生成共用） */
     private val categoryById: Map<String, CategoryInfo> = availableCategories.associateBy { it.id }
+
+    /**
+     * 用户新增的高亮类型（类别定义，见 [CustomHighlightType]）。
+     *
+     * 由主题层同步进来（`ThemeState` 初始化与改配色时调 [updateCustomCategories]）——
+     * **默认空表**，所以不接主题层时（JVM 单测直接测纯逻辑）行为与以前完全一致。
+     */
+    @Volatile
+    var customCategories: List<CategoryInfo> = emptyList()
+        private set
+
+    /** 同步用户新增类型；内容没变就不动 [revision]（否则每次改配色都会让编辑器重建语言） */
+    fun updateCustomCategories(list: List<CategoryInfo>) {
+        if (list == customCategories) return
+        customCategories = list
+        revision++
+    }
+
+    /** 全部类别定义（内置 + 用户新增），顺序即界面顺序 */
+    val allCategoryInfos: List<CategoryInfo>
+        get() = if (customCategories.isEmpty()) availableCategories else availableCategories + customCategories
+
+    /** 按 id 取类别定义（内置优先；用户新增类型也在白名单里，否则它们的规则会被 `parseRules` 丢弃） */
+    private fun infoOf(id: String): CategoryInfo? =
+        categoryById[id] ?: customCategories.firstOrNull { it.id == id }
 
     /**
      * 类别 id → 该类别覆盖的**全部** scope，直接取主题配色表（单一数据源，两者不可能再漂移）。
@@ -171,7 +198,7 @@ object HighlightRuleManager {
     )
 
     fun categoryLabel(categoryId: String): String =
-        categoryById[categoryId]?.label ?: categoryId
+        infoOf(categoryId)?.label ?: categoryId
 
     @Volatile
     private var loaded = false
@@ -386,6 +413,19 @@ object HighlightRuleManager {
         setRules(list.categoryId, rules, list.listName)
     }
 
+    /**
+     * 删除一整个类别（含其下所有列表与规则）—— **只用于删除用户新增类型**（见 [CustomHighlightType]）。
+     *
+     * 内置类别不该走到这里：它们的规则是内置语法的复刻，删掉等于少复刻内置规则、外观会变。
+     * 类型本身也在这里一起清掉，否则规则文件里会留下一批永远加载不回来的死规则
+     * （`parseRules` 的白名单不认已消失的类别 id）。
+     */
+    fun removeCategory(categoryId: String) {
+        if (categories.none { it.categoryId == categoryId }) return
+        categories = categories.filterNot { it.categoryId == categoryId }
+        persistAndRefresh()
+    }
+
     /** 只重置某个列表为内置复刻（该列表在内置语法里没有对应组时 = 删除该列表，交给内置语法） */
     fun resetListToBuiltin(listIndex: Int) {
         val list = categories.getOrNull(listIndex) ?: return
@@ -416,7 +456,7 @@ object HighlightRuleManager {
         categories.firstOrNull { it.categoryId == categoryId && it.listName == listName }?.rules ?: emptyList()
 
     private fun orderByAvailable(list: List<HighlightRuleCategory>): List<HighlightRuleCategory> {
-        val order = availableCategories.mapIndexed { i, c -> c.id to i }.toMap()
+        val order = allCategoryInfos.mapIndexed { i, c -> c.id to i }.toMap()
         return list.sortedBy { order[it.categoryId] ?: Int.MAX_VALUE }
     }
 
@@ -499,7 +539,7 @@ object HighlightRuleManager {
             } else {
                 rawCategoryId
             }
-            if (categoryById[categoryId] == null) return@forEach
+            if (infoOf(categoryId) == null) return@forEach
             val arr = cats.optJSONArray(rawCategoryId) ?: return@forEach
             val rules = mutableListOf<HighlightRule>()
             for (i in 0 until arr.length()) {
@@ -558,20 +598,34 @@ object HighlightRuleManager {
     // ==================== 语法生成 ====================
 
     /**
-     * 关键字 → 正则片段。
+     * 关键字 → 正则片段：两侧加 `\b`（**与内置语法完全一致**）。
      *
-     * 边界**不能**用 `\b`：语法引擎按 Unicode 判定词字符，汉字也算词字符，
-     * 「自身资源大于」两侧加 `\b` 会变成 `\b自身资源大于\b`——前面若是「条件: 」这种
-     * 非词字符才成立，紧跟汉字/字母时就不成立，等于规则失效（这正是内置 `自身检测`
-     * 规则族长期只能靠人工补词的原因）。
+     * 边界必须用 `\b`，不能退化成 ASCII 边界 `(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])`：
+     * 语法引擎（joni/Oniguruma）按 **Unicode** 判定词字符，**汉字也算词字符**
+     * （实测：`\b距离\b` 不命中「控制距离」里的「距离」，`\w+` 也匹配不到纯中文）。
+     * 用只认 ASCII 的边界等于把规则放宽——中文关键字会**钻进更长的中文词里**：
+     * 「也执行动作:控制距离, 撤退」里的「距离」被当成函数关键字单独上色（用户报的异常渲染），
+     * 而内置语法里这一条是不上色的。
      *
-     * 这里改为无条件加「ASCII 标识符边界」`(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])`：
-     * - 中文关键字（前一个字符通常是空格/运算符/引号）照常命中；
-     * - ASCII 关键字不会被 `notify` 这类词吞掉（`if` 不会命中 `notify` 里的 if）；
-     * - 与两侧汉字相邻时不算命中，避免「自身有活动」被 `自身有活动的路径点` 之类的长规则误吃。
+     * 只在关键字首尾确实是词字符时补 `\b`：首尾是非词字符（如 `:`、`#`）时补 `\b` 会反过来
+     * 要求「相邻位置必须是词字符」，语义就翻了，这种情况不加断言。
+     *
+     * 不用捕获组：内置规则靠 `captures: {"1": …}` 给节括号/后缀上色，多一层捕获组会挪位。
      */
-    internal fun keywordToRegexPiece(keyword: String): String =
-        "(?<![A-Za-z0-9_])${escapeRegex(keyword)}(?![A-Za-z0-9_])"
+    internal fun keywordToRegexPiece(keyword: String): String {
+        if (keyword.isEmpty()) return keyword
+        val left = if (isWordCharForBoundary(keyword.first())) "\\b" else ""
+        val right = if (isWordCharForBoundary(keyword.last())) "\\b" else ""
+        return "$left${escapeRegex(keyword)}$right"
+    }
+
+    /**
+     * 该字符算不算「词字符」（决定 `\b` 能不能加在这一侧）。
+     *
+     * 与引擎口径对齐：字母/数字/下划线，含汉字（CJK 汉字在 Unicode 里是字母）。
+     * 中英文标点、运算符、空白都不算 → 两侧不加 `\b`。
+     */
+    private fun isWordCharForBoundary(ch: Char): Boolean = ch == '_' || ch.isLetterOrDigit()
 
     private fun escapeRegex(s: String): String {
         val sb = StringBuilder(s.length + 8)
@@ -593,7 +647,7 @@ object HighlightRuleManager {
     internal fun buildCategoryPatterns(list: List<HighlightRuleCategory>): List<Pair<String, String>> {
         val result = mutableListOf<Pair<String, String>>()
         list.forEach { cat ->
-            val info = categoryById[cat.categoryId] ?: return@forEach
+            val info = infoOf(cat.categoryId) ?: return@forEach
             val pieces = cat.rules
                 .filter { it.enabled && it.pattern.isNotBlank() && it.source.isBlank() }
                 .map { rule -> if (rule.type == RuleType.REGEX) rule.pattern.trim() else keywordToRegexPiece(rule.pattern) }
@@ -636,7 +690,7 @@ object HighlightRuleManager {
 
     /** 顶层规则里被「清空」掉的数量（用于自检对账：只有顶层被删才会改变 patterns 条数） */
     private fun droppedTopLevelInside(baseJson: String, list: List<HighlightRuleCategory>): Int {
-        val activeSources = activeSources(list).keys.map { it.first }.toSet()
+        val activeSources = activeSources(list).keys.toSet()
         val touched = sourcePatterns(list)
         val cleared = touched.filter { it !in activeSources } // 用户碰过但现在没有生效规则 = 清空
         if (cleared.isEmpty()) return 0
@@ -648,8 +702,8 @@ object HighlightRuleManager {
         list.flatMap { cat -> cat.rules.map { it.source }.filter { it.isNotBlank() } }.toSet()
 
     /**
-     * 合并后的规则正文：把所有规则合成**一条交替**，每条自带 ASCII 边界
-     * （`(?<![A-Za-z0-9_])tok(?![A-Za-z0-9_])`）。
+     * 合并后的规则正文：把所有规则合成**一条交替**，每条自带 `\b` 词边界
+     * （`\btok\b`，汉字同样算词字符，见 [keywordToRegexPiece]）。
      *
      * 为什么统一走关键字语义：默认规则是"用户可编辑的规则集"，用户往一组里加词时，
      * 只有整组重建成交替才能生效；而**每一项都带自己的边界**，所以：
@@ -672,13 +726,19 @@ object HighlightRuleManager {
      * 用「原文 + 份号」定位：内置语法里同一条规则常定义两份（键值区 + 顶层），
      * 只按原文会把两份合并成一份，等于少复刻一条内置规则（用户要求 100% 一致，必须分开）。
      */
-    private fun activeSources(list: List<HighlightRuleCategory>): Map<Pair<String, Int>, List<String>> {
-        val bySource = LinkedHashMap<Pair<String, Int>, MutableList<String>>()
+    /**
+     * 有生效规则的 source 原文 → 替换体列表。
+     *
+     * **按正文定位、不按份号**：同一段词表在语法里可能写两份（键值块内 / 顶层），
+     * 用户在规则页看到并编辑的是同一条规则，两处必须一起替换 —— 一处编辑、两处生效。
+     */
+    private fun activeSources(list: List<HighlightRuleCategory>): Map<String, List<String>> {
+        val bySource = LinkedHashMap<String, MutableList<String>>()
         list.forEach { cat ->
-            if (categoryById[cat.categoryId] == null) return@forEach
+            if (infoOf(cat.categoryId) == null) return@forEach
             cat.rules.filter { it.enabled && it.pattern.isNotBlank() && it.source.isNotBlank() }.forEach { rule ->
                 val piece = if (rule.type == RuleType.REGEX) rule.pattern.trim() else keywordToRegexPiece(rule.pattern)
-                bySource.getOrPut(rule.source to rule.sourceInstance) { mutableListOf() }.add(piece)
+                bySource.getOrPut(rule.source) { mutableListOf() }.add(piece)
             }
         }
         return bySource
@@ -701,11 +761,11 @@ object HighlightRuleManager {
         // 注意：只针对"用户文件里出现过的 source"，不能拿内置正文全集去比——
         // 否则键值对的 begin 正文（用户文件里根本没有）会被误判成"清空"而删掉整条规则。
         val touched = sourcePatterns(list)
-        val cleared = touched.filter { source -> bySource.keys.none { it.first == source } }
+        val cleared = touched.filter { source -> source !in bySource }
         // 手写规则（无 source）→ 新建规则，插到 patterns 最前
         val customPatterns = mutableListOf<Pair<String, String>>()
         list.forEach { cat ->
-            val info = categoryById[cat.categoryId] ?: return@forEach
+            val info = infoOf(cat.categoryId) ?: return@forEach
             cat.rules
                 .filter { it.enabled && it.pattern.isNotBlank() && it.source.isBlank() }
                 .forEach { rule ->
@@ -721,11 +781,12 @@ object HighlightRuleManager {
         if (bracketIdx < 0) throw IllegalStateException("内置 grammar 的 patterns 不是数组")
         val endIdx = findArrayEnd(baseJson, bracketIdx)
 
-        // 1) 全文件扫描所有规则对象，按 (source 原文, 第几份) 原位替换（从右往左改，避免下标失效）
+        // 1) 全文件扫描所有规则对象，按 **source 原文** 原位替换（从右往左改，避免下标失效）。
+        //    同一段词表在语法里可能有两份（键值块内 / 顶层），正文完全相同 → 两处一起替换，
+        //    用户编辑规则页里的一条，两处同时生效（2026-09-18 起不再按份号定位）。
         data class Edit(val start: Int, val endExclusive: Int, val body: String?)
 
         val edits = mutableListOf<Edit>()
-        val seenCount = HashMap<String, Int>() // 某 scope 已出现过几次 → 当前这次是第几份
         var replaced = 0
         var i = 0
         while (i < baseJson.length) {
@@ -734,20 +795,23 @@ object HighlightRuleManager {
                 if (span != null) {
                     val (quote, closeQuote) = span
                     val body = decodeJsonEscapes(baseJson.substring(quote + 1, closeQuote))
-                    // 实例号按 **scope 内的出现次序**（与复刻端一致）：
-                    // 同一条规则的两份写法可能不同，按正文编号会错位
-                    val scope = enclosingScopeOf(baseJson, i)
-                    val instance = if (scope == null) -1 else {
-                        val n = seenCount.getOrDefault(scope, 0)
-                        seenCount[scope] = n + 1
-                        n
-                    }
-                    val key = body to instance
-                    if (key in bySource) {
-                        val pieces = bySource.getValue(key)
-                        edits.add(Edit(quote, closeQuote + 1, mergeReplacement(pieces)))
+                    if (body in bySource) {
+                        val pieces = bySource.getValue(body)
+                        // 词表型 body 保留「骨架」（前缀 \b( 与后缀 )\s*==? 等只包住词表，不改）：
+                        // 参数规则的尾部 \s*==? 是匹配语义的一部分 —— 参数名和等号一起着色；
+                        // 只换词表、丢掉尾部的话，等号会脱离参数着色（回归：等号自己染色）。
+                        val open = body.indexOf('(')
+                        val close = body.lastIndexOf(')')
+                        val rebuilt = if (open >= 0 && close > open &&
+                            HighlightRulesDefaults.literalAlternates(body) != null
+                        ) {
+                            body.substring(0, open + 1) + mergeReplacement(pieces) + body.substring(close)
+                        } else {
+                            mergeReplacement(pieces)
+                        }
+                        edits.add(Edit(quote, closeQuote + 1, rebuilt))
                         replaced++
-                    } else if (scope != null && body in cleared) {
+                    } else if (body in cleared) {
                         // 用户清空了该内置规则（scope 内所有份都没有生效规则）：整条规则对象删掉
                         val objStart = startOfContainingObject(baseJson, i)
                         if (objStart >= 0) {
@@ -787,6 +851,23 @@ object HighlightRuleManager {
                 out.substring(0, b2 + 1) + joined + out.substring(b2 + 1)
             } else {
                 out.substring(0, b2 + 1) + joined + "," + out.substring(b2 + 1)
+            }
+            // 键值对块内也要插一份：begin/end 是**封闭作用域**，块内只认块内自己的 patterns ——
+            // 手写规则不插到这里的话，「属性: 值」的值位置（ini 的绝对主流位置）永远吃不到手写规则。
+            // 块内插的与顶层是同一批规则，语义一致（用户写一条 = 两种位置都生效）。
+            val kvBegin = out.indexOf("\"begin\": \"^[")
+            if (kvBegin >= 0) {
+                val pIdx = out.indexOf("\"patterns\"", kvBegin)
+                if (pIdx >= 0) {
+                    val bIdx = out.indexOf('[', pIdx + "\"patterns\"".length)
+                    if (bIdx >= 0) {
+                        out = if (out.substring(bIdx + 1).trimStart().startsWith("]")) {
+                            out.substring(0, bIdx + 1) + joined + out.substring(bIdx + 1)
+                        } else {
+                            out.substring(0, bIdx + 1) + joined + "," + out.substring(bIdx + 1)
+                        }
+                    }
+                }
             }
         }
         val changed = replaced > 0 || customJson.isNotEmpty()
@@ -1337,6 +1418,61 @@ object HighlightRuleManager {
      * 3：分组名统一为「顶层 / 重复定义」两种后缀（顶层分组界面默认折叠），槽位 92。
      * 4：类别 id 统一为主题配色键（规则页类别 == 自定义高亮类型）；`section`→`sectionBracket`、
      *    `boolean`/`constant`→`team`，槽位 scope 归属不变（仍是 92/92）。
+     * 5：补齐四张值/引用词表（内置语法正文扩写，**槽位与条数均不变，仍 92/92**）：
+     *    中文「自身检测」+7、「自身属性」+8、引用目标 +2（中英各一）、「函数」+85。
+     *    正文一变，旧规则文件里的 `source` 全部失配 → 不 bump 会导致默认组整批失效，故必须同步 +1。
+     * 6：v5 那次正文里混进了重复定义与错误归类（`speed`/`resource`/`teamId` 等已在「引用前缀」组的词
+     *    又被加进值表），且函数据把「取数值属性」误并入。已重写为最终版（函数 +48、内置属性 +14）。
+     *    **正文又变了一次，v5 已被设备记录过 ⇒ 必须再 +1 才能让老用户刷新到这版。**
+     * 7：参数词表补齐 —— 与补全用的参数表（`assets/data/param/logicboolean.json` + `autoTriggerOnEvent.json`）
+     *    对比后，补进 17 个「补全能补、高亮不认」的参数名：
+     *    中文「关系 / 包含未完成的 / 空的 / 角度偏移」，
+     *    英文 `withActionTag`/`relation`/`dir`/`height`/`name`/`default`/`index`/`source`/`query`/
+     *    `teamId`/`compareTarget`/`byMoreThan`/`multiplyTargetBy`。
+     * 8：函数词表瘦身 —— v5 那批「函数 +85」把 `isXxx` / `hasXxx` / `numberOfXxx` / `completed` /
+     *    `eventData` / `mapHeight` 等 48 个**英文逻辑布尔**误塞进了函数类别，而它们对应的中文
+     *    （自身在天上 / 自身有资源 / 队伍中此单位数量 …）本来就在「属性值」里 ⇒ 同一个东西中英文两种写法
+     *    分属两个类别、两种颜色。**这些英文已挪回「属性值」与中文同类**；「函数」只留 22 项真正的工具函数
+     *    （select / createMarker / distance / getOffset* / squareRoot / readUnitMemory 及其中文名）。
+     *    正文又变了 ⇒ 必须 +1。
+     * 9：按老板定的规则（**计算/工具类 = 函数；状态判断 / 计数 = 属性值**）补进真实项目在用的计算函数
+     *    `int` / `rnd` / `min` / `max` / `sin` / `cos`（原本词表里一个都没有，项目里却用了 398 次）。
+     *    事件数据 / 调试通行 也是函数（v8 曾误挪到属性值，已移回）。函数词表最终 32 项。
+     * 10：自动触发事件的 18 个取值（创建 / 销毁 / 受到伤害 / 进入载具 … 及英文 created / destroyed …）
+     *    统一归**属性值** —— 原先承载它们的 `constant.language.event.ini` 在语法里 0 次出现，
+     *    只有「创建」因为混在「路径点动作」词表里被顺带上色，其余 17 个掉进兜底；
+     *    同时「创建」不是路径点动作（raw/value/addWaypoint_type.json 里没有），已从枚举值词表移除。
+     * 11：按**代码表**（code_reference.json，名字带括号的 41 条）补齐剩余函数：
+     *    `direction` / `distanceBetweenSquared` / `debug` / `length` / `lowercase` / `uppercase` / `str` / `substring`。
+     *    （`self.xxx` / `game.xxx` 那批是引用前缀 + 状态查询，不归函数。）
+     * 12：属性值内部分组重整（老板要求：**分组要语义正确、中英文分开**）：
+     *    逻辑布尔的英文写法（isXxx/hasXxx/numberOfXxx… 44 个）从「自身检测」拆出，单独成组「自身检测（英文）」；
+     *    自动触发事件单独成组，并按语言拆成「自动触发事件（中文）」+「自动触发事件（英文）」。
+     *    value 规则 10 → 16 条（块内 8 + 顶层 8），槽位相应 +6。
+     * 13：删掉属性值里永不会命中的「中文参数」死组 —— 需标签/范围内/超过/少于 这些词在**参数**类别
+     *    （variable.parameter.ini，排在属性值之前）里本来就有，属性值那份是重复且永远轮不到。
+     *    value 规则 16 → 14 条（块内 7 + 顶层 7），槽位相应 -2。
+     * 14：不再把「正文相同的两份」合并成同一分组 —— 合并会让同一个词在同一分组里出现两遍
+     *    （判重条件带份号，两份各塞一遍）。现在各自成组：第二份组名带 (重复定义)、默认折叠，
+     *    与 (顶层) 同一开关控制。规则条目本身一条不少（两份各驱动语法里自己那处的替换）。
+     * 15：删 4 个死类别：property「属性/常量」/ quote「字符串引号」/ modifier「修饰符」（三者 scope
+     *    在语法里一条规则都没有，整类空转）+ decoration「连续引号」（并入普通文本着色，
+     *    见 SoraEditorInitializer.applyScopeColors 的接管逻辑）。quote 名下「单引号字符串」2 槽、
+     *    decoration 名下 4 槽一并删除，槽位 96 → 90。**语法正文没动，但默认复刻变了 ⇒ 必须 +1。**
+     * 16：v15 的收尾补全 —— 单引号字符串的 2 个槽位**改挂「字符串」类别**（v15 直接删掉导致
+     *    规则页「字符串」下看不到单引号那组；targetScopes 的 string 本就含 single，调色统一）。
+     *    槽位 90 → 92。⚠️ 本条与另一并行会话的 v15 撞号：两个会话同时删了死类别并都 bump 到 15，
+     *    后装的包不会触发重刷 ⇒ 只能再 +1 强制对齐。
+     * 17：跨类别重复清理（老板逐词裁决）：dir/height 归参数（从内置属性删）、满/空的 归参数（从特殊值删）、
+     *    activeWaypointTarget/eventSource/thisActionTarget/shield/energy/护盾/能量 从参数删（引用目标与内置属性
+     *    在单位标记/枚举值里已有正确位置）。同一个词从此只在一个类型里出现，改色不再互相打架。
+     *    **语法正文变了 ⇒ 必须 +1**。
+     * 18：删「链式方法返回值」规则及其 2 槽 —— 它匹配 `.获取相对偏移(` 链式调用的**函数名**却挂在枚举值下，
+     *    而函数词表的 `\b` 边界天然覆盖点号后的函数名（6 词全部已在函数词表）⇒ 纯多余且错色，删了零损失。
+     *    **语法正文又变了（规则 44 → 43）⇒ 再 +1。**
+     * 19：键值对 begin 正则加否定前瞻：行首是 ROOT:/CUSTOM:/SHARED:/CORE:/SHADOW: 的行不再按键值对处理
+     *    （此前 `ROOT` 被当成键名上「属性」色，路径前缀规则轮不到）。该行整行落到顶层，
+     *    由顶层路径前缀规则着色。键名/键值冒号两槽的原文（= begin 正则）随之变化 ⇒ **必须 +1**。
      */
-    const val DEFAULTS_VERSION = 4
+    const val DEFAULTS_VERSION = 21
 }

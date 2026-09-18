@@ -27,6 +27,11 @@ class AutoTriggerOnEventValueCompletionProvider : BaseValueCompletionProvider() 
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 事件可用逗号分隔多个（autoTriggerOnEvent: created, killedAnyUnit）→
+        // 打空格只弹「,」（空格不是合法分隔符，选完吞掉空格成 `a,b`）
+        if (needsCommaSeparator(request)) {
+            return listOf(commaSeparatorItem("事件分隔符（值与值之间用逗号分隔）"))
+        }
         // 加载原始英文数据，统一走 translateValueName 剥离参数括号后翻译（tookDamage(withTag="#")→受到伤害 等）
         val data = ValueDataLoader.load(request.context, targetPropName)
         val prefix = request.valuePrefix

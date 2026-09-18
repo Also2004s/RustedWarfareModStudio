@@ -63,9 +63,11 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
     )
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
-        // defineUnitMemory 声明（boolean var1, float var2）：值片段处于类型位置（段首或 , 后）时给内存类型；
-        // 变量名阶段（段内已有空格）按已输入变量名前缀补已声明的内存变量
-        if (request.toEnglishName().equals("defineUnitMemory", ignoreCase = true)) {
+        // defineUnitMemory 声明（`类型 变量名, 类型 变量名`）：
+        // 值片段处于类型位置（段首或 , 后、还没打空格）时给内存类型；
+        // 打了空格进入变量名阶段后**一律不弹** —— 变量名由用户自己起，没有可补的词源，
+        // 弹已声明内存变量只会干扰（老板决策：变量名不需要补，只要别在这个位置弹类型）。
+        if (CompletionShared.isDefineUnitMemoryProperty(request.toEnglishName())) {
             val seg = request.valuePrefix.substringAfterLast(',').substringAfterLast('，').trim()
             if (isMemoryTypePosition(request.valuePrefix)) {
                 return memoryTypes
@@ -80,18 +82,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
                         )
                     }
             }
-            // 变量名阶段：如 `defineUnitMemory: unit nextTa` → 提示已声明内存变量
-            return request.memoryNames
-                .rankedByMatch(seg)
-                .map { name ->
-                    createValueItem(
-                        label = name,
-                        detail = memoryDetail(request.memoryTypes[name]),
-                        insertText = name,
-                        prefixLength = seg.length,
-                        valueType = request.memoryTypes[name] ?: ""
-                    )
-                }
+            return emptyList()
         }
 
         val prefix = request.valuePrefix

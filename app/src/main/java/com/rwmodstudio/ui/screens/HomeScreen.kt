@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rwmodstudio.core.RecycleBin
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.ThemeState
@@ -281,12 +282,43 @@ fun HomeScreen(
     }
 
     showDel?.let { f ->
-        AlertDialog(onDismissRequest = { showDel = null }, title = { Text("确认删除") }, text = { Text("确定删除「${f.name}」？") },
+        // 只有「文件夹」与「.rwmod 包」进回收站；其余零散文件（ini/txt/图片…）直接删除——
+        // 回收站列表只列 .rwmod 与文件夹，其它类型进去就成了看不见又占空间的条目。
+        val toTrash = f.isDirectory || f.extension.equals("rwmod", ignoreCase = true)
+        AlertDialog(onDismissRequest = { showDel = null }, title = { Text("确认删除") },
+            text = {
+                Text(
+                    if (toTrash) "确定删除「${f.name}」？\n删除后可在侧边栏「回收站」中找回。"
+                    else "确定删除「${f.name}」？\n该类型不进回收站，删除后无法找回。"
+                )
+            },
             confirmButton = { TextButton(onClick = {
-                val ok = try { if (f.isDirectory) f.deleteRecursively() else f.delete() } catch (e: Exception) { false }
-                if (!ok) android.widget.Toast.makeText(context, "删除失败", android.widget.Toast.LENGTH_SHORT).show()
+                // 大文件夹的移动/删除可能较慢，放到 IO 线程执行，避免卡住界面。
+                val target = f
                 showDel = null
-                refresh++
+                scope.launch(Dispatchers.IO) {
+                    val ok = try {
+                        when {
+                            toTrash -> RecycleBin.moveToTrash(target)
+                            target.isDirectory -> target.deleteRecursively()
+                            else -> target.delete()
+                        }
+                    } catch (e: Exception) {
+                        false
+                    }
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            context,
+                            when {
+                                !ok -> "删除失败"
+                                toTrash -> "已移入回收站"
+                                else -> "已删除"
+                            },
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        refresh++
+                    }
+                }
             }) { Text("删除", color = RustedError) } },
             dismissButton = { TextButton(onClick = { showDel = null }) { Text("取消") } })
     }

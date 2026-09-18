@@ -78,11 +78,15 @@ class HighlightRulesScreenModelTest {
     }
 
     @Test
-    fun topLevelMarkerIsTheOnlyFoldRule() {
-        // 折叠判定只看后缀，避免误伤用户自己起的、正好含「顶层」两字的分组名
+    fun foldMarkersAreTopLevelAndRepeatDefinition() {
+        // 折叠判定只看后缀，避免误伤用户自己起的、正好含「顶层」两字的分组名。
+        // (顶层) 与 (重复定义) 都默认折叠 —— 只藏显示，规则照旧生效（2026-09-18 老板要求）。
         assertTrue(HighlightRulesDefaults.isTopLevelGroup("比较符(顶层)"))
+        assertTrue(
+            HighlightRulesDefaults.isTopLevelGroup("布尔值(重复定义)"),
+            "重复定义与顶层一样默认折叠（只藏显示，规则照旧生效）"
+        )
         assertTrue(!HighlightRulesDefaults.isTopLevelGroup("顶层值"))
         assertTrue(!HighlightRulesDefaults.isTopLevelGroup("比较符"))
-        assertTrue(!HighlightRulesDefaults.isTopLevelGroup("布尔值(重复定义)"))
     }
 }

@@ -35,6 +35,15 @@ class VanillaUnitNameValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 打了空格 / Tab：空格不是合法分隔符（与 UnitNameValueCompletionProvider 一致）——
+        // 列表属性 → 只提示「,」；单值单位名（核心 name、convertTo 等）→ 值已写完，不再补单位名
+        if (needsCommaSeparator(request)) {
+            return if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) {
+                listOf(commaSeparatorItem("单位名分隔符（值与值之间用逗号分隔）"))
+            } else {
+                emptyList()
+            }
+        }
         val prefix = request.valuePrefix
         // 原版单位 + 项目单位合并候选；项目单位优先（用户 mod 覆盖原版同名单位），按 label 去重保留首个。
         // 排序同 UnitName：前缀命中优先，组内字母序。

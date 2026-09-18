@@ -2,6 +2,7 @@ package com.rwmodstudio.feature.completion.value
 
 import android.content.Context
 import android.util.Log
+import com.rwmodstudio.core.KeyTemplateRegistry
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.CompletionShared
@@ -25,7 +26,10 @@ class ValueCompletionAggregator(
         val boolEnabled: Boolean = true,
         val logicBooleanEnabled: Boolean = true,
         val enumEnabled: Boolean = true,
-        val imageEnabled: Boolean = false,
+        // 图片路径补全：默认开启（与 SettingsManager.devValueCompletionImage 默认值一致）。
+        // 注意：默认构造 = 全部 Provider 开启，分类判定（「补全类型分类」页 / 模拟 ini）用的就是默认构造，
+        // 这里若为 false 会导致 ImageValueCompletionProvider 不进链、「图片路径」分类恒为 0 条。
+        val imageEnabled: Boolean = true,
         val unitSpawnEnabled: Boolean = true,
         val autoTriggerOnEventEnabled: Boolean = true,
         val memoryEnabled: Boolean = true,
@@ -44,6 +48,10 @@ class ValueCompletionAggregator(
     private val providers = mutableListOf<BaseValueCompletionProvider>()
 
     init {
+        // 注册序号/参数模板键集（builtFrom_{NUM}_name 等）：值补全侧要把实例化键
+        // （builtFrom_1_name / 空位形态 builtFrom__name）还原成模板名才能查到类型。
+        // 这里的 sectionProperties 是三表全量按分类分组的索引，涵盖所有模板键；注册幂等。
+        KeyTemplateRegistry.register(sectionProperties.values.flatten().map { it.name })
         if (options.boolEnabled) providers.add(BoolValueCompletionProvider())
         if (options.logicBooleanEnabled) providers.add(LogicBooleanValueCompletionProvider())
         if (options.enumEnabled) providers.add(EnumValueCompletionProvider())

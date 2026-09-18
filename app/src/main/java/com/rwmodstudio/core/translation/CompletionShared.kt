@@ -1,5 +1,7 @@
 package com.rwmodstudio.core.translation
 
+import com.rwmodstudio.core.KeyTemplateRegistry
+
 /**
  * 补全共享判定源（单一数据源）。
  *
@@ -47,14 +49,26 @@ object CompletionShared {
         "unitsspawnedondeath", "overrideandreplace", "upgradedfrom", "displaylocalekey"
     )
 
+    /** 序号模板键 builtFrom_{NUM}_name 的模板名（小写），真实文件里写 builtFrom_1_name */
+    private const val BUILT_FROM_NAME_TEMPLATE = "builtfrom_{num}_name"
+
+    /** Registry 尚未注册时（早期调用 / JVM 单测）的兜底判定，兼容实例化与空位形态 */
+    private val BUILT_FROM_NAME_FALLBACK = Regex("""builtFrom_\d*_name""", RegexOption.IGNORE_CASE)
+
     /**
      * 判断英文属性名是否为「单位名列表」属性（语义核对后登记，供 JVM 单测）。
-     * 匹配：unitsSpawnedOnDeath / overrideAndReplace / upgradedFrom / builtFrom_{NUM}_name。
+     * 匹配：unitsSpawnedOnDeath / overrideAndReplace / upgradedFrom / builtFrom_{NUM}_name
+     * （含实例化 builtFrom_1_name 与未填数字的空位形态 builtFrom__name）。
      * 不匹配：altNames / onNewMapSpawn / displayName / 标签类 / builtFrom_1_pos 等。
+     *
+     * 序号模板键统一由 KeyTemplateRegistry 归一化，不再逐条硬编码正则——模板集来自补全表，
+     * 以后新增同类键（canBuild_#_xxx 等）也走同一机制。
      */
-    fun isUnitNameListProperty(enName: String): Boolean =
-        enName.lowercase() in unitNameListProperties ||
-            Regex("""builtFrom_\d+_name""", RegexOption.IGNORE_CASE).matches(enName)
+    fun isUnitNameListProperty(enName: String): Boolean {
+        if (enName.lowercase() in unitNameListProperties) return true
+        if (KeyTemplateRegistry.normalize(enName).lowercase() == BUILT_FROM_NAME_TEMPLATE) return true
+        return BUILT_FROM_NAME_FALLBACK.matches(enName)
+    }
 
     /** 触发单位名补全的归一化 type 关键词（已去空格） */
     val unitNameTypeKeywords = setOf("unitref", "unitreftype", "unittype", "unittypes")
@@ -109,6 +123,17 @@ object CompletionShared {
     /** 是否为内存属性（英文名，忽略大小写） */
     fun isMemoryProperty(nameEn: String): Boolean = nameEn.lowercase() in memoryPropertyNames
 
+    /**
+     * 是否为「定义单位内存」声明键（`定义单位内存: 类型 变量名, 类型 变量名`）。
+     * 该键的值里**空格是「类型」与「变量名」之间的合法分隔**，不是"换下一个值"的分隔符
+     * （换下一个值只认逗号），故值片段切分需对它与众不同（见 replaceableValuePrefix）。
+     * 中文键名与英文键名都认（code_reference 里该条目的 name 就是整条声明模板，故按原样比对）。
+     */
+    fun isDefineUnitMemoryProperty(name: String): Boolean {
+        val n = name.trim().lowercase()
+        return n == "defineunitmemory" || n == "定义单位内存"
+    }
+
     // ===== 复制节（CopyFromSectionValueCompletionProvider） =====
 
     /** 是否为 @copyFromSection（复制节）属性。英文 nameEn 为基础（调用方可经翻译引擎反查得到），
@@ -144,6 +169,13 @@ object CompletionShared {
     fun translationEngineEnabled(): Boolean =
         com.rwmodstudio.core.SettingsManager.devTranslationEngine &&
             TranslationEngine.getInstance().isLoaded
+
+    /** 屏蔽词开关「引号内的词不翻译」当前是否生效（总开关也需打开，默认关）。
+     *  生效时引擎把引号内内容整段占位保护（TranslationBlocklist.protectQuotedDictWords）：
+     *  既不翻成中文、也不反译回英文。故该开关打开时，**引号包裹的补全值只能用英文**，
+     *  否则写进去的中文会永久留在文件里。见 FunctionParameterCompletionProvider 的场景闸。 */
+    fun quotedValuesBlocked(): Boolean =
+        TranslationEngine.getInstance().getBlocklist().let { it.enabled && it.blockQuotedDictWords }
 
     // ===== 标签（TagValueCompletionProvider） =====
 

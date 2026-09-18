@@ -60,6 +60,11 @@ class UnitSpawnCompletionProvider : BaseValueCompletionProvider() {
                     )
                 }
         } else {
+            // 括号外：产生单位/生产单位/添加单位到载具 可一次填多个（`产生单位: heavyTank, tank*5`）；
+            // 打了空格 → 只提示「,」（空格不是合法分隔符）
+            if (needsCommaSeparator(request)) {
+                return listOf(commaSeparatorItem("分隔符（值与值之间用逗号分隔）"))
+            }
             val items = mutableListOf<CompletionProvider.CompletionItem>()
             // 括号外：列真实候选名（按已输入前缀过滤），不做示例格式兜底。
             // 单位生成列单位名（项目单位 + 原版单位，项目优先去重）；抛射体生成列项目抛射体节名。

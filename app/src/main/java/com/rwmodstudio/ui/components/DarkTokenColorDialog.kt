@@ -43,6 +43,7 @@ fun DarkTokenColorDialog(
     }
     var showPresetDialog by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
+    // 用户类型的新建与删除都在「规则」页（HighlightRulesScreen）；这里只负责显示与调色
 
     val currentColor = colorForCategory(colors, selectedCategory)
 
@@ -89,10 +90,11 @@ fun DarkTokenColorDialog(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val categories = listOf("ui", "plainText") + DarkThemeColors.targetScopes.keys.toList()
+                    // 可调色类型 = 内置（DarkThemeColors.colorableCategories）+ 用户新增类型（customTypes）
+                    val categories = DarkThemeColors.colorableCategoriesOf(colors)
                     categories.forEach { category ->
                         val color = colorForCategory(colors, category)
-                        val label = DarkThemeColors.labels[category] ?: category
+                        val label = DarkThemeColors.labelOf(category, colors)
                         val isUi = category == "ui"
                         val selected = selectedCategory == category
                         // 仅「UI 高亮」显示勾（激活标记）；其余类别选中沿用高亮边框样式、不显示勾
@@ -191,6 +193,7 @@ fun DarkTokenColorDialog(
             onDismiss = { showSavePresetDialog = false }
         )
     }
+
 }
 
 @Composable
@@ -402,7 +405,9 @@ private fun colorForCategory(colors: DarkThemeColors, category: String): String 
         "bracketRound" -> colors.bracketRound
         "bracketCurly" -> colors.bracketCurly
         "variable" -> colors.variable
-        else -> "#FFFFFF"
+        // 用户新增的高亮类型：颜色独立存在 customTypes 里（内置字段装不下可变数量）。
+        // 末尾的 "#FFFFFF" 只针对"id 已失效"（类型被删后又残留了记录）—— 与改动前的行为一致。
+        else -> DarkThemeColors.customColorOf(category, colors) ?: "#FFFFFF"
     }
 }
 
@@ -444,7 +449,16 @@ private fun updateColor(colors: DarkThemeColors, category: String, newColor: Str
         "bracketRound" -> colors.copy(bracketRound = newColor)
         "bracketCurly" -> colors.copy(bracketCurly = newColor)
         "variable" -> colors.copy(variable = newColor)
-        else -> colors
+        // 用户新增类型：颜色改在 customTypes 里；不是已知类型就原样返回（不产生无意义的新对象）
+        else -> if (colors.customTypes.any { it.id == category }) {
+            colors.copy(
+                customTypes = colors.customTypes.map {
+                    if (it.id == category) it.copy(color = newColor) else it
+                }
+            )
+        } else {
+            colors
+        }
     }
 }
 

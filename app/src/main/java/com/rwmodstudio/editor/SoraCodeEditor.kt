@@ -715,7 +715,9 @@ fun SoraCodeEditor(
     // 完成后可能覆盖我们刚才 set 的行样式，所以除了立即刷新外，还要沿递增时序多次延迟重刷，确保在异步
     // 落定后最后一次刷新生效，避免主题切换后节行高亮「看似被清掉」。真正关闭开关时才移除行高亮。
     val highlightEnabledState = ThemeState.sectionHighlightEnabled
-    LaunchedEffect(isDarkTheme, bgColor, highlightTheme, highlightEnabledState) {
+    // darkTokenColors 必须在 key 里：改色会触发 TextMate 异步重着色、冲掉行样式，
+    // 没有它的话下面的递增延迟重刷不跑 → 节行高光失效（要重开文件才恢复）
+    LaunchedEffect(isDarkTheme, bgColor, highlightTheme, highlightEnabledState, ThemeState.darkTokenColors) {
         if (!highlightEnabledState) {
             editorRef.value?.let { refreshLineStyles(it) }
             return@LaunchedEffect

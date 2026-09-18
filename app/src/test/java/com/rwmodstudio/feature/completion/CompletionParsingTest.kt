@@ -204,4 +204,44 @@ class CompletionParsingTest {
         assertEquals(items, filterStartersAfterValue(items, afterCompleteValue = false), "非完整值后原样返回")
     }
 
+    // ===== 多行值块：块内 `ROOT:` 行仍归属块键（复制与 的 ini 文件补全靠它） =====
+
+    @Test
+    fun multilineOwnerKeySurvivesRootLinesInsideBlock() {
+        // 真实写法（老板项目 实验蜘蛛X.ini）：块内每一行都是 ROOT:/...，行内含冒号
+        val text = "复制与:\"\"\"\nROOT:/定制单位/实验蜘蛛/蜘蛛模版.ini,\nROOT:/建造单位/开"
+        assertEquals("复制与", multilineValueOwnerKey(text), "块内 ROOT: 行不能把归属键顶掉")
+    }
+
+    @Test
+    fun multilineOwnerKeyIsNullOnOpeningLine() {
+        assertEquals(null, multilineValueOwnerKey("复制与:\"\"\""), "开启行本身走单行补全")
+    }
+
+    @Test
+    fun multilineOwnerKeyIsNullAfterClosing() {
+        val text = "复制与:\"\"\"\nROOT:/a.ini\n\"\"\"\n"
+        assertEquals(null, multilineValueOwnerKey(text), "块闭合后不再归属")
+    }
+
+    // ===== 单行写完的三引号块：值前缀剥掉首尾三引号 =====
+
+    @Test
+    fun stripTripleQuotesOnSingleLineBlock() {
+        assertEquals("a.ini,ROOT:/b.ini", stripTripleQuotes("\"\"\"a.ini,ROOT:/b.ini\"\"\""))
+        assertEquals("a.ini", stripTripleQuotes("\"\"\"a.ini"))
+        assertEquals("a.ini", stripTripleQuotes("a.ini\"\"\""))
+        assertEquals("a.ini", stripTripleQuotes("a.ini"), "没有三引号时原样返回")
+    }
+
+    // ===== 定义单位内存：段内空格不是分隔符（值形如 `类型 变量名, 类型 变量名`） =====
+
+    @Test
+    fun replaceablePrefixKeepsSpacesForDefineUnitMemory() {
+        // splitOnSpace=false：段内空格是「类型 变量名」的合法分隔 → 保留前导空格（测试名即语义）
+        assertEquals(" float expe", replaceableValuePrefix("boolean nukeActive, float expe", splitOnSpace = false))
+        assertEquals("boolean", replaceableValuePrefix("boolean", splitOnSpace = false))
+        // 普通键仍然按空格切（回归）
+        assertEquals("expe", replaceableValuePrefix("boolean nukeActive, float expe"))
+    }
 }

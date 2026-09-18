@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
@@ -53,7 +54,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -1078,8 +1078,8 @@ fun EditorScreen(
                     .fillMaxWidth()
                     .height(22.dp)
                     .alpha(1 - topFold)
-                    // 背景用不透明主题 surface 色：半透明会叠加编辑器背景导致颜色不定（如浅背景+深主题时发灰）
-                    .background(RustedSurface),
+                    // tab 栏始终固定深色（不跟随主题切换）：半透明会叠加编辑器背景导致颜色不定（如浅背景+深主题时发灰）
+                    .background(DarkSurface),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 可滚动的 tab 列表占 72%（开启节名显示块时剩余 28% 留给它，与底部功能栏占比一致）
@@ -1169,7 +1169,7 @@ fun EditorScreen(
                             TextButton(onClick = {
                                 // tab 栏工作区内切换：不落盘，交给 onDispose 缓存工作区
                                 onSwitchFile(path)
-                            }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = RustedOnBackground.copy(alpha = 0.45f))) { Text(if (unsaved) "*$name" else name, fontSize = 12.sp, maxLines = 1) }
+                            }, Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = DarkOnBg.copy(alpha = 0.45f))) { Text(if (unsaved) "*$name" else name, fontSize = 12.sp, maxLines = 1) }
                         }
                     }
                 }
@@ -1604,14 +1604,98 @@ fun EditorScreen(
                                     }
                                 }
                             }
-                            // 启动铁锈战争
-                            val launchGame: () -> Unit = {
+                            // 启动铁锈战争（原版 / rwjs 重打包版；默认包在设置「导入」展开区选择）
+                            var showGamePicker by remember { mutableStateOf(false) }
+                            // 弹窗内的「默认启动」预选：点单选圈立即保存为默认，下次点启动直接用该包不再询问
+                            var pickerDefault by remember { mutableStateOf(SettingsManager.launchGamePackage) }
+                            val launchPackage: (String) -> Unit = { pkg ->
                                 try {
-                                    val intent = context.packageManager.getLaunchIntentForPackage("com.corrodinggames.rts")
+                                    val intent = context.packageManager.getLaunchIntentForPackage(pkg)
                                     if (intent != null) context.startActivity(intent)
-                                    else Toast.makeText(context, "未安装铁锈战争", Toast.LENGTH_SHORT).show()
+                                    else Toast.makeText(
+                                        context,
+                                        if (pkg == SettingsManager.GAME_PKG_RWJS) "未安装极速版铁锈战争" else "未安装铁锈战争",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "启动铁锈战争失败", Toast.LENGTH_SHORT).show()
+                                    Log.e(TAG, "启动游戏失败", e)
+                                    Toast.makeText(context, "启动游戏失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            val launchGame: () -> Unit = {
+                                val pref = SettingsManager.launchGamePackage
+                                if (pref.isNotEmpty()) {
+                                    launchPackage(pref)
+                                } else {
+                                    val installed: (String) -> Boolean = { pkg ->
+                                        try { context.packageManager.getLaunchIntentForPackage(pkg) != null } catch (e: Exception) { false }
+                                    }
+                                    val hasOriginal = installed(SettingsManager.GAME_PKG_ORIGINAL)
+                                    val hasRwjs = installed(SettingsManager.GAME_PKG_RWJS)
+                                    when {
+                                        hasOriginal && hasRwjs -> showGamePicker = true
+                                        hasOriginal -> launchPackage(SettingsManager.GAME_PKG_ORIGINAL)
+                                        hasRwjs -> launchPackage(SettingsManager.GAME_PKG_RWJS)
+                                        else -> Toast.makeText(context, "未安装铁锈战争", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            if (showGamePicker) {
+                                AppDialog(
+                                    onDismissRequest = { showGamePicker = false },
+                                    title = "启动游戏"
+                                ) {
+                                    Column {
+                                        listOf(
+                                            "铁锈战争 · 原版" to SettingsManager.GAME_PKG_ORIGINAL,
+                                            "铁锈战争 · 极速版" to SettingsManager.GAME_PKG_RWJS
+                                        ).forEach { (label, pkg) ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable {
+                                                        showGamePicker = false
+                                                        launchPackage(pkg)
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Default.RocketLaunch, null, tint = RustedPrimary, modifier = Modifier.size(20.dp))
+                                                Spacer(Modifier.width(10.dp))
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(label, fontSize = 14.sp, color = RustedOnBackground)
+                                                    Text(pkg, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                                                }
+                                                // 方形细边框复选框：点击勾选并设为默认；再次点击勾消失，恢复「每次询问」
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(18.dp)
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .then(
+                                                            if (pickerDefault == pkg) Modifier.background(RustedPrimary, RoundedCornerShape(3.dp))
+                                                            else Modifier.border(1.dp, RustedOnBackground.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                                        )
+                                                        .clickable {
+                                                            if (pickerDefault == pkg) {
+                                                                pickerDefault = ""
+                                                                SettingsManager.launchGamePackage = ""
+                                                                Toast.makeText(context, "已恢复每次询问", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                pickerDefault = pkg
+                                                                SettingsManager.launchGamePackage = pkg
+                                                                Toast.makeText(context, "已设为默认启动，下次不再询问", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (pickerDefault == pkg) {
+                                                        Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             // 主浮层：竖向展开菜单 + 底部横栏（3 个小圆按钮在 + 号左侧、与 + 垂直居中）+「方块+」按钮本体
@@ -1894,33 +1978,31 @@ fun EditorScreen(
                             val previewBaseColor = remember(ThemeState.highlightTheme) {
                                 com.rwmodstudio.editor.RainbowColorUtils.resolvePreviewBaseColor(ThemeState.highlightTheme)
                             }
-                            AlertDialog(
+                            AppDialog(
                                 onDismissRequest = {
                                     showRainbowBracketDialog = false
                                     rainbowSettingsTick++
                                 },
-                                title = { Text("括号颜色", fontSize = 16.sp) },
-                                text = {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .verticalScroll(rememberScrollState())
-                                    ) {
-                                        RainbowBracketSettingsPanel(
-                                            previewBackgroundColor = previewBg,
-                                            previewBaseColor = previewBaseColor
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(onClick = {
+                                title = "括号颜色",
+                                actions = {
+                                    DialogActionButton("关闭", color = RustedOnBackground) {
                                         showRainbowBracketDialog = false
                                         rainbowSettingsTick++
-                                    }) {
-                                        Text("关闭")
                                     }
                                 }
-                            )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 480.dp)
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    RainbowBracketSettingsPanel(
+                                        previewBackgroundColor = previewBg,
+                                        previewBaseColor = previewBaseColor
+                                    )
+                                }
+                            }
                         }
                         // 自定义高亮色设置（迁自顶栏高亮主题下拉）
                         if (showDarkTokens) {
@@ -2290,7 +2372,21 @@ fun EditorScreen(
 
     // Symbol editor
     if (showSymbolEditor) {
-        AlertDialog(onDismissRequest = { showSymbolEditor = false }, title = { Text("编辑快捷符号") }, text = {
+        AppDialog(
+            onDismissRequest = { showSymbolEditor = false },
+            title = "编辑快捷符号",
+            actions = {
+                DialogActionButton("保存") {
+                    val symValue = editingSymbolValue.text
+                    if (editingSymbolLabel.isNotEmpty() && symValue.isNotEmpty()) {
+                        if (editingSymbolIndex >= 0) customSymbols = customSymbols.toMutableList().also { it[editingSymbolIndex] = editingSymbolLabel to symValue }
+                        else customSymbols = customSymbols + (editingSymbolLabel to symValue)
+                        saveSymbols(); editingSymbolLabel = ""; editingSymbolValue = TextFieldValue(""); editingSymbolIndex = -1
+                    }
+                }
+                DialogActionButton("关闭", color = RustedOnBackground) { showSymbolEditor = false }
+            }
+        ) {
             Column(Modifier.heightIn(max = 400.dp)) {
                 LazyColumn(Modifier.weight(1f)) { items(customSymbols.size) { idx ->
                     val (l, v) = customSymbols[idx]
@@ -2317,19 +2413,7 @@ fun EditorScreen(
                     editingSymbolValue = TextFieldValue(newText, TextRange(offset + markerStr.length))
                 }, modifier = Modifier.align(Alignment.End)) { Text("插入 $CURSOR_MARKER（光标位置）") }
             }
-        }, confirmButton = {
-            Row {
-                TextButton(onClick = {
-                    val symValue = editingSymbolValue.text
-                    if (editingSymbolLabel.isNotEmpty() && symValue.isNotEmpty()) {
-                        if (editingSymbolIndex >= 0) customSymbols = customSymbols.toMutableList().also { it[editingSymbolIndex] = editingSymbolLabel to symValue }
-                        else customSymbols = customSymbols + (editingSymbolLabel to symValue)
-                        saveSymbols(); editingSymbolLabel = ""; editingSymbolValue = TextFieldValue(""); editingSymbolIndex = -1
-                    }
-                }) { Text("保存") }
-                TextButton(onClick = { showSymbolEditor = false }) { Text("关闭") }
-            }
-        })
+        }
     }
 
     // 补全筛选 - 第一层选节，第二层选分类
@@ -2348,7 +2432,20 @@ fun EditorScreen(
 
         if (selectedSection == null) {
             // 第一层：选节
-            AlertDialog(onDismissRequest = { showCompletionFilter = false }, title = { Text("补全筛选") }, text = {
+            AppDialog(
+                onDismissRequest = { showCompletionFilter = false },
+                title = "补全筛选",
+                actions = {
+                    DialogActionButton("重置默认", color = RustedError) {
+                        val ok = SettingsManager.resetSectionFilters()
+                        completionFilter = SettingsManager.loadAllSectionFilters()
+                        if (!ok) {
+                            Toast.makeText(ctx, "重置分类筛选失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    DialogActionButton("确定", color = RustedOnBackground) { showCompletionFilter = false }
+                }
+            ) {
                 Column {
                     Text("选择节后配置分类", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                     Spacer(Modifier.height(8.dp))
@@ -2357,7 +2454,7 @@ fun EditorScreen(
                             Text("未检测到节", fontSize = 13.sp, color = RustedOnBackground.copy(alpha = 0.4f))
                         }
                     } else {
-                        LazyColumn(Modifier.heightIn(max = 480.dp)) { items(sections) { section ->
+                        LazyColumn(Modifier.heightIn(max = 420.dp)) { items(sections) { section ->
                             val filter = completionFilter[section]
                             val count = filter?.size ?: 0
                             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { selectedSection = section }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2369,18 +2466,7 @@ fun EditorScreen(
                         } }
                     }
                 }
-            }, confirmButton = {
-                Row {
-                    TextButton(onClick = {
-                        val ok = SettingsManager.resetSectionFilters()
-                        completionFilter = SettingsManager.loadAllSectionFilters()
-                        if (!ok) {
-                            Toast.makeText(ctx, "重置分类筛选失败", Toast.LENGTH_SHORT).show()
-                        }
-                    }) { Text("重置默认", color = RustedError) }
-                    TextButton(onClick = { showCompletionFilter = false }) { Text("确定") }
-                }
-            })
+            }
         } else {
             // 第二层：选分类
             val sectionKey = selectedSection ?: ""
@@ -2397,7 +2483,13 @@ fun EditorScreen(
             }
             var enabledCats by remember { mutableStateOf(initialEnabled) }
 
-            AlertDialog(onDismissRequest = { showCompletionFilter = false }, title = { Text("[$sectionKey] 节 - 分类筛选") }, text = {
+            AppDialog(
+                onDismissRequest = { showCompletionFilter = false },
+                title = "[$sectionKey] 节 - 分类筛选",
+                actions = {
+                    DialogActionButton("确定", color = RustedOnBackground) { selectedSection = null; showCompletionFilter = false }
+                }
+            ) {
                 Column(Modifier.heightIn(max = 400.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = { enabledCats = allCategories.toSet(); completionFilter = completionFilter + (sectionKey to enabledCats); SettingsManager.saveSectionFilter(sectionKey, enabledCats) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("全选", fontSize = 11.sp) }
@@ -2418,7 +2510,7 @@ fun EditorScreen(
                         }
                     } }
                 }
-            }, confirmButton = { TextButton(onClick = { selectedSection = null; showCompletionFilter = false }) { Text("确定") } })
+            }
         }
     }
 

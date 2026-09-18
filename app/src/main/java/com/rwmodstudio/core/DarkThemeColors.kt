@@ -5,6 +5,31 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
+ * 用户新增的高亮类型（「规则」页里「新建类型」建出来的）。
+ *
+ * 与内置类型的区别：内置类型的 scope 集合写死在 [DarkThemeColors.targetScopes] 里，
+ * 这里由用户指定一个 scope（**留空则自动生成 `user.custom.<id>`**）。
+ * 配合「规则」页给这个类型写关键字/正则规则（规则会带上这个 scope），就能高亮任意自定义写法：
+ * 用户规则插进语法最前 → 产生这个 scope → 主题里按 [color] 上色（[DarkThemeColors] 的固定字段装不下可变数量，
+ * 所以颜色独立存在这里）。
+ *
+ * @param id 稳定唯一标识（`custom_<时间戳>`），与内置配色键不会撞名
+ * @param label 界面显示名
+ * @param scope TextMate scope；留空 = 自动生成
+ * @param color 该类型的颜色（大写 `#RRGGBB`）
+ */
+@Serializable
+data class CustomHighlightType(
+    val id: String,
+    val label: String,
+    val scope: String = "",
+    val color: String = "#FFFFFF"
+) {
+    /** 实际使用的 scope：用户没填就按 id 生成一个专属 scope */
+    val effectiveScope: String get() = scope.ifBlank { "user.custom.$id" }
+}
+
+/**
  * 自定义代码高亮颜色配置。
  * 每个字段对应一组 TextMate scope，通过 scope 精确替换生成自定义主题。
  * 字段设计与 VS Code 扩展 ini-cn-highlight 的配色键一一对应。
@@ -72,7 +97,13 @@ import kotlinx.serialization.json.Json
     val variable: String = "#9DDDFF",
 
     /** 是否激活「点击符号（() [] 等）匹配高亮」：勾选后点击符号用 [ui]（UI 高亮）色高亮，与深色高亮一致。默认开启（深色预设默认勾选）。 */
-    val highlightDelimiters: Boolean = true
+    val highlightDelimiters: Boolean = true,
+
+    /**
+     * 用户新增的高亮类型（见 [CustomHighlightType]），追加在内置类型之后。
+     * 默认 `emptyList()` ⇒ 旧的 `settings.json` / 旧预设反序列化后就是空表，行为与以前完全一致。
+     */
+    val customTypes: List<CustomHighlightType> = emptyList()
 ) {
     companion object {
         val Default = DarkThemeColors()
@@ -89,7 +120,7 @@ import kotlinx.serialization.json.Json
             keyword = "#067D17",
             control = "#AF00DB",
             other = "#7798f3",
-            value = "#75D8AE",
+            value = "#60B18E",
             property = "#75D8AE",
             comment = "#6A737D",
             number = "#1750EB",
@@ -140,7 +171,7 @@ import kotlinx.serialization.json.Json
             quote = "#99EEBB",
             boolean = "#1c52b8",
             constant = "#1196e4",
-            team = "#f86300",
+            team = "#642800",
             movement = "#88DDDD",
             path = "#f00404",
             hexColor = "#da1212",
@@ -166,77 +197,125 @@ import kotlinx.serialization.json.Json
         /**
          * 配色键 → 界面显示名。
          *
-         * **键集合必须与 [targetScopes] 完全一致**（加上不参与 scope 着色的 ui / plainText）：
+         * **键集合必须与 [targetScopes] 完全一致**（加上不参与 scope 着色的 ui / plainText），
+         * **键序也必须一致**：它就是界面顺序（`ui` / `plainText` 置顶，其余按真实项目实测的
+         * 出现次数降序；节族 → 数字 → 符号组 → 注释 固定收尾）。改顺序时这张表和 [targetScopes] 一起改。
+         *
          * 「自定义高亮」页的类型列表与「规则」页的类别列表都直接由它派生，
          * 两边从此是同一套词表（`HighlightRuleManagerTest.categoriesMatchCustomHighlightTypesExactly` 校验）。
+         *
+         * 显示名以**用户看得懂**为准，不追求与 scope 名一一对应（2026-09-18 统一过一轮）：
+         * `keyword` = 属性（其实是每行开头的键名）、`value` = 属性值、`team` = 枚举值
+         * （它覆盖布尔 / 帧率 / 队伍 / 路径点动作 / 内置属性名这一串内置固定取值，所以不叫「队伍/路径点」）、
+         * `sectionBracket` = 节前缀（节名与 `[` `]` 同色、同属一个类别）、
+         * `type` = 内存类型（真实项目里只出现在 `@memory 变量:float[]` 的类型位）、
+         * `memory` = 内存/变量（`@memory` / `@global` / `@define` 声明）、`shortcutVariable` = 变量名、
+         * `movement` = 移动类型（`AIR/LAND/水面/两栖…`；原「移动/层级」里的「层级」scope 语法里根本不存在）。
          */
         val labels = mapOf(
             "ui" to "UI 高亮",
             "plainText" to "普通文本",
-            "sectionBracket" to "节括号",
-            "sectionSuffix" to "节后缀",
-            "keyword" to "关键字",
-            "logical" to "逻辑符",
-            "operator" to "操作符",
-            "comma" to "逗号",
-            "value" to "值高亮",
-            "property" to "属性/常量",
-            "team" to "队伍/路径点",
-            "movement" to "移动/层级",
-            "path" to "路径前缀",
-            "decoration" to "装饰符",
-            "hexColor" to "颜色值",
-            "number" to "数字",
-            "string" to "字符串",
-            "quote" to "字符串引号",
-            "comment" to "注释",
-            "memory" to "内存/快捷键",
-            "reference" to "引用前缀/目标",
-            "function" to "函数",
+            // ── 按出现次数降序（实测：真实项目 27,501 行 / 148,787 个 token）──
+            "value" to "属性值",
+            "keyword" to "属性",
             "parameter" to "参数",
-            "shortcutVariable" to "快捷变量",
-            "type" to "类型",
-            "modifier" to "修饰符",
+            "team" to "枚举值",
+            "string" to "字符串",
+            "reference" to "单位标记",
+            "function" to "函数",
+            "path" to "路径前缀",
+            "hexColor" to "颜色值",
+            "movement" to "移动类型",
+            "shortcutVariable" to "变量名",
+            "memory" to "内存/变量",
+            "type" to "内存类型",
+            // ── 节族（固定在数字 / 符号 / 注释之前）──
+            "sectionBracket" to "节前缀",
+            "sectionSuffix" to "节后缀",
+            // ── 数字 ──
+            "number" to "数字",
+            // ── 符号（统一成一组，组内不按出现次数）──
+            "comma" to "逗号",
             "bracket" to "方括号",
             "bracketRound" to "圆括号",
-            "bracketCurly" to "花括号"
+            "bracketCurly" to "花括号",
+            "operator" to "操作符",
+            "logical" to "逻辑符",
+            // ── 注释（固定最末）──
+            "comment" to "注释"
         )
+
+        /**
+         * **不进调色盘、但规则页仍保留**的类型。
+         *
+         * 历史上这里排除过 4 个类型（decoration / property / quote / modifier），2026-09-18 全部处理完毕：
+         * - `decoration`（连续引号）：**并入普通文本** —— 它是语法标记 `"""` / `'''` 多行引号边界的
+         *   「不上色」结构（scope 名就是 *ignored*），颜色永远跟随正文（见
+         *   [com.rwmodstudio.editor.SoraEditorInitializer.applyScopeColors] 的接管逻辑），不再单独立类型；
+         * - `property` / `quote` / `modifier`：scope 在语法里一条规则都没有，整类空转，已从类型表整体移除。
+         *
+         * ⇒ 现在为空集。入口保留：将来若再出现「有配色字段但没有 scope 规则」的类型，从这里排除。
+         */
+        private val nonColorableCategories: Set<String> = emptySet()
+
+        /**
+         * 「自定义高亮」里**可调色**的类型 = [labels] 的键序去掉 [nonColorableCategories]。
+         *
+         * 把"调了没反应"的类型摆进调色盘只会让用户以为改坏了；规则页不受影响。
+         */
+        val colorableCategories: List<String> = labels.keys.filterNot { it in nonColorableCategories }
+
+        // ── 内置 + 用户新增：类型表的「运行时视图」 ──
+        // 内置类型写在常量表里（编译期固定），用户新增类型存在 DarkThemeColors.customTypes 里（可变），
+        // 所以凡是"要显示/遍历全部类型"的地方都得走下面这几个函数，不能只看 labels / targetScopes。
+
+        /** 全部可调色类型：内置在前，用户新增追加在后（顺序即界面顺序） */
+        fun colorableCategoriesOf(colors: DarkThemeColors): List<String> =
+            colorableCategories + colors.customTypes.map { it.id }
+
+        /** 显示名：内置 → 用户新增 → 回落 id */
+        fun labelOf(id: String, colors: DarkThemeColors): String =
+            labels[id] ?: colors.customTypes.firstOrNull { it.id == id }?.label ?: id
+
+        /** 该类型覆盖的 scope：内置取 [targetScopes]，用户新增取它自己的 scope */
+        fun scopesOf(id: String, colors: DarkThemeColors): Set<String> =
+            targetScopes[id] ?: colors.customTypes.firstOrNull { it.id == id }
+                ?.let { setOf(it.effectiveScope) }.orEmpty()
+
+        /** 用户新增类型的颜色；内置类型返回 null（它们的颜色在各自的固定字段里） */
+        fun customColorOf(id: String, colors: DarkThemeColors): String? =
+            colors.customTypes.firstOrNull { it.id == id }?.color
+
+        /** 新建用户类型时生成 id（`custom_<时间戳>`，撞了就加后缀） */
+        fun newCustomTypeId(existing: List<CustomHighlightType>): String {
+            val used = existing.map { it.id }.toSet()
+            var id = "custom_" + System.currentTimeMillis()
+            var n = 0
+            while (id in used) id = "custom_" + System.currentTimeMillis() + "_" + (++n)
+            return id
+        }
 
         /**
          * 每个类别对应的 TextMate scope 集合。
          * 生成自定义主题时，会把这些 scope 的 foreground 替换为用户颜色。
-         * 顺序靠前的类别优先匹配。
+         *
+         * **键序 = 界面顺序**（与 [labels] 一致）：`ui` / `plainText` 不在本表里、固定置顶，
+         * 其余按**真实项目实测的出现次数降序**（`人机的玩笑`：27,501 行 / 148,898 个 token），
+         * 节族 → 数字 → 符号组 → 注释 固定收尾。
+         *
+         * 顺序同时决定「同一 scope 命中多个类别时」的首命中优先级 ——
+         * 所以**同一个 scope 不允许出现在两个类别里**（`HighlightRuleManagerTest` 有校验）。
+         * 2026-09-18 重排前已核实：29 个类别零重复 scope、跨类前缀不重叠 ⇒ 重排不改变任何 token 的配色归属。
          */
         val targetScopes = linkedMapOf(
-            // 节括号 + 节名一起：主题里 entity.name.section.ini 的配色和节括号完全一样（#FD80FF / #871095），
-            // 规则页也只保留「节括号」一个类别（历史上「节高亮」与「节括号」在规则页重复出现）
-            "sectionBracket" to setOf(
-                "punctuation.definition.section.begin.ini",
-                "punctuation.definition.section.end.ini",
-                "entity.name.section.ini",
-                "entity.name.section.prefix.ini"
-            ),
-            "sectionSuffix" to setOf("entity.name.section.suffix.ini"),
-            "keyword" to setOf("keyword.key.ini"),
-            "logical" to setOf("keyword.operator.logical.ini"),
-            "operator" to setOf(
-                "keyword.operator.comparison.ini",
-                "keyword.operator.assignment.ini",
-                "keyword.operator.arithmetic.ini",
-                "punctuation.accessor.ini"
-            ),
-            "comma" to setOf("punctuation.separator.comma.ini"),
+            // ── 按出现次数降序 ──
             "value" to setOf(
                 "string.unquoted.value.ini",
                 "punctuation.separator.ini",
                 "punctuation.separator.forward-slash.ini"
             ),
-            "property" to setOf(
-                "support.variable.property.ini",
-                "support.constant.sound.ini",
-                "support.constant.effect.ini",
-                "support.constant.spawn.ini"
-            ),
+            "keyword" to setOf("keyword.key.ini"),
+            "parameter" to setOf("variable.parameter.ini"),
             "team" to setOf(
                 "constant.language.team.ini",
                 "constant.language.waypoint.ini",
@@ -244,54 +323,66 @@ import kotlinx.serialization.json.Json
                 // 布尔常量与队伍值在主题里同色（历史沿革），并入同一配色键 → 规则页也只显示一个类别
                 "constant.language.boolean.ini"
             ),
-            "movement" to setOf(
-                "constant.language.movement.ini",
-                "constant.language.uppercase.ini",
-                "constant.language.layer.ini",
-                "constant.language.animation.ini"
-            ),
-            "path" to setOf("constant.language.path.ini"),
-            // 装饰符：语法里「相邻引号 / 连续单引号」这类无 scoped 结构标记（自定义高亮规则的「装饰符」类别写这里）
-            "decoration" to setOf("punctuation.ignored.ini"),
-            "hexColor" to setOf("constant.other.color.ini"),
-            "number" to setOf("constant.numeric.ini"),
             "string" to setOf(
                 "string.quoted.single.ini",
                 "string.quoted.double.ini",
                 "string.multiline.ini"
-            ),
-            "quote" to setOf(
-                "punctuation.definition.string.begin.ini",
-                "punctuation.definition.string.end.ini"
-            ),
-            "memory" to setOf(
-                "keyword.control.shortcut.ini",
-                "keyword.control.shortcut.key.ini",
-                "keyword.control.memory.ini"
             ),
             "reference" to setOf(
                 "variable.other.reference.ini",
                 "variable.other.reference.target.ini"
             ),
             "function" to setOf("support.function.ini"),
-            "parameter" to setOf("variable.parameter.ini"),
+            "path" to setOf("constant.language.path.ini"),
+            "hexColor" to setOf("constant.other.color.ini"),
+            "movement" to setOf(
+                "constant.language.movement.ini",
+                "constant.language.uppercase.ini",
+                "constant.language.layer.ini",
+                "constant.language.animation.ini"
+            ),
             "shortcutVariable" to setOf(
                 "variable.other.shortcut.ini",
                 "punctuation.separator.shortcut.ini"
             ),
+            "memory" to setOf(
+                "keyword.control.shortcut.ini",
+                "keyword.control.shortcut.key.ini",
+                "keyword.control.memory.ini"
+            ),
+            // type 是 2026-09-15 补的：主题里这个 scope 一直有独立配色，
+            // 但那之前 targetScopes/规则页都没有对应键 → 自定义高亮里调不了、规则页写了也不生效。
+            "type" to setOf("storage.type.ini", "storage.type.shortcut.ini"),
+            // ── 节族：固定在数字 / 符号 / 注释之前 ──
+            // 节前缀 + 节名一起：主题里 entity.name.section.ini 的配色和节括号完全一样（#FD80FF / #871095），
+            // 规则页也只保留「节前缀」一个类别（历史上「节高亮」与「节括号」在规则页重复出现）
+            "sectionBracket" to setOf(
+                "punctuation.definition.section.begin.ini",
+                "punctuation.definition.section.end.ini",
+                "entity.name.section.ini",
+                "entity.name.section.prefix.ini"
+            ),
+            "sectionSuffix" to setOf("entity.name.section.suffix.ini"),
+            // ── 数字 ──
+            "number" to setOf("constant.numeric.ini"),
+            // ── 符号：统一成一组（组内不按出现次数）──
+            "comma" to setOf("punctuation.separator.comma.ini"),
             "bracket" to setOf("punctuation.bracket.square.ini"),
             "bracketRound" to setOf("punctuation.bracket.round.ini"),
             "bracketCurly" to setOf("punctuation.bracket.curly.ini"),
+            "operator" to setOf(
+                "keyword.operator.comparison.ini",
+                "keyword.operator.assignment.ini",
+                "keyword.operator.arithmetic.ini",
+                "punctuation.accessor.ini"
+            ),
+            "logical" to setOf("keyword.operator.logical.ini"),
+            // ── 注释：固定最末 ──
             "comment" to setOf(
                 "comment.line.ini",
                 "comment.block.ini",
                 "punctuation.definition.comment.ini"
-            ),
-            // ── 以下两个键是 2026-09-15 补的：主题里这两个 scope 一直有独立配色，
-            //    但 targetScopes/规则页都没有对应键 → 自定义高亮里调不了、规则页写了也不生效。
-            //    追加在最后，**不改动上面任何键的相对顺序**（顺序即首命中优先级）。
-            "type" to setOf("storage.type.ini", "storage.type.shortcut.ini"),
-            "modifier" to setOf("storage.modifier.ini")
+            )
         )
     }
 }

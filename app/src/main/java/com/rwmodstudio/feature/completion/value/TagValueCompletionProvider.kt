@@ -38,21 +38,10 @@ class TagValueCompletionProvider : BaseValueCompletionProvider() {
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         // 标签间用逗号分隔：当用户用空格分隔（光标在标签值内且前一字符是空格/制表符）时，
         // 空格不是合法的标签分隔符，此时不补标签名，只补「,」引导用户用逗号分隔；
-        // 只有输入「,」后才继续补标签名。若空格前已是逗号（已分隔完成），不再弹「,」。
-        val lastChar = request.textBeforeCursor.lastOrNull()
-        val prevNonSpace = request.textBeforeCursor.trimEnd().lastOrNull()
-        if (!request.isInsideParentheses() && (lastChar == ' ' || lastChar == '\t') &&
-            prevNonSpace != ',' && prevNonSpace != '，'
-        ) {
-            return listOf(
-                createValueItem(
-                    label = ",",
-                    detail = "标签分隔符（标签间用逗号分隔）",
-                    insertText = ",",
-                    prefixLength = 0,
-                    valueType = "string"
-                )
-            )
+        // 只有输入「,」后才继续补标签名。判定与「,」项统一走公共实现（与文件/音效等多值补全一致），
+        // 选中「,」时会吃掉刚打的空格，直接得到 `a,b`。
+        if (needsCommaSeparator(request)) {
+            return listOf(commaSeparatorItem("标签分隔符（标签间用逗号分隔）"))
         }
 
         // 消息标签（带标签发送消息）：只列项目里 sendMessageWithTags: 的取值，独立命名空间

@@ -294,6 +294,10 @@ takeResources_saveFirstUnitToCustomTarget1 = 提取资源保存第一个单元�
 takeResources_saveFirstUnitToCustomTarget2 = 提取资源保存第一个单元自定义目标2
 takeResources_triggerActionIfAnyCollected = 提取资源成功触发
 takeResources_triggerActionIfNoneCollected = 提取资源失败触发
+
+# --- 列表 ---
+mutatorX_ifUnitWithTags = 修正需要标签
+mutatorX_ifUnitWithoutTags = 修正除此标签
 # --- 其他（未分类） ---
 @global = 全局
 @define = 局部
@@ -711,8 +715,6 @@ mutatorX_addResourcesDirectHit = 修正直接添加资源
 mutatorX_areaDamageMultiplier = 修正范围伤害
 mutatorX_changedExplodeEffect = 修正命中效果
 mutatorX_directDamageMultiplier = 修正直接伤害
-mutatorX_ifUnitWithTags = 修正需要标签
-mutatorX_ifUnitWithoutTags = 修正除此标签
 nanoFactorySpeed = 工厂速度乘数
 nanoRange = 维修或建造范围
 nanoRangeForReclaim = 回收距离
