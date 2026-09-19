@@ -60,6 +60,11 @@ class UnitNameValueCompletionProvider : BaseValueCompletionProvider() {
         // 判定来源为 [CompletionShared]（与分类页共用），不按类型猜测。
         if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) return true
 
+        // altNames（别名）：真实语法是「逗号分隔的名称列表」（示例 custTank1, customTank1, cTank1），
+        // 但别名是「自身别名」、候选不应列其他单位名 → 仅在空格后提示多值逗号，正常输入不弹候选
+        // （emptyList，见 provideItems 的 altNames 分支）。
+        if (request.toEnglishName().equals("altnames", ignoreCase = true)) return true
+
         // 单位名固定精确名单（经 code_reference 逐条核实，与分类页共源 CompletionShared）：
         // convertTo/onCreateSpawnUnitOf 等虽 type 为 unit ref（单位标记）但用法是单位类型名 → 精确注入，
         // 不做属性名 contains(unit/单位) 模糊匹配。
@@ -76,15 +81,23 @@ class UnitNameValueCompletionProvider : BaseValueCompletionProvider() {
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         // 打了空格 / Tab：空格不是合法分隔符——
-        // 列表属性（可建造 名称、死亡产生单位、覆盖单位…）→ 只提示「,」（选中时吞掉空格成 `a,b`）；
-        // 单值单位名（核心 name、convertTo 等）→ 值已写完，不再补单位名
+        // 多值单位名（核心 name、可建造 名称、死亡产生单位、覆盖单位…）→ 只提示「,」（选中时吞掉空格成 `a,b`）；
+        // 单值单位名（convertTo、onCreateSpawnUnitOf 等）→ 值已写完，不再补单位名。
+        // name 键本身也是多值（铁锈真实语法：`name:turret, turret_artillery` 逗号分隔多个单位名），
+        // 故核心 name 归入「多值→提示逗号」而非单值（2026-09-18 设备实际项目核对修正）。
         if (needsCommaSeparator(request)) {
-            return if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) {
+            val en = request.toEnglishName()
+            val isListLike = CompletionShared.isUnitNameListProperty(en) ||
+                    en.equals("name", ignoreCase = true) ||
+                    en.equals("altnames", ignoreCase = true)
+            return if (isListLike) {
                 listOf(commaSeparatorItem("单位名分隔符（值与值之间用逗号分隔）"))
             } else {
                 emptyList()
             }
         }
+        // altNames：别名是自身别名，候选不列其他单位名 → 正常输入不给候选（仅空格后的逗号提示）
+        if (request.toEnglishName().equals("altnames", ignoreCase = true)) return emptyList()
         val source = request.unitNames
         if (source.isEmpty()) return emptyList()
 

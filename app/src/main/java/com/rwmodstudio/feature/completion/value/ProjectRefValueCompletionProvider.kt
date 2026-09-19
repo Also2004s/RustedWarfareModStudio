@@ -117,10 +117,12 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
         prefix.lowercase().startsWith("custom:")
 
     /**
-     * 可按逗号填多个的引用类别（依据 code_reference 的官方示例 + 真实项目用法）：
+     * 可按逗号填多个的引用类别（依据 code_reference 的官方示例 + 真实项目用法 + **语义**）：
      * 效果（死亡效果: shockwave, CUSTOM:pieces*3）、行动（也执行动作: addCredits, playSound）、
-     * 附属槽位（附属添加于槽位: drop1, drop2）、抛射体（在寿命结束时刷抛射体: a(...), b(...)）。
-     * 单值引用（炮塔/贴花/动画/可建造）不在其中：官方示例全为单值，不提示逗号。
+     * 附属槽位（附属添加于槽位: drop1, drop2）、抛射体（炮塔抛射体 projectile 语义支持逗号列多个弹型）。
+     * 单值引用不在其中，且按语义天然单值：turret/decal/animation/canbuild 一处引用配一个（炮塔/贴花/动画/可建造）。
+     * 注意不可单凭语料收窄：projectile 的 corpus 多为单值写法，但引擎语义允许多值，故仍保留多值
+     * （2026-09-19 语义确认恢复）。
      */
     private val multiValueRefKinds = setOf("effect", "action", "attachment", "projectile")
 

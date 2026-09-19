@@ -15,7 +15,13 @@ class UnitNameListPropertyTest {
         assertTrue(CompletionShared.isUnitNameListProperty("unitsSpawnedOnDeath"), "死亡产生单位")
         assertTrue(CompletionShared.isUnitNameListProperty("overrideAndReplace"), "覆盖单位")
         assertTrue(CompletionShared.isUnitNameListProperty("upgradedFrom"), "升级自")
-        assertTrue(CompletionShared.isUnitNameListProperty("displayLocaleKey"), "界面显示内部调用：填单位内部标识")
+        // displayLocaleKey 经真实项目实测（corpus_all.txt 近 50 处）值恒为单个单位名，非逗号多值列表（2026-09-19 修正）
+        assertFalse(CompletionShared.isUnitNameListProperty("displayLocaleKey"), "界面显示内部调用：单值，见 unitNameProperties")
+    }
+
+    @Test
+    fun displayLocaleKeyIsSingleValueUnitName() {
+        assertTrue(CompletionShared.isUnitNameProperty("displayLocaleKey"), "界面显示内部调用：补单位名但单值")
     }
 
     @Test

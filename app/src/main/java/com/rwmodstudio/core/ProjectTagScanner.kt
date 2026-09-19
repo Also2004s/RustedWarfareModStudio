@@ -504,7 +504,7 @@ object ProjectTagScanner {
     // 节名：支持 [资源_xxx]、[resource_xxx]、[全局资源_xxx]、[globalResource_xxx]、[global_resource_xxx]
     private val sectionRegex = Regex("""^\[((?:全局资源|globalResource|global_resource|资源|resource))_([^\]]+)\]$""", RegexOption.IGNORE_CASE)
     // 键值对：tags / 临时标签添加 / 添加全局标签 / 带标签发送消息 / name / price / buildSpeed（含英文、下划线、复数、队伍变体、中文）
-    private val kvRegex = Regex("""^(\s*(tags|临时标签添加|tempTagAdd|temp_tag_add|添加全局标签|addGlobalTag|add_global_tag|addGlobalTags|add_global_tags|addGlobalTeamTags|add_global_team_tags|带标签发送消息|sendMessageWithTags|name|price|价格|buildSpeed|建造速度)\s*):\s*(.*)$""", RegexOption.IGNORE_CASE)
+    private val kvRegex = Regex("""^(\s*(tags|临时标签添加|temporarilyAddTags|添加全局标签|addGlobalTeamTags|带标签发送消息|sendMessageWithTags|name|price|价格|buildSpeed|建造速度)\s*):\s*(.*)$""", RegexOption.IGNORE_CASE)
     private val memoryRegex = Regex("""@memory\s+(\S+)\s*:""")
     // @memory name:type（类型可选，供 unit 型内存变量链式补全）
     private val memoryTypeRegex = Regex("""@memory\s+(\S+)\s*:\s*(\S+)""", RegexOption.IGNORE_CASE)
@@ -563,8 +563,8 @@ object ProjectTagScanner {
         val keyRaw = match.groupValues[2].trim().lowercase()
         val key = when (keyRaw) {
             "tags" -> TagKey.TAGS
-            "临时标签添加", "temptagadd", "temp_tag_add" -> TagKey.TEMP_TAG_ADD
-            "添加全局标签", "addglobaltag", "add_global_tag", "addglobaltags", "add_global_tags", "addglobalteamtags", "add_global_team_tags" -> TagKey.ADD_GLOBAL_TAG
+            "临时标签添加", "temporarilyaddtags" -> TagKey.TEMP_TAG_ADD
+            "添加全局标签", "addglobalteamtags" -> TagKey.ADD_GLOBAL_TAG
             "带标签发送消息", "sendmessagewithtags" -> TagKey.MESSAGE_TAG
             "name" -> TagKey.NAME
             "price", "价格" -> TagKey.PRICE

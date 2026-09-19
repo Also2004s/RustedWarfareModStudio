@@ -83,6 +83,15 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
         if (isResourceNameLhs && needsCommaSeparator(request)) {
             return listOf(commaSeparatorItem("资源分隔符（值与值之间用逗号分隔）"))
         }
+        // dynamic resources（用逻辑设置资源/用逻辑添加资源）：写完一个 `资源名=表达式` 后打空格，
+        // 接下来用逗号分隔下一个键值对 → 提示「,」（选中吞掉空格成 `建造状态=3,`），供继续写下一组。
+        // 若此时走末尾属性型分支，会用空前缀把全部资源名无脑弹出（写成 `建造状态=3 能量` 的非法写法）。
+        if (prop != null && isDynamicResourcesValueType(prop.type) &&
+            currentSegmentRhs(request.textBeforeCursor) != null &&
+            needsCommaSeparator(request)
+        ) {
+            return listOf(commaSeparatorItem("资源分隔符（键值对之间用逗号分隔）"))
+        }
         // 属性型：按前缀过滤，替换整个值片段
         val allResources = collectResourceNames(request)
         val matching = allResources

@@ -253,6 +253,14 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
+        // 用逻辑设置资源/用逻辑添加资源：写完一个 `资源名=表达式` 后打空格 = 用逗号分隔下一组。
+        // 该位置的「,」由 ResourceValueCompletionProvider 提供；此处不再兜底弹逻辑表达式，
+        // 否则空格后会混入一摞逻辑候选（应只有逗号）。
+        val propSpace = request.findProperty()
+        if (propSpace != null && isDynamicResourcesValueType(propSpace.type) &&
+            currentSegmentRhs(request.textBeforeCursor) != null &&
+            needsCommaSeparator(request)
+        ) return emptyList()
         val hasSelfPrefix = request.textBeforeCursor.endsWith("self.")
         // 加载原始英文数据，自行翻译，保证中英文两套匹配键都可用
         val data = ValueDataLoader.load(request.context, "logicboolean")
@@ -347,7 +355,12 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         //   作为函数参数（间距(self, 当前动作目标)）或链式求值前缀（当前动作目标.tags(...)），
         //   故数值/文本/布尔表达式上下文都保留；布尔值（真/假）入口由下方 isBooleanEntry
         //   （空前缀、非括号内）单独过滤，此时只出 真/假/if，不含单位标记。
-        // UNKNOWN/ANY 期望类型不过滤（插值/纯文本等宽松场景）。
+        // UNKNOWN/ANY（分析器识别不到期望类型）的兜底域：
+        // 早期把整张逻辑候选全集直接放行（含 真/假、and/or/not/if 连接符、资源名、内存变量）是错误行为。
+        // 识别不到该弹什么时兜底改走「布尔值表达式域」，套用 if 后表达式的过滤
+        // （同下方 isBooleanExprStart 的剔除集 {and,or,if,true,false}）——剔除 真/假(true/false) 字面量
+        // 与二元连接符 and/or、表达式入口 if，**保留 not**（布尔表达式可带逻辑非，如 `not self.isInWater`），
+        // 只留可插入的表达式项（单位标记/选择/资源函数/内存变量等），而非倾泻全集。
         val contextFiltered = if (expectedTarget != LogicTarget.UNKNOWN && expectedTarget != LogicTarget.ANY) {
             candidates.filter { item ->
                 val allowed = classifyLogicType(item.type)
@@ -356,7 +369,9 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                     allowed.contains(LogicTarget.UNIT_MARKER)
             }
         } else {
-            candidates
+            candidates.filterNot {
+                it.name.removePrefix("self.").lowercase() in setOf("and", "or", "if", "true", "false")
+            }
         }
         // 真/假/if 与布尔函数互斥：布尔属性顶层**空值**（如 自动触发: 空前缀、非括号内）只出 真/假/if 三个布尔原语；
         // 一旦输入了前缀（哪怕只是 if），即进入表达式模式，给布尔函数/选择/and/or/not 等。
@@ -436,7 +451,11 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                     dict, request.context, operandPrefix, operandPrefixLen,
                     request.memoryNames, request.memoryTypes
                 )
-                LogicTarget.BOOLEAN -> {
+                // ANY/BOTH（多态参数位置，如 选择( 第2/3参 type=ANY）直接路由到布尔值表达域，
+                // 与布尔（选择( 第1参）、if 共用同一套状态机（not/and/or/真/假 逐点注入），
+                // 不再单独走「剔除语法项」的旁路（历史：ANY 用了含 not 的 LOGIC_SYNTAX_ITEMS，
+                // 导致 ANY 起点没 not、与 if 不一致）。
+                LogicTarget.BOOLEAN, LogicTarget.ANY -> {
                     // 用「光标前一字符」（未 trim）判断是否运算符后紧跟空白：
                     // 运算符/比较符与操作数必须紧贴无空格，一旦运算符后出现空格 → 该操作数已结束，
                     // 绝不允许表达式补全，只弹 and/or 连接符；紧贴（无空格）时弹对应操作数集。
@@ -471,7 +490,13 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                         request.memoryNames, request.memoryTypes,
                         excludeTokens = LOGIC_SYNTAX_ITEMS
                     )
-                    val lastWord = trimmed.substringAfterLast(' ').trim()
+                    // 当前操作数词：先定位最近一层 '('（函数参数起点），只在其「内部」再按空格切，
+                    // 避免跨括号把 `选择(not` 连成一体（历史：`... or 选择(not ` 的最后一个空格
+                    // 在 or 与 选择 之间，把 选择(not 当操作数，not 判定不到、误入「操作数完成→and/or」）。
+                    // 无 '(' 时（if 顶层）保持原行为（整段按空格切，取到 not）。
+                    val lastOpen = trimmed.lastIndexOf('(')
+                    val lastWord = (if (lastOpen >= 0) trimmed.substring(lastOpen + 1) else trimmed)
+                        .substringAfterLast(' ').trim()
                         .removePrefix("self.").lowercase()
                     fun syntaxItem(text: String, detail: String) = CompletionProvider.CompletionItem(
                         label = text,
@@ -497,11 +522,12 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                         }
                         // 正在输入半截操作词：只给操作数（按当前词过滤）
                         typingOperand -> operands
-                        // 子式/参数起点：完整布尔操作数集、不弹连接符
-                        (lastChar == '(' || lastChar == ',') -> operands
-                        // 空插值起点（%{ 内刚打开、未输入）：本质是表达式起点，弹完整布尔操作数集，
+                        // 子式/参数起点（`(` / `,`，如 选择( 第1参布尔表达式）：完整布尔操作数集 + not，
+                        // 与 if 起点一致（布尔表达式起点都可带逻辑非），不弹 and/or/if/真/假
+                        (lastChar == '(' || lastChar == ',') -> listOf(notItem) + operands
+                        // 空插值起点（%{ 内刚打开、未输入）：本质是表达式起点，与 if/参数起点一致给 操作数集 + not，
                         // 而非只给 and/or（exprText 空白被 when 尾部 else 误判为「操作数已完成」）
-                        (interpFragment != null && exprText.isBlank()) -> operands
+                        (interpFragment != null && exprText.isBlank()) -> listOf(notItem) + operands
                         // 片段起点（if/and/or）：操作数全集 + not（not 在此片段首次可用）
                         lastWord in setOf("if", "and", "or") -> listOf(notItem) + operands
                         // not 已用一次：只给操作数，不再给 not/and/or
@@ -519,14 +545,6 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                 LogicTarget.STRING -> stringLogicValueItems(
                     dict, request.context, operandPrefix, operandPrefixLen,
                     request.memoryNames, request.memoryTypes
-                )
-                // 任意/多态上下文（如 选择( 第2/3参，type=ANY）：统一用布尔值表达式源
-                // （布尔/数值/文本/任意/单位标记 + 排除语法项），与其它表达式上下文一致，
-                // 不再把整套 logicboolean 全量堆出。
-                LogicTarget.ANY -> booleanLogicValueItems(
-                    dict, request.context, operandPrefix, operandPrefixLen,
-                    request.memoryNames, request.memoryTypes,
-                    excludeTokens = LOGIC_SYNTAX_ITEMS
                 )
                 // 单位标记上下文（如 distanceBetween(unit1,unit2) 的 间距( 第1参 → 单位标记）：
                 // 直接走统一单位标记调用源（self + unit/marker/event + 选择 + unit 型内存变量），

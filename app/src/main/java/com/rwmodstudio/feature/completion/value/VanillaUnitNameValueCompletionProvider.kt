@@ -23,6 +23,8 @@ class VanillaUnitNameValueCompletionProvider : BaseValueCompletionProvider() {
 
         if (request.toEnglishName().equals("name", ignoreCase = true)) return true
         if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) return true
+        // altNames（别名）：真实语法逗号多值，但候选不列其他单位名 → 仅空格后提示逗号（见 provideItems）
+        if (request.toEnglishName().equals("altnames", ignoreCase = true)) return true
         // 单位名固定精确名单（与 UnitNameValueCompletionProvider 共源，见 CompletionShared）
         if (CompletionShared.isUnitNameProperty(request.toEnglishName())) return true
         // type 初筛兜底（type 不可信，仅作第一道过滤；错误数据已由上述精确名单排除）
@@ -36,14 +38,22 @@ class VanillaUnitNameValueCompletionProvider : BaseValueCompletionProvider() {
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         // 打了空格 / Tab：空格不是合法分隔符（与 UnitNameValueCompletionProvider 一致）——
-        // 列表属性 → 只提示「,」；单值单位名（核心 name、convertTo 等）→ 值已写完，不再补单位名
+        // 多值单位名（核心 name、可建造 名称、死亡产生单位、覆盖单位…）→ 只提示「,」；
+        // 单值单位名（convertTo、onCreateSpawnUnitOf 等）→ 值已写完，不再补单位名。
+        // 核心 name 归入「多值→提示逗号」（铁锈真实语法逗号分隔多个单位名，2026-09-18 核对修正）。
         if (needsCommaSeparator(request)) {
-            return if (CompletionShared.isUnitNameListProperty(request.toEnglishName())) {
+            val en = request.toEnglishName()
+            val isListLike = CompletionShared.isUnitNameListProperty(en) ||
+                    en.equals("name", ignoreCase = true) ||
+                    en.equals("altnames", ignoreCase = true)
+            return if (isListLike) {
                 listOf(commaSeparatorItem("单位名分隔符（值与值之间用逗号分隔）"))
             } else {
                 emptyList()
             }
         }
+        // altNames：别名是自身别名，候选不列其他单位名 → 正常输入不给候选（仅空格后的逗号提示）
+        if (request.toEnglishName().equals("altnames", ignoreCase = true)) return emptyList()
         val prefix = request.valuePrefix
         // 原版单位 + 项目单位合并候选；项目单位优先（用户 mod 覆盖原版同名单位），按 label 去重保留首个。
         // 排序同 UnitName：前缀命中优先，组内字母序。

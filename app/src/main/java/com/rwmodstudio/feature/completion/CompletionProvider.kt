@@ -907,12 +907,12 @@ private val memoryDefAtTypedRegex = Regex("""@memory\s+(\S+)\s*:\s*(\S+)""", Reg
 
 // --- 标签/资源/单位名 提取辅助 ---
 
-/** 从全文匹配 tags:/tempTagAdd: 值（本地标签） */
-private val localTagRegex = Regex("""^\s*(?:tags|tempTagAdd|temp_tag_add|临时标签添加)\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
-/** 仅匹配 tags: 属性值（行动标签 withActionTag 只认行动节里的 tags，不含 tempTagAdd 等其它标签类属性） */
+/** 从全文匹配 tags:/temporarilyAddTags: 值（本地标签） */
+private val localTagRegex = Regex("""^\s*(?:tags|temporarilyAddTags|临时标签添加)\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
+/** 仅匹配 tags: 属性值（行动标签 withActionTag 只认行动节里的 tags，不含 temporarilyAddTags 等其它标签类属性） */
 private val actionTagLineRegex = Regex("""^\s*tags\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
-/** 从全文匹配 addGlobalTag:/addGlobalTeamTags: 等值（全局标签） */
-private val globalTagRegex = Regex("""^\s*(?:addGlobalTag|add_global_tag|addGlobalTags|add_global_tags|addGlobalTeamTags|add_global_team_tags|添加全局标签)\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
+/** 从全文匹配 addGlobalTeamTags:/添加全局标签: 值（全局标签） */
+private val globalTagRegex = Regex("""^\s*(?:addGlobalTeamTags|添加全局标签)\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
 /** 从全文匹配 sendMessageWithTags:/带标签发送消息: 值（消息标签） */
 private val messageTagRegex = Regex("""^\s*(?:sendMessageWithTags|带标签发送消息)\s*:\s*(.+)$""", RegexOption.IGNORE_CASE)
 /** 从全文匹配 [resource_xxx] / [资源_xxx] 节头（本地资源） */
@@ -1004,7 +1004,7 @@ fun extractCurrentFileSymbols(
                 if (inCoreSection) fileTags.addAll(values)
                 if (inActionSection) fileActionTags.addAll(values)
             } else {
-                // tempTagAdd/临时标签添加：任意节，进单位标签（未限定范围）
+                // temporarilyAddTags/临时标签添加：任意节，进单位标签（未限定范围）
                 fileTags.addAll(values)
             }
         }

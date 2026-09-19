@@ -6,8 +6,8 @@ import com.rwmodstudio.feature.completion.LOGIC_SYNTAX_ITEMS
 import com.rwmodstudio.feature.completion.completionMatchLevel
 
 /** 内存/变量名统一分级匹配：前缀命中优先，子串包含兜底（≥2字符），空前缀全量返回 */
-private fun Collection<String>.rankedByMatch(prefix: String): List<String> {
-    if (prefix.isEmpty()) return toList()
+    private fun Collection<String>.rankedByMatch(prefix: String): List<String> {
+        if (prefix.isEmpty()) return toList()
     return map { it to completionMatchLevel(prefix, it) }
         .filter { it.second > 0 }
         .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
@@ -86,6 +86,15 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         }
 
         val prefix = request.valuePrefix
+
+        // 用逻辑设置资源/用逻辑添加资源：写完一个 `资源名=表达式` 后打空格 = 用逗号分隔下一组。
+        // 该位置的「,」由 ResourceValueCompletionProvider 提供；此处不再兜底弹内存变量，
+        // 否则空格后会混入内存变量候选（应只有逗号）。
+        val propSpace = request.findProperty()
+        if (propSpace != null && isDynamicResourcesValueType(propSpace.type) &&
+            currentSegmentRhs(request.textBeforeCursor) != null &&
+            needsCommaSeparator(request)
+        ) return emptyList()
 
         // dynamic resources（用逻辑设置资源:AI阶段=内存）与 key value pairs（设置单位内存:变量=内存）：
         // 值区形如 资源名=RHS，用 RHS 片段做内存变量过滤（AI阶段= → 取 = 后），否则整段前缀匹配不到

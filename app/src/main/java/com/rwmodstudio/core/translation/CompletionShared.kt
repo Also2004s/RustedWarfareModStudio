@@ -44,9 +44,11 @@ object CompletionShared {
 
     // ===== 单位名列表（UnitNameValueCompletionProvider） =====
 
-    /** 单位名列表固定成员（isUnitNameListProperty 的固定名单部分） */
+    /** 单位名列表固定成员（isUnitNameListProperty 的固定名单部分。）
+     *  不含 displayLocaleKey：它虽补单位名但值恒为单个单位名（真实项目 battleShip/mechMinigun 等，
+     *  corpus_all.txt 近 50 处无一逗号多值），已在下方 unitNameProperties 归单值（2026-09-19 实测修正）。 */
     val unitNameListProperties = setOf(
-        "unitsspawnedondeath", "overrideandreplace", "upgradedfrom", "displaylocalekey"
+        "unitsspawnedondeath", "overrideandreplace", "upgradedfrom"
     )
 
     /** 序号模板键 builtFrom_{NUM}_name 的模板名（小写），真实文件里写 builtFrom_1_name */
@@ -240,7 +242,7 @@ object CompletionShared {
     val unitNameProperties = setOf(
         "addwaypoint_unittype", "convertto",
         "guibuildunit", "name", "oncreatespawnunitof",
-        "whenbuilding_temporarilyconvertto"
+        "whenbuilding_temporarilyconvertto", "displaylocalekey"
     )
 
     /** 是否为单位名固定属性（英文名，忽略大小写） */
