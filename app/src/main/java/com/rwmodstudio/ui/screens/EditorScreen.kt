@@ -202,7 +202,17 @@ fun EditorScreen(
     bookmarkPanelOpen: Boolean = false,
     onBookmarkPanelClose: () -> Unit = {},
     backRequest: Int = 0,
-    onBackRequestConsumed: () -> Unit = {}
+    onBackRequestConsumed: () -> Unit = {},
+    // 顶部全局菜单栏的撤销按钮（宿主触发）：递增后编辑器执行一次撤销，并立即清零避免切换文件时误触发
+    undoTrigger: Int = 0,
+    onUndoTriggerConsumed: () -> Unit = {},
+    // 撤销可用态上报：MainApp 顶部撤销按钮据此亮起/变灰（视觉与保存按钮一致）
+    onCanUndoChange: ((Boolean) -> Unit)? = null,
+    // 顶部全局菜单栏的重做按钮（宿主触发）：递增后编辑器执行一次重做，并立即清零避免切换文件时误触发
+    redoTrigger: Int = 0,
+    onRedoTriggerConsumed: () -> Unit = {},
+    // 重做可用态上报：MainApp 顶部重做按钮据此亮起/变灰（视觉与撤销/保存按钮一致）
+    onCanRedoChange: ((Boolean) -> Unit)? = null
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -291,6 +301,9 @@ fun EditorScreen(
     var text by remember(filePath) { mutableStateOf("") }
     // 编辑器实际最新文本（onTextChange 同步维护），保存时直读避免跨线程 runBlocking
     var latestEditorText by remember(filePath) { mutableStateOf("") }
+    // 「上次保存 / 加载完成时」的编辑器内容快照：撤销 / 重做落定后与它比对，内容一致即视为「无更改」
+    // → 熄灭保存按钮、返回时不再追问保存。sora 内核不提供"当前内容是否已保存"的标记，只能项目侧自查。
+    var savedSnapshot by remember(filePath) { mutableStateOf("") }
     var englishText by remember(filePath) { mutableStateOf("") }
     var chineseText by remember(filePath) { mutableStateOf("") }
     var showChinese by remember(filePath) { mutableStateOf(true) }
@@ -466,6 +479,7 @@ fun EditorScreen(
         isEnglish = isEnglish,
         showChinese = showChinese,
         isModified = isModified,
+        savedSnapshot = savedSnapshot,
         litLines = litLines,
         lineOriginalTexts = lineOriginalTexts,
         // 优先用实时同步的视图状态（View 销毁后仍有效）；未就绪时回退到现场读 View
@@ -503,6 +517,21 @@ fun EditorScreen(
             if (fabExpanded) fabExpanded = false
             showSearch = true
             onSearchTriggerConsumed()
+        }
+    }
+    // 顶部全局菜单栏「撤销」按钮触发：执行一次撤销后立即消费触发值，
+    // 避免切换文件重建 EditorScreen 时以非 0 触发值重复撤销。
+    LaunchedEffect(undoTrigger) {
+        if (undoTrigger > 0) {
+            editorRef?.undo()
+            onUndoTriggerConsumed()
+        }
+    }
+    // 顶部全局菜单栏「重做」按钮触发：执行一次重做后立即消费触发值，理由同撤销。
+    LaunchedEffect(redoTrigger) {
+        if (redoTrigger > 0) {
+            editorRef?.redo()
+            onRedoTriggerConsumed()
         }
     }
     // 从搜索/近期修改跳转：内容加载完成后定位到目标行，若带列范围则选中匹配区域
@@ -676,6 +705,9 @@ fun EditorScreen(
                         // 若写盘期间用户又编辑过，保留 isModified，避免误清导致新改动丢失
                         val stillUnchanged = (latestEditorText.ifEmpty { text }) == currentText
                         if (stillUnchanged) isModified = false
+                        // 刚落盘的编辑器内容成为新的「已保存基线」（注意用编辑器形态的 currentText，
+                        // 而非写盘用的反向翻译结果）—— 撤销/重做回到这里即视为无更改
+                        savedSnapshot = currentText
                     } else {
                         Log.w(TAG, "[$caller] filePath changed during save: expected=$targetPath actual=$filePath")
                     }
@@ -825,6 +857,8 @@ fun EditorScreen(
             isEnglish = workspaceEntry.isEnglish
             showChinese = workspaceEntry.showChinese
             isModified = workspaceEntry.isModified
+            // 基线随缓存一起还原：跨页面 / 切文件回来后，撤销回到原样仍能正确熄灭未保存标记
+            savedSnapshot = workspaceEntry.savedSnapshot
             litLines = workspaceEntry.litLines
             lineOriginalTexts = workspaceEntry.lineOriginalTexts
             text = workspaceEntry.displayText
@@ -920,6 +954,9 @@ fun EditorScreen(
             resetTextTick++
             resetTextRequest = text to resetTextTick
         }
+        // 从盘加载完成（含加载失败）：当前内容即为新的「已保存基线」，
+        // 此后撤销 / 重做回到这个内容就视为无更改
+        savedSnapshot = text
         contentLoaded = true
         loading = false
     }
@@ -1062,21 +1099,22 @@ fun EditorScreen(
     // 非 edge-to-edge + adjustResize：系统在键盘弹出时顶高窗口即缩小编辑器，不加 imePadding（避免双重削减），
     // sora 感知编辑器尺寸变化自动校正光标，此为本仓库验证过的流畅方案。
     Box(Modifier.fillMaxSize().background(Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark)))) {
-        // Tab bar（仅前台实例显示）：浮层叠加在编辑器上方，位于全局菜单栏（44dp）之下，
+        // Tab bar（仅前台实例显示）：浮层叠加在编辑器上方，位于全局菜单栏（40dp）之下，
         // 随 topFold 上滑隐藏；不占布局空间，编辑器始终全屏、滚动完全不受折叠影响。
+        // ⚠️ 这里的 40dp（菜单栏）与 60dp（=40 菜单栏 + 20 tab 栏）跟 MainApp 的菜单栏浮层高度联动，改一处必须改另一处。
         if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
             Box(
                 Modifier
                     .zIndex(1f)
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .offset { IntOffset(0, (44.dp - 66.dp * topFold).roundToPx()) }
+                    .offset { IntOffset(0, (40.dp - 60.dp * topFold).roundToPx()) }
                     .clipToBounds()
             ) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(22.dp)
+                    .height(20.dp)
                     .alpha(1 - topFold)
                     // tab 栏始终固定深色（不跟随主题切换）：半透明会叠加编辑器背景导致颜色不定（如浅背景+深主题时发灰）
                     .background(DarkSurface),
@@ -1254,7 +1292,7 @@ fun EditorScreen(
             Modifier
                 .fillMaxSize()
                 .padding(
-                    top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 66.dp else 44.dp) * (1 - topFold),
+                    top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 60.dp else 40.dp) * (1 - topFold),
                     bottom = searchBarBottomPad
                 )
         ) {
@@ -1265,8 +1303,15 @@ fun EditorScreen(
                         onTextChange = {
                             text = it
                             latestEditorText = it
-                            isModified = true
+                            // 未保存标记：默认置位；仅当长度与「已保存基线」相同时（才可能是"改回了原样"）
+                            // 才做一次内容比对 —— 长度不同直接早退，打字热路径无额外 O(n) 开销
+                            isModified = if (it.length == savedSnapshot.length) it != savedSnapshot else true
                             onTextChange?.invoke(it)
+                        },
+                        // 撤销/重做落定后重新判定：内容与「上次保存 / 加载时的基线」完全一致即视为无更改
+                        // （反向亦然：重做回到修改态会重新点亮）—— 这就是"全撤完 = 没改动"的判定
+                        onUndoRedoApplied = { current ->
+                            isModified = current != savedSnapshot
                         },
                         modifier = Modifier.fillMaxSize(),
                         fontSize = fontSizeState,
@@ -1289,8 +1334,6 @@ fun EditorScreen(
                         resetTextRequest = resetTextRequest,
                         restoreViewStateRequest = pendingRestoreViewState?.let { it to resetTextTick },
                         onRestoreViewStateConsumed = { pendingRestoreViewState = null },
-                        canUndo = canUndo,
-                        canRedo = canRedo,
                         showBottomToolbar = editingBarShown,
                         onScrollDirectionChanged = onTopBarsScroll,
                         blocklistEnabled = SettingsManager.translationBlockEnabled && SettingsManager.devLightbulbEnabled,
@@ -1305,6 +1348,9 @@ fun EditorScreen(
                         onCanUndoRedoChange = { undo, redo ->
                             canUndo = undo
                             canRedo = redo
+                            // 上报给宿主的顶部菜单栏按钮：不可撤销/重做时同步变灰
+                            onCanUndoChange?.invoke(undo)
+                            onCanRedoChange?.invoke(redo)
                         },
                         onLitLinesChange = { litLines = it },
                         onBracketIssues = { bracketIssues = it },
@@ -1338,15 +1384,13 @@ fun EditorScreen(
                                     editingSymbolValue = TextFieldValue("")
                                     showSymbolEditor = true
                                 }
+                                // 可用态统一交给 SoraCodeEditor 的变更回调上报（那里对撤销/重做做了延后一帧读取），
+                                // 这里紧跟着 undo()/redo() 立即读会拿到 sora 移动栈指针之前的旧值。
                                 EditorToolbarAction.UNDO -> safeEditorOp { editor ->
                                     editor.undo()
-                                    canUndo = editor.canUndo()
-                                    canRedo = editor.canRedo()
                                 }
                                 EditorToolbarAction.REDO -> safeEditorOp { editor ->
                                     editor.redo()
-                                    canUndo = editor.canUndo()
-                                    canRedo = editor.canRedo()
                                 }
                                 EditorToolbarAction.HINT -> {
                                     editorRef?.let { ed ->

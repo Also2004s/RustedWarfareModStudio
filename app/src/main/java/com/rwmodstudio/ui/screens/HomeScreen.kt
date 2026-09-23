@@ -1845,8 +1845,20 @@ private fun resolveThumbnailFile(dir: File): File? {
     } catch (_: Exception) { null }
 }
 
+/**
+ * 读取并规整 mod-info 的 description，专供首页卡片显示（只渲染一行）。
+ *
+ * 先把字面 `\n` 还原成真换行，再**跳过前面所有空行**（含只含空白的行），直到第一个有内容的行：
+ * 描述若以换行 / 字面 `\n` 开头，第一行是空的，首页就会显示成"没有内容"。
+ * 其余行结构与内容保持原样，不改变"多行只显示第一行"的既有语义。
+ */
 private fun readModInfoDescription(dir: File): String? =
-    readModInfoValue(dir, "description")?.replace("\\n", "\n")
+    readModInfoValue(dir, "description")
+        ?.replace("\\n", "\n")
+        ?.lines()
+        ?.dropWhile { it.isBlank() }
+        ?.joinToString("\n")
+        ?.takeIf { it.isNotBlank() }
 
 private fun readModInfoTitle(dir: File): String? = readModInfoValue(dir, "title")
 

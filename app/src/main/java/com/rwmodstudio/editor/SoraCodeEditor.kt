@@ -14,6 +14,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -26,6 +27,8 @@ import com.rwmodstudio.core.translation.BehaviorVerifier
 import com.rwmodstudio.feature.completion.CompletionProvider
 import com.rwmodstudio.feature.completion.multilineValueOwnerKey
 import com.rwmodstudio.feature.completion.value.topLevelEq
+import com.rwmodstudio.ui.theme.DarkOnBg
+import com.rwmodstudio.ui.theme.LightOnBg
 import com.rwmodstudio.ui.theme.editorTypeface
 import io.github.rosemoe.sora.event.ClickEvent
 import io.github.rosemoe.sora.event.ContentChangeEvent
@@ -124,6 +127,10 @@ data class EditorWorkspaceEntry(
     val isEnglish: Boolean = false,
     val showChinese: Boolean = true,
     val isModified: Boolean = false,
+    // 「上次保存/加载时」的编辑器内容快照（编辑器形态，未做反向翻译）：
+    // 撤销/重做落定后与它比对，一致即视为「无更改」。必须随缓存一起带走 —— 否则切文件/跨页面
+    // 回来后，撤销回原样也无法熄灭未保存标记（sora 本身不提供"是否已保存"的标记）
+    val savedSnapshot: String = "",
     val litLines: Set<Int> = emptySet(),
     val lineOriginalTexts: Map<Int, String> = emptyMap(),
     val viewState: EditorViewState? = null
@@ -191,8 +198,6 @@ fun SoraCodeEditor(
     // 仅当「文件级整篇替换」（tab 切换/重新加载）时携带上次保存的视图状态，恢复光标与视角；中英切换等不触发。
     restoreViewStateRequest: Pair<EditorViewState, Int>? = null,
     onRestoreViewStateConsumed: () -> Unit = {},
-    canUndo: Boolean = false,
-    canRedo: Boolean = false,
     showBottomToolbar: Boolean = true,
     // 滚动方向上报：手指上滑(内容下滚)=1 / 下滑(内容上滚)=-1，方向反转时触发一次，供宿主联动顶部栏显隐
     onScrollDirectionChanged: ((Int) -> Unit)? = null,
@@ -207,6 +212,9 @@ fun SoraCodeEditor(
     onViewStateChanged: ((EditorViewState) -> Unit)? = null,
     onSearchResultUpdate: ((count: Int, currentIndex: Int) -> Unit)? = null,
     onCanUndoRedoChange: ((canUndo: Boolean, canRedo: Boolean) -> Unit)? = null,
+    // 撤销/重做落定后上报最新文本（已延后一帧，此时可安全读取 sora 状态）：
+    // 宿主据此判断「是否已回到上次保存/加载时的内容」，从而熄灭未保存标记
+    onUndoRedoApplied: ((text: String) -> Unit)? = null,
     onLitLinesChange: ((Set<Int>) -> Unit)? = null,
     // 括号诊断问题列表回调（主线程，清空时回调空列表）：供宿主显示角标/跳转
     onBracketIssues: ((List<BracketIssue>) -> Unit)? = null,
@@ -540,7 +548,10 @@ fun SoraCodeEditor(
     // rainbowSettingsTick 用于在彩虹括号参数变化时触发重新应用主题
     LaunchedEffect(isDarkTheme, highlightTheme, bgColor, darkTokenColors, rainbowSettingsTick, themeRefreshTick) {
         val resolvedBg = resolveEditorBackground(bgColor, isDarkTheme)
-        val barBg = themeBackgroundColor(isDarkTheme)
+        // 底部快捷栏配色跟随 App 深浅主题：底色 = 主题背景色，图标/文字 = 主题反色，
+        // 与底部「方块+」按钮、横栏圆按钮同源。
+        val barBg = themeBarBackgroundColor(isDarkTheme)
+        val barFg = themeBarContentColor(isDarkTheme)
         editorRef.value?.let { editor ->
             applyEditorTheme(editor, isDarkTheme, highlightTheme, bgColor, darkTokenColors, resolvedBg)
             // 主题变化可能改变节名高光/电池底色，重新应用行样式
@@ -561,30 +572,22 @@ fun SoraCodeEditor(
                 scroll.setBackgroundColor(barBg)
                 scroll.postInvalidate()
             }
-            bar.findViewWithTag<ImageButton>("paste")
-                ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-            bar.findViewWithTag<ImageButton>("palette_quick")
-                ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-            bar.findViewWithTag<ImageButton>(EditorToolbarAction.EDIT_SYMBOLS.name)
-                ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-            bar.findViewWithTag<ImageButton>(EditorToolbarAction.REDO.name)
-                ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-            val color = if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            bar.findViewWithTag<ImageButton>("paste")?.setColorFilter(barFg)
+            bar.findViewWithTag<ImageButton>("palette_quick")?.setColorFilter(barFg)
+            bar.findViewWithTag<ImageButton>(EditorToolbarAction.EDIT_SYMBOLS.name)?.setColorFilter(barFg)
             for (i in 0 until bar.childCount) {
-                (bar.getChildAt(i) as? android.widget.TextView)?.setTextColor(color)
+                (bar.getChildAt(i) as? android.widget.TextView)?.setTextColor(barFg)
             }
             bar.postInvalidate()
         }
         toolbarRef.value?.let { toolbar ->
-            val color = if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-            toolbar.findViewWithTag<android.widget.Button>(EditorToolbarAction.AT_REFERENCE.name)?.setTextColor(color)
+            toolbar.findViewWithTag<android.widget.Button>(EditorToolbarAction.AT_REFERENCE.name)?.setTextColor(barFg)
             listOf(
-                EditorToolbarAction.UNDO,
                 EditorToolbarAction.HINT,
                 EditorToolbarAction.REFERENCE,
                 EditorToolbarAction.MORE
             ).forEach { action ->
-                toolbar.findViewWithTag<ImageButton>(action.name)?.setColorFilter(color)
+                toolbar.findViewWithTag<ImageButton>(action.name)?.setColorFilter(barFg)
             }
             toolbar.postInvalidate()
         }
@@ -593,13 +596,6 @@ fun SoraCodeEditor(
     // 底部栏显隐
     LaunchedEffect(showBottomToolbar) {
         bottomBarRef.value?.visibility = if (showBottomToolbar) android.view.View.VISIBLE else android.view.View.GONE
-    }
-
-    // 撤销/重做按钮状态变化时刷新工具栏图标
-    LaunchedEffect(canUndo, canRedo) {
-        toolbarRef.value?.let { toolbar ->
-            updateToolbarIcons(toolbar, symbolBarRef.value, canUndo, canRedo)
-        }
     }
 
     // 自定义符号栏
@@ -751,7 +747,8 @@ fun SoraCodeEditor(
         factory = { ctx ->
             SoraEditorInitializer.init(ctx)
 
-            val barBg = themeBackgroundColor(isDarkTheme)
+            val barBg = themeBarBackgroundColor(isDarkTheme)
+            val barFg = themeBarContentColor(isDarkTheme)
             val container = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
             }
@@ -949,13 +946,34 @@ fun SoraCodeEditor(
                         // 外部 setText — 静默刷新缓存
                         cachedText = event.editor.text.toString()
                     }
-                    val canUndoNow = event.editor.canUndo()
-                    val canRedoNow = event.editor.canRedo()
-                    // 状态去重：仅在变化时通知宿主，避免每次按键触发 Compose 重组
-                    if (canUndoNow != lastCanUndo || canRedoNow != lastCanRedo) {
-                        lastCanUndo = canUndoNow
-                        lastCanRedo = canRedoNow
-                        onCanUndoRedoChange?.invoke(canUndoNow, canRedoNow)
+                    // 撤销/重做时，sora 的 UndoManager 是「先应用内容变更（即触发本事件）、后移动栈指针」
+                    // （见其 undo()：action.undo(content) → stackPointer--），所以在这里直接读
+                    // canUndo/canRedo 拿到的是【变更前】的旧值 —— 现象就是「一路撤到底按钮仍亮着，
+                    // 点一次重做反而变灰」。这一支延后一帧再读真实状态。
+                    // 普通输入（含外部 setText）的栈指针与内容同步更新，可立即读。
+                    if (event.isCausedByUndoManager) {
+                        val ed = event.editor
+                        ed.post {
+                            val u = ed.canUndo()
+                            val r = ed.canRedo()
+                            if (u != lastCanUndo || r != lastCanRedo) {
+                                lastCanUndo = u
+                                lastCanRedo = r
+                                onCanUndoRedoChange?.invoke(u, r)
+                            }
+                            // 撤销/重做落定后同步文本：宿主据此判断内容是否已回到上次保存/加载时的样子，
+                            // 从而熄灭"未保存"标记（全撤完 = 无更改）
+                            onUndoRedoApplied?.invoke(cachedText)
+                        }
+                    } else {
+                        val canUndoNow = event.editor.canUndo()
+                        val canRedoNow = event.editor.canRedo()
+                        // 状态去重：仅在变化时通知宿主，避免每次按键触发 Compose 重组
+                        if (canUndoNow != lastCanUndo || canRedoNow != lastCanRedo) {
+                            lastCanUndo = canUndoNow
+                            lastCanRedo = canRedoNow
+                            onCanUndoRedoChange?.invoke(canUndoNow, canRedoNow)
+                        }
                     }
                     scheduleLineStyleRefresh(event.editor)
                 }
@@ -1101,12 +1119,14 @@ fun SoraCodeEditor(
             }
 
             val density = ctx.resources.displayMetrics.density
-            val barHeight = (42 * density).toInt()
+            // 底部快捷栏高度：图标为 24dp 矢量、实际显示尺寸受按钮宽度限制（FIT_CENTER/CENTER_INSIDE），
+            // 因此压缩栏高只是吃掉上下留白，图标视觉大小不变（原 42dp 偏高，上下各有明显空隙）
+            val barHeight = (34 * density).toInt()
 
             val editButton = android.widget.ImageButton(ctx).apply {
                 tag = EditorToolbarAction.EDIT_SYMBOLS.name
                 setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_edit))
-                setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
+                setColorFilter(barFg)
                 resolveRipple(ctx)?.let { background = it }
                 scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
@@ -1116,7 +1136,7 @@ fun SoraCodeEditor(
             val pasteButton = android.widget.ImageButton(ctx).apply {
                 tag = "paste"
                 setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_paste))
-                setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
+                setColorFilter(barFg)
                 resolveRipple(ctx)?.let { background = it }
                 scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
@@ -1129,30 +1149,17 @@ fun SoraCodeEditor(
             val paletteQuickButton = android.widget.ImageButton(ctx).apply {
                 tag = "palette_quick"
                 setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_palette))
-                setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
+                setColorFilter(barFg)
                 resolveRipple(ctx)?.let { background = it }
                 scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
                 setOnClickListener { onToolbarAction?.invoke(EditorToolbarAction.COLOR_PICKER) }
             }
 
-            // 符号栏最左侧：重做按钮（从功能栏移入，方便拇指点击）
-            val redoButton = android.widget.ImageButton(ctx).apply {
-                tag = EditorToolbarAction.REDO.name
-                setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_redo))
-                setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-                resolveRipple(ctx)?.let { background = it }
-                scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
-                setOnClickListener { onToolbarAction?.invoke(EditorToolbarAction.REDO) }
-            }
-
             val inner = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setBackgroundColor(barBg)
-                // 重做按钮位于符号栏最左侧
-                addView(redoButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
                 addView(pasteButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
                 // 调色盘快捷入口（位于粘贴按钮右侧 = 左侧第二格），不被 applySymbols 移除
                 addView(paletteQuickButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
@@ -1170,22 +1177,25 @@ fun SoraCodeEditor(
 
             val toolbar = createToolbar(ctx, onToolbarAction, isDarkTheme).apply {
                 toolbarRef.value = this
-                updateToolbarIcons(this, symbolBarRef.value, canUndo, canRedo)
                 setBackgroundColor(barBg)
             }
 
-            // 底部栏：功能栏 25% + 符号栏 75%（节名显示已移至顶部 tab 栏，不放底部）
+            // 底部栏：功能栏宽度按按钮数量自适应，符号栏占剩余空间（节名显示已移至顶部 tab 栏，不放底部）
+            // 基准：原设计 3 个按钮合计占 25%，故单按钮占比恒为 0.25/3 —— 以后增删按钮自动伸缩，
+            // 不会再出现「按钮变少、功能栏仍占满 25%」的空白（撤销移出后 2 按钮 = 25% × 2/3 ≈ 16.7%）。
+            val perButtonWeight = 0.25f / 3f
+            val toolbarWeight = perButtonWeight * toolbar.childCount
             val bottomBar = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 visibility = if (showBottomToolbar) android.view.View.VISIBLE else android.view.View.GONE
                 setBackgroundColor(barBg)
                 addView(
                     toolbar,
-                    LinearLayout.LayoutParams(0, barHeight, 0.25f)
+                    LinearLayout.LayoutParams(0, barHeight, toolbarWeight)
                 )
                 addView(
                     symbolPanel,
-                    LinearLayout.LayoutParams(0, barHeight, 0.75f)
+                    LinearLayout.LayoutParams(0, barHeight, 1f - toolbarWeight)
                 )
                 bottomBarRef.value = this
             }
@@ -1208,32 +1218,26 @@ fun SoraCodeEditor(
         },
         modifier = modifier,
         update = { _ ->
-            // 兜底：每次重构图/视图重建后都同步一次底部栏背景，使用固定主题色保证稳定。
-            val barBg = themeBackgroundColor(isDarkTheme)
+            // 每次重构图/视图重建后同步一次底部栏配色（主题背景色底 + 反色图标/文字）
+            val barBg = themeBarBackgroundColor(isDarkTheme)
+            val barFg = themeBarContentColor(isDarkTheme)
             bottomBarRef.value?.setBackgroundColor(barBg)
             toolbarRef.value?.setBackgroundColor(barBg)
             symbolBarRef.value?.let { bar ->
                 bar.setBackgroundColor(barBg)
                 (bar.parent as? android.widget.HorizontalScrollView)?.setBackgroundColor(barBg)
-                bar.findViewWithTag<ImageButton>("paste")
-                    ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-                bar.findViewWithTag<ImageButton>("palette_quick")
-                    ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-                bar.findViewWithTag<ImageButton>(EditorToolbarAction.EDIT_SYMBOLS.name)
-                    ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
-                bar.findViewWithTag<ImageButton>(EditorToolbarAction.REDO.name)
-                    ?.setColorFilter(if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
+                bar.findViewWithTag<ImageButton>("paste")?.setColorFilter(barFg)
+                bar.findViewWithTag<ImageButton>("palette_quick")?.setColorFilter(barFg)
+                bar.findViewWithTag<ImageButton>(EditorToolbarAction.EDIT_SYMBOLS.name)?.setColorFilter(barFg)
             }
             toolbarRef.value?.let { toolbar ->
-                val color = if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-                toolbar.findViewWithTag<android.widget.Button>(EditorToolbarAction.AT_REFERENCE.name)?.setTextColor(color)
+                toolbar.findViewWithTag<android.widget.Button>(EditorToolbarAction.AT_REFERENCE.name)?.setTextColor(barFg)
                 listOf(
-                    EditorToolbarAction.UNDO,
                     EditorToolbarAction.HINT,
                     EditorToolbarAction.REFERENCE,
                     EditorToolbarAction.MORE
                 ).forEach { action ->
-                    toolbar.findViewWithTag<ImageButton>(action.name)?.setColorFilter(color)
+                    toolbar.findViewWithTag<ImageButton>(action.name)?.setColorFilter(barFg)
                 }
             }
         },
@@ -1356,6 +1360,20 @@ internal fun themeBackgroundColor(isDarkTheme: Boolean): Int {
 }
 
 /**
+ * 底部快捷栏底色 = 主题背景色（与主题里的 `RustedBackground` 同值：深 #1E1E1E / 浅 #F0F0F0），
+ * 与底部「方块+」按钮及横栏圆按钮完全同色，跟随 App 深浅主题切换。
+ * 不用表面色 `#FFFFFF`：浅色主题下纯白比主题底色更刺眼。
+ */
+internal fun themeBarBackgroundColor(isDarkTheme: Boolean): Int = themeBackgroundColor(isDarkTheme)
+
+/**
+ * 底部快捷栏前景色（图标/文字）= 主题反色（与主题里的 `RustedOnBackground` 同值），
+ * 与「方块+」按钮的图标色同源。
+ */
+internal fun themeBarContentColor(isDarkTheme: Boolean): Int =
+    (if (isDarkTheme) DarkOnBg else LightOnBg).toArgb()
+
+/**
  * 节名行高光底色：蓝调半透明覆盖，依据编辑器背景明暗自适应。
  * 深底用亮蓝叠加，浅底用深蓝叠加，确保两种主题下都清晰可辨。
  */
@@ -1372,19 +1390,6 @@ internal fun sectionHighlightResolvedColor(resolvedBg: Int, custom: String): Int
     return parsed ?: sectionHighlightColor(resolvedBg)
 }
 
-private fun updateToolbarIcons(toolbar: LinearLayout, symbolBar: LinearLayout?, canUndo: Boolean, canRedo: Boolean) {
-    val undo = toolbar.findViewWithTag<ImageButton>(EditorToolbarAction.UNDO.name)
-    // 重做按钮已移至符号栏最左侧，先从符号栏查找，找不到再回退工具栏
-    val redo = symbolBar?.findViewWithTag<ImageButton>(EditorToolbarAction.REDO.name)
-        ?: toolbar.findViewWithTag<ImageButton>(EditorToolbarAction.REDO.name)
-    val alphaUndo = if (canUndo) 1.0f else 0.3f
-    val alphaRedo = if (canRedo) 1.0f else 0.3f
-    undo?.alpha = alphaUndo
-    undo?.isEnabled = canUndo
-    redo?.alpha = alphaRedo
-    redo?.isEnabled = canRedo
-}
-
 private fun createToolbar(
     ctx: Context,
     onToolbarAction: ((EditorToolbarAction) -> Unit)?,
@@ -1397,11 +1402,12 @@ private fun createToolbar(
 
     val ripple = resolveRipple(ctx)
 
-    val iconColor = if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+    // 功能栏图标色跟随主题反色（与底部「方块+」同源）
+    val iconColor = themeBarContentColor(isDarkTheme)
+    // 撤销已移至顶部全局菜单栏（书签按钮左侧），底部功能栏只保留引用与提示
     val items = listOf(
         EditorToolbarAction.REFERENCE to R.drawable.ic_reference,
-        EditorToolbarAction.HINT to R.drawable.ic_hint,
-        EditorToolbarAction.UNDO to R.drawable.ic_undo
+        EditorToolbarAction.HINT to R.drawable.ic_hint
     )
     val density = ctx.resources.displayMetrics.density
     val hPadding = (4 * density).toInt()
@@ -1507,7 +1513,7 @@ private fun applySymbols(
     val density = bar.resources.displayMetrics.density
     val hPadding = (10 * density).toInt()
     val vPadding = (4 * density).toInt()
-    val textColor = if (isDarkTheme) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+    val textColor = themeBarContentColor(isDarkTheme)
     var index = insertIndex
     for ((label, value) in list) {
         val btn = android.widget.Button(bar.context).apply {

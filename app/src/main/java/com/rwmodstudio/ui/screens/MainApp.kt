@@ -290,8 +290,13 @@ fun MainApp() {
     // 持有当前编辑器文本，供外部 intent 打开文件时判断是否有未保存修改；用普通 var 避免每次输入都触发重组
     val editorTextHolder = remember { object { var text = "" } }
     var editorSaveTrigger by remember { mutableIntStateOf(0) }
-    // 顶部菜单栏「搜索」「保存」触发状态
+    // 顶部菜单栏「搜索」「保存」「撤销」触发状态
     var editorSearchTrigger by remember { mutableIntStateOf(0) }
+    // 顶部菜单栏「撤销」「重做」：触发值 + 可用态（由 EditorScreen 上报，不可用时按钮变灰）
+    var editorUndoTrigger by remember { mutableIntStateOf(0) }
+    var editorCanUndo by remember { mutableStateOf(false) }
+    var editorRedoTrigger by remember { mutableIntStateOf(0) }
+    var editorCanRedo by remember { mutableStateOf(false) }
     // 存活实例的实时未保存状态（按路径）：每个 EditorScreen 的 isModified 变化都会上报到这里，
     // 供 tab 栏星号与保存按钮统一判断「哪个文件未保存」。editorModified 由此派生（当前前台文件是否未保存）。
     var liveModifiedPaths by remember { mutableStateOf(setOf<String>()) }
@@ -803,7 +808,7 @@ fun MainApp() {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .height(40.dp)
                         .background(containerColor)
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1195,23 +1200,33 @@ fun MainApp() {
                                             },
                                             onSearchTriggerConsumed = { editorSearchTrigger = 0 },
                                             backRequest = if (path == activePath) bookmarkBackRequest else 0,
-                                                        onBackRequestConsumed = { bookmarkBackRequest = 0 }
+                                                        onBackRequestConsumed = { bookmarkBackRequest = 0 },
+                                            // 顶部全局菜单栏「撤销」：只对前台实例生效，触发后立即清零；
+                                            // 可用态由当前实例上报（避免后台实例覆盖前台按钮状态）
+                                            undoTrigger = if (path == activePath) editorUndoTrigger else 0,
+                                                        onUndoTriggerConsumed = { editorUndoTrigger = 0 },
+                                                        onCanUndoChange = { if (path == activePath) editorCanUndo = it },
+                                            // 顶部全局菜单栏「重做」：同样只对前台实例生效
+                                            redoTrigger = if (path == activePath) editorRedoTrigger else 0,
+                                                        onRedoTriggerConsumed = { editorRedoTrigger = 0 },
+                                                        onCanRedoChange = { if (path == activePath) editorCanRedo = it }
                                         )
                                     }
                                 }
-                            // 编辑器页全局菜单栏浮层：叠加在编辑器上方，随 topFold 上滑隐藏（44dp），
+                            // 编辑器页全局菜单栏浮层：叠加在编辑器上方，随 topFold 上滑隐藏（40dp），
                             // 不占布局空间，编辑器始终全屏、滚动完全不受折叠影响
+                            // ⚠️ 高度 40dp 与 EditorScreen 里 tab 栏偏移量（40.dp - 60.dp * topFold）联动，改一处必须改另一处
                             Box(
                                 Modifier
                                     .align(Alignment.TopStart)
                                     .fillMaxWidth()
-                                    .offset { IntOffset(0, (-44.dp * topFold).roundToPx()) }
+                                    .offset { IntOffset(0, (-40.dp * topFold).roundToPx()) }
                                     .clipToBounds()
                             ) {
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
-                                        .height(44.dp)
+                                        .height(40.dp)
                                         .alpha(1 - topFold)
                                         .background(Color(0xFF1E1E1E))
                                         .padding(horizontal = 4.dp),
@@ -1219,6 +1234,30 @@ fun MainApp() {
                                 ) {
                                     IconButton(onClick = { showBookmarkPanel = !showBookmarkPanel }) { Icon(Icons.Default.Menu, null, tint = Color.White) }
                                     Spacer(Modifier.weight(1f))
+                                    // 撤销：由底部功能栏移至此处（书签左侧）。白色图标，仅在可撤销时亮起，
+                                    // 视觉与保存按钮一致（不可撤销时 0.3 透明度且不可点）
+                                    IconButton(
+                                        onClick = { if (editorCanUndo) editorUndoTrigger++ },
+                                        enabled = editorCanUndo,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Undo, "撤销", Modifier.size(20.dp),
+                                            tint = Color.White.copy(alpha = if (editorCanUndo) 1f else 0.3f)
+                                        )
+                                    }
+                                    // 重做：由底部符号栏移至此处（撤销右侧、书签左侧）。白色图标，
+                                    // 仅在可重做时亮起，视觉与撤销/保存按钮一致
+                                    IconButton(
+                                        onClick = { if (editorCanRedo) editorRedoTrigger++ },
+                                        enabled = editorCanRedo,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Redo, "重做", Modifier.size(20.dp),
+                                            tint = Color.White.copy(alpha = if (editorCanRedo) 1f else 0.3f)
+                                        )
+                                    }
                                     // 钉子：标记/取消标记当前文件为书签
                                     val currentPathMaybe = selectedFile?.second ?: ""
                                     val currentIsBookmarked = (bookmarkTick >= 0) && currentPathMaybe.isNotEmpty() && BookmarkManager.isBookmarked(currentPathMaybe)

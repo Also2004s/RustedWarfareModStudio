@@ -34,8 +34,8 @@ class SmartWrapBreaksTest {
     @Test
     fun plusMinusOnlyBreakBeforeNamedOperand() {
         assertEquals(listOf(1), breaks("A+numberOfUnitsInTeam(x)+1-0.25"))
-        // R5 逗号也是断点：rnd(-2 与 , 2) 之间断，但 -2 本身不断
-        assertEquals(listOf(1, 8), breaks("x+rnd(-2, 2)"))
+        // R5 逗号也是断点，且断在「逗号之后」：rnd(-2, 2) 断在「, 」之后；-2 本身不断
+        assertEquals(listOf(1, 10), breaks("x+rnd(-2, 2)"))
         // 中文标识符操作数（+盟友有…）也能断
         assertEquals(listOf(1), breaks("A+盟友有此单位数量(x)+1"))
         // 后跟 ( 不再断：只保留 B+C 前的 +（问题①：避免 (1+(A+B) 被拆成 *(1 / +(…)
@@ -51,11 +51,11 @@ class SmartWrapBreaksTest {
         assertTrue(11 !in b, "不应在 1+( 的 + 前断行")
     }
 
-    // R5：, 之前断（任意深度，符号行首）
+    // R5：, 之后断（逗号留在上一行末尾；新行从逗号后第一个非空白字符开始，任意深度）
     @Test
-    fun commaBreaksBeforeSymbol() {
-        assertEquals(listOf(1, 4), breaks("A, B, C"))
-        assertEquals(listOf(3), breaks("f(x, y)"))
+    fun commaBreaksAfterSymbol() {
+        assertEquals(listOf(3, 6), breaks("A, B, C"))
+        assertEquals(listOf(5), breaks("f(x, y)"))
     }
 
     // R6：* 之前断（两侧非空白）
@@ -111,15 +111,29 @@ class SmartWrapBreaksTest {
         val fb = SmartWrapBreaks.computeFallbackBreaks(han, 0, han.length).toList()
         assertEquals(listOf(han.indexOf('(')), fb, "在 ( 前断，且不在汉字内部断")
     }
-    // 优先级分组：括号组 > and/or > 运算符号 > 逗号
+    // 优先级分组：括号组 > and/or > 括号外逗号 > 运算符号 > 括号内逗号
     @Test
     fun priorityBreaksGroupedByPriority() {
         val line = "if (A or B) and C+D*E, F"
         val pb = SmartWrapBreaks.computePriorityBreaks(line)
         assertEquals(listOf(3), pb.parenGroups.toList(), "含 or 的括号组")
         assertEquals(listOf(6, 12), pb.andOr.toList(), "or/and")
+        assertEquals(listOf(23), pb.outerCommas.toList(), "括号外逗号在逗号之后，优先于运算符")
         assertEquals(listOf(17, 19), pb.operators.toList(), "+ / *（紧凑运算符号）")
-        assertEquals(listOf(21), pb.commas.toList(), "逗号最低优先级")
+        assertTrue(pb.innerCommas.isEmpty(), "无括号内逗号")
+    }
+    // 括号外逗号（资源名列表分隔）优先于运算符；括号内逗号归最低档，不与运算符抢位置
+    @Test
+    fun outerCommaOutranksOperatorWhileInnerCommaDoesNot() {
+        val pb = SmartWrapBreaks.computePriorityBreaks("A=(x), B=(y+z)")
+        assertEquals(listOf(7), pb.outerCommas.toList(), "括号外逗号之后（跳过逗号后的空格）")
+        assertEquals(listOf(11), pb.operators.toList(), "括号内 + 属运算符档")
+        assertTrue(pb.innerCommas.isEmpty())
+
+        val pb2 = SmartWrapBreaks.computePriorityBreaks("max(a/b, 1)")
+        assertTrue(pb2.outerCommas.isEmpty(), "括号内逗号不进外层档")
+        assertEquals(listOf(5), pb2.operators.toList(), "/ 仍是运算符档")
+        assertEquals(listOf(9), pb2.innerCommas.toList(), "括号内逗号之后")
     }
     // / 加入运算符号：A/(B+C) 在 / 与 + 前断；路径 ROOT:/机制 在 / 前断
     @Test
@@ -136,5 +150,11 @@ class SmartWrapBreaksTest {
         assertEquals(emptyList(), SmartWrapBreaks.computeFallbackBreaks("a.b", 0, 3).toList())
         assertEquals(listOf(1), SmartWrapBreaks.computeDotBreaks("a.b", 0, 3).toList())
     }
-}
 
+    // 兜底断点里的逗号同样走「逗号之后」，且结果保持升序（布局层依赖升序 + 早停）
+    @Test
+    fun fallbackCommaBreaksAfterSymbol() {
+        assertEquals(listOf(2), SmartWrapBreaks.computeFallbackBreaks("A,B", 0, 3).toList())
+        assertEquals(listOf(2, 3), SmartWrapBreaks.computeFallbackBreaks("A, B", 0, 4).toList())
+    }
+}

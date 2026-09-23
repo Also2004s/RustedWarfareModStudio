@@ -277,8 +277,9 @@ public class SmartWordwrapLayout extends WordwrapLayout {
         PriorityBreaks pb = SmartWrapBreaks.INSTANCE.computePriorityBreaks(sequence);
         int[] parenGroups = pb.getParenGroups();
         int[] andOr = pb.getAndOr();
+        int[] outerCommas = pb.getOuterCommas();
         int[] operators = pb.getOperators();
-        int[] commas = pb.getCommas();
+        int[] innerCommas = pb.getInnerCommas();
         var results = new ArrayList<RowRegion>();
         int len = sequence.length();
         // 空行也必须产生一个行区域（sora 原版 breakText 的语义：每行至少一行），
@@ -288,7 +289,7 @@ public class SmartWordwrapLayout extends WordwrapLayout {
             return results;
         }
         int rowStart = 0;
-        int pi = 0, ai = 0, oi = 0, ci = 0;
+        int pi = 0, ai = 0, oci = 0, oi = 0, ici = 0;
         while (rowStart < len) {
             // 字面 \n 是硬断点：本行以它为上界，绝不越过；\n 显示在新行行首。
             int limit = nextBackslashN(sequence, rowStart);
@@ -302,16 +303,19 @@ public class SmartWordwrapLayout extends WordwrapLayout {
                 results.add(makeRegion(line, rowStart, limit, tr, isRtlBased));
                 rowStart = limit;
             } else {
-                // 按优先级选断点：括号组 > and/or > 运算符号(+ - *) > 逗号。
+                // 按优先级选断点：括号组 > and/or > 括号外逗号（资源名列表）> 运算符号(+ - * /) > 括号内逗号。
                 int chosen = farthestFitting(tr, parenGroups, pi, rowStart, limit);
                 if (chosen < 0) {
                     chosen = farthestFitting(tr, andOr, ai, rowStart, limit);
                 }
                 if (chosen < 0) {
+                    chosen = farthestFitting(tr, outerCommas, oci, rowStart, limit);
+                }
+                if (chosen < 0) {
                     chosen = farthestFitting(tr, operators, oi, rowStart, limit);
                 }
                 if (chosen < 0) {
-                    chosen = farthestFitting(tr, commas, ci, rowStart, limit);
+                    chosen = farthestFitting(tr, innerCommas, ici, rowStart, limit);
                 }
                 if (chosen >= 0) {
                     results.add(makeRegion(line, rowStart, chosen, tr, isRtlBased));
@@ -341,8 +345,9 @@ public class SmartWordwrapLayout extends WordwrapLayout {
             }
             while (pi < parenGroups.length && parenGroups[pi] <= rowStart) pi++;
             while (ai < andOr.length && andOr[ai] <= rowStart) ai++;
+            while (oci < outerCommas.length && outerCommas[oci] <= rowStart) oci++;
             while (oi < operators.length && operators[oi] <= rowStart) oi++;
-            while (ci < commas.length && commas[ci] <= rowStart) ci++;
+            while (ici < innerCommas.length && innerCommas[ici] <= rowStart) ici++;
         }
         // 防御：任何行都必须至少一个行区域（与 sora 原版一致）。
         if (results.isEmpty()) {

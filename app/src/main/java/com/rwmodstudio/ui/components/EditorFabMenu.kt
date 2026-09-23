@@ -32,10 +32,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rwmodstudio.ui.theme.RustedBackground
 import com.rwmodstudio.ui.theme.RustedOnBackground
 import com.rwmodstudio.ui.theme.RustedPrimary
 import com.rwmodstudio.ui.theme.RustedSecondary
-import com.rwmodstudio.ui.theme.RustedSurface
 import kotlinx.coroutines.delay
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ fun EditorFabButton(
             .size(50.dp)
             .rotate(rotation),
         shape = RoundedCornerShape(14.dp),
-        color = RustedSurface,
+        color = RustedBackground,
         contentColor = RustedOnBackground,
         shadowElevation = 2.dp
     ) {
@@ -129,7 +129,7 @@ fun EditorFabMenuRow(
         Surface(
             onClick = onLabel,
             shape = RoundedCornerShape(6.dp),
-            color = RustedSurface,
+            color = RustedBackground,
             shadowElevation = 2.dp
         ) {
             Column(
@@ -150,7 +150,7 @@ fun EditorFabMenuRow(
         Surface(
             onClick = onIcon,
             shape = CircleShape,
-            color = RustedSurface,
+            color = RustedBackground,
             contentColor = iconTint,
             shadowElevation = 2.dp
         ) {
@@ -199,7 +199,7 @@ fun EditorFabCheckRow(
         Surface(
             onClick = onToggle,
             shape = RoundedCornerShape(6.dp),
-            color = RustedSurface,
+            color = RustedBackground,
             shadowElevation = 2.dp
         ) {
             Text(
@@ -212,7 +212,7 @@ fun EditorFabCheckRow(
         Surface(
             onClick = onToggle,
             shape = CircleShape,
-            color = RustedSurface,
+            color = RustedBackground,
             shadowElevation = 2.dp
         ) {
             Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
@@ -238,7 +238,7 @@ fun EditorFabSliderRow(
         // 左侧文字标签：仅显示实际数值，不显示汉字说明
         Surface(
             shape = RoundedCornerShape(6.dp),
-            color = RustedSurface,
+            color = RustedBackground,
             shadowElevation = 2.dp
         ) {
             Text(
@@ -255,7 +255,7 @@ fun EditorFabSliderRow(
                 .height(26.dp)
                 .shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
                 .clip(RoundedCornerShape(13.dp))
-                .background(RustedSurface)
+                .background(RustedBackground)
                 .pointerInput(valueRange) {
                     detectDragGestures(
                         onDragStart = { offset ->
@@ -321,7 +321,7 @@ fun RoundIconButton(
         onClick = onClick,
         modifier = modifier.size(42.dp),
         shape = CircleShape,
-        color = if (isActive) RustedSecondary else RustedSurface,
+        color = if (isActive) RustedSecondary else RustedBackground,
         contentColor = if (isActive) RustedSecondary else RustedOnBackground,
         shadowElevation = 2.dp
     ) {
