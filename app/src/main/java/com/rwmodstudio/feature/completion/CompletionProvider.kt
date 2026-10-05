@@ -8,6 +8,7 @@ import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.CompletionShared
+import com.rwmodstudio.core.translation.SectionRequiredProperties
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.feature.completion.value.ProjectSoundCache
 import com.rwmodstudio.feature.completion.value.ValueCompletionAggregator
@@ -29,6 +30,16 @@ internal fun completionMatchLevel(query: String, candidate: String): Int {
         query.length >= 2 && candidate.contains(query, ignoreCase = true) -> 1
         else -> 0
     }
+}
+
+/**
+ * 输入词首个非空白字符是否为英文字母。用于「双语匹配」的语言判定：
+ * - 首个是英文字母 → 按英文名（nameEn）匹配，等价于关闭翻译引擎时的匹配；
+ * - 其余（中文 / 数字 / 下划线 / 符号）→ 按中文名（label / name）匹配，即原有行为。
+ */
+internal fun startsWithEnglishLetter(s: String): Boolean {
+    val c = s.firstOrNull { !it.isWhitespace() } ?: return false
+    return c in 'a'..'z' || c in 'A'..'Z'
 }
 
 /**
@@ -104,6 +115,35 @@ class CompletionProvider(
     var currentFilePath: String = ""
     /** 当前编辑文件所属项目根（由 EditorScreen 设置，与图片/音效缓存刷新路径保持一致） */
     var currentProjectRoot: String = ""
+
+    /**
+     * 手动「代码提示」一次性请求：光标在节内空内容行点击灯泡时，
+     * 只列出该节必备、且当前尚未出现的属性。由 EditorScreen 在触发补全前设置，消费即清。
+     */
+    data class SectionHintRequest(
+        /** EditorScreen 解析出的当前节名（为空时由 [getCompletions] 现场兜底定位）。 */
+        val sectionName: String?,
+        /** 继承链（模板/复制与/@copyFromSection）中同名节已出现的键（已归一化小写）。 */
+        val extraExistingKeys: Set<String>
+    )
+
+    @Volatile
+    var pendingSectionHint: SectionHintRequest? = null
+
+    /**
+     * 供 EditorScreen 手动节内提示使用：解析光标所在节名。
+     * 优先用调用方解析结果，为空时用光标前文本现场兜底定位。
+     */
+    fun resolveCurrentSection(textBeforeCursor: String, injected: String?): String? =
+        injected?.takeIf { it.isNotBlank() } ?: fallbackSectionName(textBeforeCursor)
+
+    /**
+     * 从继承链合并行（[com.rwmodstudio.core.InheritanceResolver.resolve] 的 mergedLines 内容）中，
+     * 取出与 [sectionName] 同名节里已出现的键集合（归一化小写）。
+     * 节名经 [mapSectionName] 归一比对；其余逻辑见 [collectSectionKeysFromMergedLines]。
+     */
+    fun collectSectionKeysFromMerged(lines: List<String>, sectionName: String): Set<String> =
+        collectSectionKeysFromMergedLines(lines, sectionName) { mapSectionName(it) }
 
     private val valueAggregator by lazy {
         ValueCompletionAggregator(context, valueSectionProperties, valueCompletionOptions, translationDict)
@@ -308,6 +348,26 @@ class CompletionProvider(
         sectionCompletionEnabled: Boolean = false
     ): List<CompletionItem> {
         val results = mutableListOf<CompletionItem>()
+
+        // 手动「代码提示」：节内空内容行点击灯泡 → 只列该节必备且尚未出现的属性。
+        // 一次性请求，无论是否命中都消费掉，避免污染后续补全。
+        pendingSectionHint?.let { hint ->
+            pendingSectionHint = null
+            val lineBefore = textBeforeCursor.substringAfterLast('\n')
+            val lineFull = lineBefore + textAfterCursor.takeWhile { it != '\n' }
+            val inBlankSectionLine = lineBefore.trim().isEmpty() && !lineFull.trim().startsWith("[")
+            if (inBlankSectionLine) {
+                val section = resolveCurrentSection(textBeforeCursor, hint.sectionName)
+                if (section != null) {
+                    val existing = existingKeysInSection(textBeforeCursor, textAfterCursor) + hint.extraExistingKeys
+                    Log.d(
+                        "RW_SECTION_COMPL",
+                        "sectionHint section=$section mapped=${mapSectionName(section)} existing=${existing.size} inherited=${hint.extraExistingKeys.size}"
+                    )
+                    return getSectionBodyCompletions(section, sectionFilters, existing, requiredOnly = true).withDetail()
+                }
+            }
+        }
 
         // 提取光标前的字符，遇到换行、空格、括号或指定触发符号则停止，不限制长度
         var end = textBeforeCursor.length
@@ -598,8 +658,12 @@ class CompletionProvider(
         // 前缀命中优先，子串包含兜底（≥2字符），保证「中间命中」也能弹出且前缀项置顶
         // 已被模板路覆盖的模板原文条目要排除，否则「builtFrom_」场景同一键会出现两遍（模板原文 + 留空位形态）
         val coveredTemplates = templateResults.mapNotNull { it.keyTemplate.takeIf { t -> t.isNotEmpty() } }.toSet()
+        // 双语匹配：输入首字符是英文字母 → 用英文名（无英文名时退回 label），否则用 label（原行为不变）
+        val matchInEnglish = startsWithEnglishLetter(wordPrefix)
+        fun matchTarget(item: CompletionItem): String =
+            if (matchInEnglish) item.nameEn.ifBlank { item.label } else item.label
         val customResults = mergedCustom
-            .map { it to completionMatchLevel(wordPrefix, it.label) }
+            .map { it to completionMatchLevel(wordPrefix, matchTarget(it)) }
             .filter { it.second > 0 && (enabledCategories == null || it.first.category.any { c -> c in enabledCategories }) }
             .filter {
                 it.first.name !in coveredTemplates &&
@@ -608,7 +672,7 @@ class CompletionProvider(
             }
             .sortedWith(
                 compareByDescending<Pair<CompletionItem, Int>> { it.second }
-                    .thenBy { it.first.label }
+                    .thenBy { matchTarget(it.first) }
             )
             .map { it.first }
         results.addAll(customResults)
@@ -666,8 +730,15 @@ class CompletionProvider(
         val deduped = dedupeValueByKeyPriority(valueResults, finalResults)
         // 排序：与值补全同名的项按值补全原始顺序置顶（恢复 真/假/if/and/or 靠前）
         val ordered = orderByValueCollision(deduped, valueResults.map { it.label })
+        // 完全匹配置顶：输入词与候选名完全相等（忽略大小写）的项排到最前，可压过值补全（真/假/if/and/or）。
+        // 与代码参考页 / 代码提示弹窗的「完全匹配优先」口径一致；稳定分区，不改变其余项相对顺序。
+        // 去重后同 label 唯一，故不存在「同一个词既是键又是值」的并列情况。
+        val exactFirst = if (wordPrefix.isEmpty()) ordered else {
+            val (exact, rest) = ordered.partition { matchTarget(it).equals(wordPrefix, ignoreCase = true) }
+            exact + rest
+        }
         // 逻辑值入口抑制：值里已有 if/真/假 后不再提示这三个，避免 `if ... if ...` 重复入口
-        val entryFiltered = filterLogicEntryTokens(ordered, suppressEntryTokens)
+        val entryFiltered = filterLogicEntryTokens(exactFirst, suppressEntryTokens)
         // 关键字后不提示语法项（真/假/if/and/or/not/运算符）
         val syntaxFiltered = filterLogicSyntaxItems(entryFiltered, suppressLogicSyntax)
         // 完整值后不提示表达式起始关键字（if/真/假/not）
@@ -696,22 +767,32 @@ class CompletionProvider(
     /**
      * 节补全：返回当前节允许分类下的所有属性，供空行时直接选择。
      * 仅列出当前节尚未出现过的属性名（existingKeys 为当前文件当前节已存在的键集合）。
+     *
+     * @param requiredOnly 为 true 时（手动「代码提示」触发），再按
+     *   [SectionRequiredProperties] 的必备表取交集；该节无必备条目时回退为全量（现有行为）。
      */
     private fun getSectionBodyCompletions(
         activeSection: String,
         sectionFilters: Map<String, Set<String>>,
-        existingKeys: Set<String>
+        existingKeys: Set<String>,
+        requiredOnly: Boolean = false
     ): List<CompletionItem> {
         val mappedSection = mapSectionName(activeSection)
         val enabledCategories = sectionFilters[mappedSection]
+        val requiredKeys = if (requiredOnly) SectionRequiredProperties.requiredKeysFor(mappedSection) else null
         val results = mutableListOf<CompletionItem>()
         val seen = mutableSetOf<String>()
 
         // 节补全只从自定义补全表（native + user）查询
         for (item in mergedCustom) {
-            if (enabledCategories != null && !item.category.any { c -> c in enabledCategories }) continue
+            // 手动「必备属性」提示不再套用用户分类筛选：必备表本身即白名单，
+            // 且部分必备键所属 category 与节名不一致（如 AI 的 ai_isHighPriority 归在「行动」），
+            // 套用筛选会导致该节必备项被整批滤掉、弹窗为空。
+            if (!requiredOnly && enabledCategories != null && !item.category.any { c -> c in enabledCategories }) continue
             // 当前节已出现的属性名不再提示（仅检测当前文件当前节）
             if (existingKeys.isNotEmpty() && itemAppearsInSection(item, existingKeys)) continue
+            // 手动提示：只保留该节必备属性（必备表为空则回退全量）
+            if (requiredKeys != null && !itemMatchesRequiredKeys(item, requiredKeys)) continue
             // 序号模板键：空行时用户尚未输入，占位符留空位 + 光标定位；label 保持模板原文
             val templateSource = listOf(item.name, item.nameEn, item.label)
                 .firstOrNull { KeyTemplate.isTemplateKey(it) }
@@ -725,6 +806,13 @@ class CompletionProvider(
         }
 
         return sortCompletions(results)
+    }
+
+    /** 手动提示用：补全项是否命中该节必备键集合（name/nameEn/label 任一归一化后命中）。 */
+    private fun itemMatchesRequiredKeys(item: CompletionItem, requiredKeys: Set<String>): Boolean {
+        return (item.name.isNotBlank() && normalizeKey(item.name) in requiredKeys) ||
+                (item.nameEn.isNotBlank() && normalizeKey(item.nameEn) in requiredKeys) ||
+                (item.label.isNotBlank() && normalizeKey(item.label) in requiredKeys)
     }
 
     /**
@@ -1140,6 +1228,44 @@ private fun mergeSectionNames(
         result[base] = (result[base] ?: emptySet()) + names
     }
     return result
+}
+
+/**
+ * 从继承链合并行里取出与 [sectionName] 同名节已出现的键集合（归一化小写）。
+ * 按 `[节]` 头切分，节名经 [normalizeSection] 归一比对；键取第一个 `:`/`=` 前的部分，
+ * 跳过注释、指令行与多行值块内容。抽成顶层纯函数便于 JVM 单测。
+ */
+internal fun collectSectionKeysFromMergedLines(
+    lines: List<String>,
+    sectionName: String,
+    normalizeSection: (String) -> String
+): Set<String> {
+    val target = normalizeSection(sectionName)
+    val keys = mutableSetOf<String>()
+    var inTarget = false
+    var inValueBlock = false
+    for (raw in lines) {
+        val t = raw.trim()
+        if (t.startsWith("[") && t.endsWith("]")) {
+            inTarget = normalizeSection(t.removeSurrounding("[", "]").trim()) == target
+            inValueBlock = false
+            continue
+        }
+        if (!inTarget || t.isEmpty()) continue
+        if (inValueBlock) {
+            if (t.startsWith("\"\"\"")) inValueBlock = false
+            continue
+        }
+        if (t.startsWith(";") || t.startsWith("#") || t.startsWith("//")) continue
+        val sepIdx = t.indexOfFirst { it == ':' || it == '=' }
+        if (sepIdx <= 0) continue
+        val key = t.substring(0, sepIdx).trim()
+        if (key.isEmpty() || key.startsWith("@") || key.contains(' ')) continue
+        keys.add(key.lowercase())
+        val rest = t.substring(sepIdx + 1).trim()
+        if (rest.startsWith("\"\"\"") && rest.substring(3).indexOf("\"\"\"") < 0) inValueBlock = true
+    }
+    return keys
 }
 
 /**

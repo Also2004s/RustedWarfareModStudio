@@ -37,6 +37,7 @@ import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.feature.completion.sectionEnToZh
+import com.rwmodstudio.feature.completion.startsWithEnglishLetter
 import com.rwmodstudio.util.atomicWriteText
 
 import com.rwmodstudio.ui.components.CustomCompletionEditorDialog
@@ -284,7 +285,9 @@ fun CustomCompletionsScreen() {
             CompletionFilter.EXTRA -> extraItems
             CompletionFilter.USER -> userItems
         }
-        val displayFiltered = displayList.filter { searchQuery.isEmpty() || it.name.contains(searchQuery, true) }
+        // 双语匹配：搜索词首字符是英文字母 → 按英文名匹配，否则按中文名匹配（原行为不变）
+        val searchInEnglish = startsWithEnglishLetter(searchQuery)
+        val displayFiltered = displayList.filter { searchQuery.isEmpty() || (if (searchInEnglish) it.nameEn.contains(searchQuery, true) else it.name.contains(searchQuery, true)) }
         when {
             isLoading -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = RustedPrimary) }
             displayFiltered.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("无结果", color = RustedOnBackground.copy(alpha=0.4f)) }

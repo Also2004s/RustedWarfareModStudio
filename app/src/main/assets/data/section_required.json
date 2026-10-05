@@ -1,0 +1,8 @@
+{
+  "核心": ["name", "mass", "price", "maxHp", "radius"],
+  "图像": ["image"],
+  "攻击": ["canAttack"],
+  "运动": ["movementType"],
+  "炮塔": ["x", "y"],
+  "腿": ["x", "y"]
+}

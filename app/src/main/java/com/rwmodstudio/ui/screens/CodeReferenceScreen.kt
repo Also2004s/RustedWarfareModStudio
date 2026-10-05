@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.TranslationEngine
+import com.rwmodstudio.feature.completion.startsWithEnglishLetter
 import com.rwmodstudio.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -85,12 +86,14 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
     val userNames by remember(userItems) { derivedStateOf { userItems.map { it.name }.toSet() } }
 
     val q = searchQuery.trim().lowercase()
-    val filteredItems = remember(mergedItems, q) {
+    // 双语匹配：搜索词首字符是英文字母 → 搜英文名字段，否则搜中文名字段（原行为不变）
+    val searchInEnglish = startsWithEnglishLetter(q)
+    val filteredItems = remember(mergedItems, q, searchInEnglish) {
         if (q.isEmpty()) mergedItems
         else {
             // 「完全匹配优先」排序：名称 完全相等(3) > 前缀命中(2) > 子串包含(1) > 仅其它字段命中(0)
             fun namePriority(it: CustomCompletion): Int {
-                val n = it.name.lowercase()
+                val n = (if (searchInEnglish) it.nameEn else it.name).lowercase()
                 return when {
                     n == q -> 3
                     n.startsWith(q) -> 2
@@ -99,11 +102,20 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
                 }
             }
             mergedItems.filter {
-                it.name.lowercase().contains(q) ||
-                it.desc.lowercase().contains(q) ||
-                it.value.lowercase().contains(q) ||
-                it.detail.lowercase().contains(q) ||
-                it.category.any { c -> c.lowercase().contains(q) }
+                if (searchInEnglish) {
+                    it.nameEn.lowercase().contains(q) ||
+                    it.descEn.lowercase().contains(q) ||
+                    it.valueEn.lowercase().contains(q) ||
+                    it.detailEn.lowercase().contains(q) ||
+                    it.exampleEn.lowercase().contains(q) ||
+                    it.category.any { c -> c.lowercase().contains(q) }
+                } else {
+                    it.name.lowercase().contains(q) ||
+                    it.desc.lowercase().contains(q) ||
+                    it.value.lowercase().contains(q) ||
+                    it.detail.lowercase().contains(q) ||
+                    it.category.any { c -> c.lowercase().contains(q) }
+                }
             }.sortedByDescending { namePriority(it) }
         }
     }

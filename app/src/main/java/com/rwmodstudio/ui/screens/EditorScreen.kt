@@ -67,6 +67,7 @@ import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.SearchTranslationCache
+import com.rwmodstudio.core.translation.SectionRequiredProperties
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.util.atomicWriteText
@@ -89,6 +90,7 @@ import com.rwmodstudio.ui.components.*
 import com.rwmodstudio.ui.theme.*
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.EditorSearcher
+import io.github.rosemoe.sora.widget.component.EditorAutoCompletion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -244,6 +246,8 @@ fun EditorScreen(
         }
         // 三表始终加载：值补全与行尾灯泡的类型判断都依赖，不能受补全开关影响
         val (userItems, nativeItems, extraItems) = withContext(Dispatchers.IO) {
+            // 节内必备属性表（手动「代码提示」用）：后台预加载，避免首次点击时主线程读 assets
+            SectionRequiredProperties.load(ctx)
             Triple(loadUserItems(), loadNativeItemsVerified(engine), loadExtraItemsVerified(ctx, engine))
         }
         rawUserCompletions = userItems
@@ -1393,24 +1397,59 @@ fun EditorScreen(
                                     editor.redo()
                                 }
                                 EditorToolbarAction.HINT -> {
-                                    editorRef?.let { ed ->
-                                        val leftLine = ed.cursor.leftLine
-                                        val leftCol = ed.cursor.leftColumn
-                                        val lineStr = ed.text.getLineString(leftLine)
-                                        if (lineStr.isNotEmpty() && leftCol > 0) {
-                                            val before = lineStr.substring(0, leftCol.coerceAtMost(lineStr.length))
-                                            var end = before.length
-                                            while (end > 0) {
-                                                val ch = before[end - 1]
-                                                if (!ch.isLetterOrDigit() && ch != '_') break
-                                                end--
+                                    // 节内空内容行：不打开属性搜索弹窗，改为弹出"该节必备但尚未出现"的补全列表
+                                    val ed = editorRef
+                                    val hintLine = ed?.cursor?.leftLine ?: -1
+                                    val hintLineStr = if (ed != null && hintLine >= 0) ed.text.getLineString(hintLine) else ""
+                                    val blankInSection = ed != null && cp != null && hintLine >= 0 &&
+                                            hintLineStr.trim().isEmpty() &&
+                                            !hintLineStr.trimStart().startsWith("[") &&
+                                            !currentSection.isNullOrBlank()
+                                    if (blankInSection) {
+                                        val sectionName = currentSection!!
+                                        val editorForHint = ed!!
+                                        scope.launch(Dispatchers.IO) {
+                                            // 继承链（模板/复制与/@copyFromSection）中同一节已出现的键
+                                            val inheritedKeys = try {
+                                                InheritanceResolver.resolve(filePath, homeDir)
+                                                    ?.mergedLines?.map { it.content }
+                                                    ?.let { cp?.collectSectionKeysFromMerged(it, sectionName) }
+                                                    ?: emptySet()
+                                            } catch (e: Exception) {
+                                                emptySet()
                                             }
-                                            cursorWord = before.substring(end)
+                                            withContext(Dispatchers.Main) {
+                                                val provider = cp ?: return@withContext
+                                                provider.pendingSectionHint =
+                                                    com.rwmodstudio.feature.completion.CompletionProvider.SectionHintRequest(
+                                                        sectionName, inheritedKeys
+                                                    )
+                                                val completion = editorForHint.getComponent(EditorAutoCompletion::class.java)
+                                                    ?: return@withContext
+                                                if (completion.isShowing()) completion.hide()
+                                                completion.requireCompletion()
+                                            }
                                         }
+                                    } else {
+                                        ed?.let { e ->
+                                            val leftLine = e.cursor.leftLine
+                                            val leftCol = e.cursor.leftColumn
+                                            val lineStr = e.text.getLineString(leftLine)
+                                            if (lineStr.isNotEmpty() && leftCol > 0) {
+                                                val before = lineStr.substring(0, leftCol.coerceAtMost(lineStr.length))
+                                                var end = before.length
+                                                while (end > 0) {
+                                                    val ch = before[end - 1]
+                                                    if (!ch.isLetterOrDigit() && ch != '_') break
+                                                    end--
+                                                }
+                                                cursorWord = before.substring(end)
+                                            }
+                                        }
+                                        hintQuery = cursorWord
+                                        hintResults = emptyList()
+                                        activePopup = "hint"
                                     }
-                                    hintQuery = cursorWord
-                                    hintResults = emptyList()
-                                    activePopup = "hint"
                                 }
                                 EditorToolbarAction.REFERENCE -> activePopup = "ref"
                                 EditorToolbarAction.AT_REFERENCE -> activePopup = "at"
