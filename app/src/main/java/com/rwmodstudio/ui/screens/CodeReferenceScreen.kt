@@ -200,7 +200,9 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
                         Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(item.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = AppCodeFontFamily, color = RustedOnBackground)
+                            Text(item.displayPrimary(), fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = AppCodeFontFamily, color = RustedOnBackground)
+                            val secondary = item.displaySecondary()
+                            if (secondary.isNotEmpty()) Text(secondary, fontSize = 12.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground.copy(alpha = 0.5f))
                             if (item.detail.isNotEmpty()) Text(item.detail, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                         }
                         IconButton(onClick = { detailItem = null }, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
@@ -341,7 +343,14 @@ private fun CompletionItemRow(item: CustomCompletion, isUser: Boolean, onClick: 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
             Spacer(Modifier.width(8.dp))
-            Text(item.name, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = nameColor, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.displayPrimary(), fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = nameColor, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val secondary = item.displaySecondary()
+            if (secondary.isNotEmpty()) {
+                Spacer(Modifier.width(6.dp))
+                Text(secondary, fontSize = 11.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground.copy(alpha = 0.4f), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             if (isUser) Text("自定义", fontSize = 10.sp, color = RustedSecondary.copy(alpha = 0.6f))
         }
         if (item.desc.isNotEmpty()) {

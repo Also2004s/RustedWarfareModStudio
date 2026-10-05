@@ -28,6 +28,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -290,7 +291,7 @@ fun CustomCompletionsScreen() {
             else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(8.dp)) { items(displayFiltered) { item ->
                 Card(Modifier.fillMaxWidth().padding(vertical=2.dp), colors = CardDefaults.cardColors(containerColor = if (item.isOverridden) RustedSecondary.copy(alpha=0.08f) else RustedSurface), shape = RoundedCornerShape(10.dp)) {
                     Column(Modifier.padding(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text(item.name, fontSize=14.sp, fontFamily=AppCodeFontFamily, fontWeight=FontWeight.Medium, color=if (item.isOverridden) RustedSecondary else RustedPrimary, modifier=Modifier.weight(1f)); if (item.detail.isNotEmpty()) Text(item.detail, fontSize=10.sp, color=RustedOnBackground.copy(alpha=0.4f)) }
+                        Row(verticalAlignment = Alignment.CenterVertically) { val secondary = item.displaySecondary(); Text(item.displayPrimary(), fontSize=14.sp, fontFamily=AppCodeFontFamily, fontWeight=FontWeight.Medium, color=if (item.isOverridden) RustedSecondary else RustedPrimary, maxLines=1, overflow=TextOverflow.Ellipsis, modifier=Modifier.weight(1f, fill=false)); if (secondary.isNotEmpty()) { Spacer(Modifier.width(6.dp)); Text(secondary, fontSize=11.sp, fontFamily=AppCodeFontFamily, color=RustedOnBackground.copy(alpha=0.4f), maxLines=1, overflow=TextOverflow.Ellipsis, modifier=Modifier.weight(1f)) } else Spacer(Modifier.weight(1f)); if (item.detail.isNotEmpty()) Text(item.detail, fontSize=10.sp, color=RustedOnBackground.copy(alpha=0.4f)) }
                         if (item.value.isNotEmpty()) Text("值: ${item.value}", fontSize=12.sp, fontFamily=AppCodeFontFamily, color=RustedOnBackground.copy(alpha=0.6f))
                         if (item.desc.isNotEmpty()) Text(item.desc.take(40), fontSize=11.sp, color=RustedOnBackground.copy(alpha=0.5f), maxLines=1)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -795,6 +796,39 @@ fun parseItems(json: String): List<CustomCompletion> {
     }
 }
 
+/** 是否含汉字（CJK 统一表意文字）。用于判定 name / nameEn 谁是中文名。 */
+internal fun hasCjk(s: String): Boolean = s.any { it.code in 0x4E00..0x9FFF }
+
+/**
+ * 双语显示主名：优先中文（含汉字者），无中文则退回英文名。
+ * 仅为展示用，不影响任何插入文本。
+ */
+fun CustomCompletion.displayPrimary(): String {
+    val n = name.trim()
+    val e = nameEn.trim()
+    return when {
+        hasCjk(n) -> n
+        hasCjk(e) -> e
+        n.isNotEmpty() -> n
+        else -> e
+    }
+}
+
+/**
+ * 双语显示副名：主名之外的另一语言。只有一种语言时返回空串（不臆造、不兜底翻译）。
+ */
+fun CustomCompletion.displaySecondary(): String {
+    val primary = displayPrimary()
+    if (primary.isEmpty()) return ""
+    val n = name.trim()
+    val e = nameEn.trim()
+    return when {
+        e.isNotEmpty() && e != primary -> e
+        n.isNotEmpty() && n != primary -> n
+        else -> ""
+    }
+}
+
 /** 按「格式分类」计算补全要插入的文本（与生产补全一致的插入形式，供复制代码等复用） */
 fun completionFormatInsert(item: CustomCompletion): String {
     // 自动补全 label 优先使用中文名；只有没有中文名时才使用英文名
@@ -810,14 +844,15 @@ fun completionFormatInsert(item: CustomCompletion): String {
 
 fun customCompletionsToProviderItems(items: List<CustomCompletion>): List<com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem> {
     return items.map { item ->
-        // 自动补全 label 优先使用中文名；只有没有中文名时才使用英文名
-        val hasChineseName = item.name.isNotBlank() && item.name.any { it.code in 0x4E00..0x9FFF }
-        val label = if (hasChineseName) item.name else item.nameEn.takeIf { it.isNotBlank() } ?: item.name
+        // 双语展示：label=主名（中文优先），detail 首段=副名（另一种语言），其后接说明
+        val label = item.displayPrimary()
+        val secondary = item.displaySecondary()
         val insertText = completionFormatInsert(item)
-        val detail = if (item.nameEn.isNotBlank() && item.nameEn != item.name && item.name.isNotBlank()) {
-            "${item.name} | ${item.desc.ifEmpty { item.detail }}"
+        val baseDesc = item.desc.ifEmpty { item.detail }
+        val detail = if (secondary.isNotEmpty()) {
+            if (baseDesc.isNotBlank()) "$secondary · $baseDesc" else secondary
         } else {
-            item.desc.ifEmpty { item.detail }
+            baseDesc
         }
         com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem(
             label = label,
