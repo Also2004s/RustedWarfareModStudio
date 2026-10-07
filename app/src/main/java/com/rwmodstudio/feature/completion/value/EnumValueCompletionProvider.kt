@@ -68,13 +68,20 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
         // 打了空格 / Tab：空格不是合法分隔符——
         // 多值枚举（transportUnitsRequireMovementType / convertTo_keepCurrentFields /
         // whenBuilding_temporarilyConvertTo_keepFields）→ 只弹「,」；
-        // setUnitStats（fields values）段内空格是「字段 += 值」的合法分隔，不拦截，落入下方原逻辑；
+        // setUnitStats（fields values）段内空格是「字段 += 值」的合法分隔，不拦截（保留运算符输入）；
+        // 仅当「= 之后已写完值」时让位给 LogicBoolean 的「,」；
         // 其余单值枚举 → 值已写完，不弹。
-        if (needsCommaSeparator(request) && fileName != "setUnitStats") {
-            return if (isMultiValueEnumProperty(request)) {
-                listOf(commaSeparatorItem("枚举分隔符（值与值之间用逗号分隔）"))
+        if (needsCommaSeparator(request)) {
+            if (fileName == "setUnitStats") {
+                // fields values（设置单位状态 护盾值 += 20）：段内空格是「字段 += 值」的合法分隔，
+                // 不拦截（保留输入运算符前后的空格）。但「= 之后已写完值」再打空格（`护盾值 += 20 `）
+                // 是「换下一组」的手势 → 让位给 LogicBooleanValueCompletionProvider 的「,」，
+                // 本 Provider 不再倒出整份字段名（历史：此处会倒出全部字段名）。
+                if (currentSegmentRhs(request.textBeforeCursor)?.trim()?.isNotEmpty() == true) return emptyList()
+            } else if (isMultiValueEnumProperty(request)) {
+                return listOf(commaSeparatorItem("枚举分隔符（值与值之间用逗号分隔）"))
             } else {
-                emptyList()
+                return emptyList()
             }
         }
         val data = ValueDataLoader.load(request.context, fileName, request.translationDict)
@@ -82,7 +89,9 @@ class EnumValueCompletionProvider : BaseValueCompletionProvider() {
         return data.data
             .map { it to completionMatchLevel(prefix, it.name) }
             .filter { it.second > 0 }
-            .sortedWith(compareByDescending<Pair<ValueDataLoader.ValueItem, Int>> { it.second }.thenBy { it.first.name })
+            // 并列时保持数据文件声明顺序（稳定排序），不再按名称字典序——
+            // 各枚举数据文件的条目顺序即人工整理好的推荐顺序（按真实项目使用频率排定）。
+            .sortedWith(compareByDescending<Pair<ValueDataLoader.ValueItem, Int>> { it.second })
             .map { it.first }
             .map {
                 createValueItem(

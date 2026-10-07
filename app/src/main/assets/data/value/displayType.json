@@ -3,22 +3,46 @@
   "example": "displayType: none",
   "data": [
     {
-      "name": "none",
-      "description": "data.value.displaytype.none",
+      "name": "action",
+      "description": "data.value.displaytype.action",
       "version": "1.13.3-1.15p9",
-      "example": "displayType: none"
-    },
-    {
-      "name": "rally",
-      "description": "data.value.displaytype.rally",
-      "version": "1.13.3-1.15p9",
-      "example": "displayType: rally"
+      "example": "displayType: action"
     },
     {
       "name": "upgrade",
       "description": "data.value.displaytype.upgrade",
       "version": "1.13.3-1.15p9",
       "example": "displayType: upgrade"
+    },
+    {
+      "name": "infoOnly",
+      "description": "data.value.displaytype.infoonly",
+      "version": "1.13.3-1.15p9",
+      "example": "displayType: infoOnly"
+    },
+    {
+      "name": "infoOnlyStockpile",
+      "description": "data.value.displaytype.infoonlystockpile",
+      "version": "1.13.3-1.15p9",
+      "example": "displayType: infoOnlyStockpile"
+    },
+    {
+      "name": "none",
+      "description": "data.value.displaytype.none",
+      "version": "1.13.3-1.15p9",
+      "example": "displayType: none"
+    },
+    {
+      "name": "infoOnlyNoBox",
+      "description": "data.value.displaytype.infoonlynobox",
+      "version": "1.13.3-1.15p9",
+      "example": "displayType: infoOnlyNoBox"
+    },
+    {
+      "name": "rally",
+      "description": "data.value.displaytype.rally",
+      "version": "1.13.3-1.15p9",
+      "example": "displayType: rally"
     },
     {
       "name": "queueUnit",
@@ -31,30 +55,6 @@
       "description": "data.value.displaytype.building",
       "version": "1.13.3-1.15p9",
       "example": "displayType: building"
-    },
-    {
-      "name": "action",
-      "description": "data.value.displaytype.action",
-      "version": "1.13.3-1.15p9",
-      "example": "displayType: action"
-    },
-    {
-      "name": "infoOnly",
-      "description": "data.value.displaytype.infoonly",
-      "version": "1.13.3-1.15p9",
-      "example": "displayType: infoOnly"
-    },
-    {
-      "name": "infoOnlyNoBox",
-      "description": "data.value.displaytype.infoonlynobox",
-      "version": "1.13.3-1.15p9",
-      "example": "displayType: infoOnlyNoBox"
-    },
-    {
-      "name": "infoOnlyStockpile",
-      "description": "data.value.displaytype.infoonlystockpile",
-      "version": "1.13.3-1.15p9",
-      "example": "displayType: infoOnlyStockpile"
     }
   ]
 }

@@ -40,7 +40,14 @@ class CopyFromSectionValueCompletionProvider : BaseValueCompletionProvider() {
         val names = buildCopyFromSectionNames(
             currentBase = currentBase,
             chainSectionNames = request.chainSectionNames,
-            withBasePrefix = withBasePrefix
+            withBasePrefix = withBasePrefix,
+            // 节名前缀按翻译引擎的节名表翻译（与引擎显示/保存回译同一张表，保证回环）：
+            // 中文视图插入「隐藏行动_xxx」（保存时引擎反译回 hiddenAction_xxx）；引擎关闭时保持英文。
+            sectionToZh = { en ->
+                if (CompletionShared.translationEngineEnabled())
+                    request.translationDict?.getSectionTranslation(en) ?: en
+                else en
+            }
         )
         return names
             .map { it to completionMatchLevel(prefix, it) }
@@ -78,12 +85,14 @@ internal fun sectionBaseFromCategory(sectionName: String?): String? = when (sect
  * [currentBase] 非空时只取该基名的节名；为 null 时回退全部命名节。
  * [withBasePrefix]=true（复制节 @copyFromSection）→ 完整节名「基名_后缀」（如 projectile_scoutBotProjectileSplit）；
  * [withBasePrefix]=false（复制与 copyFrom）→ 只补同类节的节后缀名（如 炮塔节里 cannon1）。
- * 节基名前缀一律英文（节名是 INI 语法固定词，不硬编码中文），显示中文由翻译引擎后处理交还。
+ * 节基名前缀的语言由 [sectionToZh] 决定：默认英文（默认参数 = 恒等）；
+ * 中文视图传入引擎节名表 → 「隐藏行动_xxx」，保存时引擎反译回 hiddenAction_xxx（与节名显示/回译同一张表）。
  */
 internal fun buildCopyFromSectionNames(
     currentBase: String?,
     chainSectionNames: Map<String, Set<String>>,
-    withBasePrefix: Boolean
+    withBasePrefix: Boolean,
+    sectionToZh: (String) -> String = { it }
 ): List<String> {
     // key 为节基名（小写，与 sectionBaseFromCategory 一致）；en 为完整节名的英文节前缀
     data class NamedSection(val key: String, val en: String)
@@ -104,7 +113,8 @@ internal fun buildCopyFromSectionNames(
     return selected
         .flatMap { sec ->
             (chainSectionNames[sec.key] ?: emptySet()).map { name ->
-                if (withBasePrefix) "${sec.en}_$name" else name
+                // 基名前缀按调用方给定的节名映射出显示语言（默认英文；中文视图传引擎节名表 → 隐藏行动_xxx）
+                if (withBasePrefix) "${sectionToZh(sec.en)}_$name" else name
             }
         }
         .distinct()

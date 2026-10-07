@@ -3,22 +3,10 @@
   "example": "takeResources_includeUnitsWithinRange_team: own",
   "data": [
     {
-      "name": "own",
-      "description": "data.value.takeresources_includeunitswithinrange_team.own",
+      "name": "any",
+      "description": "data.value.takeresources_includeunitswithinrange_team.any",
       "version": "1.13.3-1.15p9",
-      "example": "takeResources_includeUnitsWithinRange_team: own"
-    },
-    {
-      "name": "neutral",
-      "description": "data.value.takeresources_includeunitswithinrange_team.neutral",
-      "version": "1.13.3-1.15p9",
-      "example": "takeResources_includeUnitsWithinRange_team: neutral"
-    },
-    {
-      "name": "allyNotOwn",
-      "description": "data.value.takeresources_includeunitswithinrange_team.allynotown",
-      "version": "1.13.3-1.15p9",
-      "example": "takeResources_includeUnitsWithinRange_team: allyNotOwn"
+      "example": "takeResources_includeUnitsWithinRange_team: any"
     },
     {
       "name": "ally",
@@ -27,16 +15,28 @@
       "example": "takeResources_includeUnitsWithinRange_team: ally"
     },
     {
+      "name": "own",
+      "description": "data.value.takeresources_includeunitswithinrange_team.own",
+      "version": "1.13.3-1.15p9",
+      "example": "takeResources_includeUnitsWithinRange_team: own"
+    },
+    {
+      "name": "allyNotOwn",
+      "description": "data.value.takeresources_includeunitswithinrange_team.allynotown",
+      "version": "1.13.3-1.15p9",
+      "example": "takeResources_includeUnitsWithinRange_team: allyNotOwn"
+    },
+    {
       "name": "enemy",
       "description": "data.value.takeresources_includeunitswithinrange_team.enemy",
       "version": "1.13.3-1.15p9",
       "example": "takeResources_includeUnitsWithinRange_team: enemy"
     },
     {
-      "name": "any",
-      "description": "data.value.takeresources_includeunitswithinrange_team.any",
+      "name": "neutral",
+      "description": "data.value.takeresources_includeunitswithinrange_team.neutral",
       "version": "1.13.3-1.15p9",
-      "example": "takeResources_includeUnitsWithinRange_team: any"
+      "example": "takeResources_includeUnitsWithinRange_team: neutral"
     },
     {
       "name": "notOwn",

@@ -42,7 +42,9 @@ class ValueCompletionAggregator(
         val copyFromSectionEnabled: Boolean = true,
         val defineVariableEnabled: Boolean = true,
         val crossSectionRefEnabled: Boolean = true,
-        val classEnabled: Boolean = true
+        val classEnabled: Boolean = true,
+        // 数值列表（ints/point/point3d）定长逗号分隔提示：默认开启
+        val numericListEnabled: Boolean = true
     )
 
     private val providers = mutableListOf<BaseValueCompletionProvider>()
@@ -72,6 +74,7 @@ class ValueCompletionAggregator(
         if (options.defineVariableEnabled) providers.add(DefineVariableValueCompletionProvider())
         if (options.crossSectionRefEnabled) providers.add(CrossSectionRefValueCompletionProvider())
         if (options.classEnabled) providers.add(ClassValueCompletionProvider())
+        if (options.numericListEnabled) providers.add(NumericListValueCompletionProvider())
     }
 
     /**
@@ -375,6 +378,8 @@ class ValueCompletionAggregator(
             is ProjectRefValueCompletionProvider -> CompletionTypeRepository.CAT_PROJECT_REF
             is CopyFromSectionValueCompletionProvider -> CompletionTypeRepository.CAT_COPY_SECTION
             is ClassValueCompletionProvider -> CompletionTypeRepository.CAT_TEXT
+            // 数值列表（ints/point/point3d）无候选词源，仅逗号提示，归「文字/任意」（与其原无 Provider 时一致）
+            is NumericListValueCompletionProvider -> CompletionTypeRepository.CAT_TEXT
             else -> CompletionTypeRepository.CAT_TEXT
         }
     }
@@ -400,6 +405,7 @@ class ValueCompletionAggregator(
             "DefineVariableValueCompletionProvider" -> "变量定义"
             "CrossSectionRefValueCompletionProvider" -> "跨节引用"
             "ClassValueCompletionProvider" -> "类别"
+            "NumericListValueCompletionProvider" -> "数值列表"
             else -> provider.javaClass.simpleName
         }
     }

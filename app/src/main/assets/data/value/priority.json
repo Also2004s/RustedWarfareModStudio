@@ -3,10 +3,10 @@
   "example": "优先级: critical",
   "data": [
     {
-      "name": "veryLow",
-      "description": "优先级: veryLow",
+      "name": "high",
+      "description": "优先级: high",
       "version": "1.13",
-      "example": "优先级: veryLow"
+      "example": "优先级: high"
     },
     {
       "name": "low",
@@ -15,16 +15,10 @@
       "example": "优先级: low"
     },
     {
-      "name": "normal",
-      "description": "优先级: normal",
+      "name": "veryLow",
+      "description": "优先级: veryLow",
       "version": "1.13",
-      "example": "优先级: normal"
-    },
-    {
-      "name": "high",
-      "description": "优先级: high",
-      "version": "1.13",
-      "example": "优先级: high"
+      "example": "优先级: veryLow"
     },
     {
       "name": "veryHigh",
@@ -37,6 +31,12 @@
       "description": "优先级: critical",
       "version": "1.13",
       "example": "优先级: critical"
+    },
+    {
+      "name": "normal",
+      "description": "优先级: normal",
+      "version": "1.13",
+      "example": "优先级: normal"
     }
   ]
 }

@@ -91,7 +91,8 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         // 该位置的「,」由 ResourceValueCompletionProvider 提供；此处不再兜底弹内存变量，
         // 否则空格后会混入内存变量候选（应只有逗号）。
         val propSpace = request.findProperty()
-        if (propSpace != null && isDynamicResourcesValueType(propSpace.type) &&
+        if (propSpace != null &&
+            (isDynamicResourcesValueType(propSpace.type) || isKeyValuePairsType(propSpace.type)) &&
             currentSegmentRhs(request.textBeforeCursor) != null &&
             needsCommaSeparator(request)
         ) return emptyList()

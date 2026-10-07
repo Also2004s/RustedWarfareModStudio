@@ -558,6 +558,11 @@ object SettingsManager {
         get() = settings.getBoolean("completion_detail_enabled", true)
         set(value) = settings.edit().putBoolean("completion_detail_enabled", value).apply()
 
+    /** 补全项是否显示英文名（副名）。默认关闭：说明位只显示中文说明，避免说明过长 */
+    var completionShowEnglishName: Boolean
+        get() = settings.getBoolean("completion_show_english_name", false)
+        set(value) = settings.edit().putBoolean("completion_show_english_name", value).apply()
+
     /** 非值限制补全：开启后，光标所在行已有键值时隐藏普通键补全，仅保留值/values/特定值 */
     var nonValueCompletionLimited: Boolean
         get() = settings.getBoolean("non_value_completion_limited", true)

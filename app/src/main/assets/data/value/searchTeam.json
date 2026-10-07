@@ -3,6 +3,12 @@
   "example": "searchTeam: own",
   "data": [
     {
+      "name": "any",
+      "description": "data.value.searchteam.any",
+      "version": "1.13.3-1.15p9",
+      "example": "searchTeam: any"
+    },
+    {
       "name": "own",
       "description": "data.value.searchteam.own",
       "version": "1.13.3-1.15p9",
@@ -31,12 +37,6 @@
       "description": "data.value.searchteam.enemy",
       "version": "1.13.3-1.15p9",
       "example": "searchTeam: enemy"
-    },
-    {
-      "name": "any",
-      "description": "data.value.searchteam.any",
-      "version": "1.13.3-1.15p9",
-      "example": "searchTeam: any"
     },
     {
       "name": "notOwn",

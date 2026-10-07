@@ -658,6 +658,7 @@ class TranslationEngine private constructor() {
         customCompletions: List<com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem> = emptyList(),
         nativeCompletions: List<com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem> = emptyList(),
         showDetail: Boolean = true,
+        showEnglishName: Boolean = false,
         valueSectionProperties: Map<String, List<CodeReferenceRepository.PropertyInfo>> = emptyMap()
     ) = com.rwmodstudio.feature.completion.CompletionProvider(
         context = appContext ?: throw IllegalStateException("TranslationEngine not loaded"),
@@ -666,6 +667,7 @@ class TranslationEngine private constructor() {
         customCompletions = customCompletions,
         nativeCompletions = nativeCompletions,
         showDetail = showDetail,
+        showEnglishName = showEnglishName,
         valueCompletionEnabled = SettingsManager.devValueCompletion,
         valueCompletionOptions = com.rwmodstudio.feature.completion.value.ValueCompletionAggregator.ValueCompletionOptions(
             boolEnabled = SettingsManager.devValueCompletionBool,

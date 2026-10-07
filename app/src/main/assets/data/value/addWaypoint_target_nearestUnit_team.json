@@ -3,22 +3,10 @@
   "example": "addWaypoint_target_nearestUnit_team: own",
   "data": [
     {
-      "name": "own",
-      "description": "data.value.addwaypoint_target_nearestunit_team.own",
+      "name": "enemy",
+      "description": "data.value.addwaypoint_target_nearestunit_team.enemy",
       "version": "1.13.3-1.15p9",
-      "example": "addWaypoint_target_nearestUnit_team: own"
-    },
-    {
-      "name": "neutral",
-      "description": "data.value.addwaypoint_target_nearestunit_team.neutral",
-      "version": "1.13.3-1.15p9",
-      "example": "addWaypoint_target_nearestUnit_team: neutral"
-    },
-    {
-      "name": "allyNotOwn",
-      "description": "data.value.addwaypoint_target_nearestunit_team.allynotown",
-      "version": "1.13.3-1.15p9",
-      "example": "addWaypoint_target_nearestUnit_team: allyNotOwn"
+      "example": "addWaypoint_target_nearestUnit_team: enemy"
     },
     {
       "name": "ally",
@@ -27,16 +15,28 @@
       "example": "addWaypoint_target_nearestUnit_team: ally"
     },
     {
-      "name": "enemy",
-      "description": "data.value.addwaypoint_target_nearestunit_team.enemy",
+      "name": "own",
+      "description": "data.value.addwaypoint_target_nearestunit_team.own",
       "version": "1.13.3-1.15p9",
-      "example": "addWaypoint_target_nearestUnit_team: enemy"
+      "example": "addWaypoint_target_nearestUnit_team: own"
     },
     {
       "name": "any",
       "description": "data.value.addwaypoint_target_nearestunit_team.any",
       "version": "1.13.3-1.15p9",
       "example": "addWaypoint_target_nearestUnit_team: any"
+    },
+    {
+      "name": "allyNotOwn",
+      "description": "data.value.addwaypoint_target_nearestunit_team.allynotown",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_target_nearestUnit_team: allyNotOwn"
+    },
+    {
+      "name": "neutral",
+      "description": "data.value.addwaypoint_target_nearestunit_team.neutral",
+      "version": "1.13.3-1.15p9",
+      "example": "addWaypoint_target_nearestUnit_team: neutral"
     },
     {
       "name": "notOwn",

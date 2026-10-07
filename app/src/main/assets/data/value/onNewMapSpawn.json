@@ -3,16 +3,16 @@
   "example": "onNewMapSpawn: emptyResourcePools_asNeutral",
   "data": [
     {
-      "name": "emptyResourcePools_asNeutral",
-      "description": "data.value.onnewmapspawn.emptyresourcepools_asneutral",
-      "version": "1.13.3-1.15p9",
-      "example": "onNewMapSpawn: emptyResourcePools_asNeutral"
-    },
-    {
       "name": "emptyOrOccupiedResourcePools_asNeutral",
       "description": "data.value.onnewmapspawn.emptyoroccupiedresourcepools_asneutral",
       "version": "1.13.3-1.15p9",
       "example": "onNewMapSpawn: emptyOrOccupiedResourcePools_asNeutral"
+    },
+    {
+      "name": "spawnPoint_eachActiveTeam",
+      "description": "data.value.onnewmapspawn.spawnpoint_eachactiveteam",
+      "version": "1.13.3-1.15p9",
+      "example": "onNewMapSpawn: spawnPoint_eachActiveTeam"
     },
     {
       "name": "mapCenter_asNeutral",
@@ -27,10 +27,10 @@
       "example": "onNewMapSpawn: mapCenter_eachActiveTeam"
     },
     {
-      "name": "spawnPoint_eachActiveTeam",
-      "description": "data.value.onnewmapspawn.spawnpoint_eachactiveteam",
+      "name": "emptyResourcePools_asNeutral",
+      "description": "data.value.onnewmapspawn.emptyresourcepools_asneutral",
       "version": "1.13.3-1.15p9",
-      "example": "onNewMapSpawn: spawnPoint_eachActiveTeam"
+      "example": "onNewMapSpawn: emptyResourcePools_asNeutral"
     }
   ]
 }

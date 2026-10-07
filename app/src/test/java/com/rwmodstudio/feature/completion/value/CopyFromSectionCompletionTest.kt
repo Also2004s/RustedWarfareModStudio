@@ -93,6 +93,26 @@ class CopyFromSectionCompletionTest {
     }
 
     @Test
+    fun basePrefixUsesSectionToZhWhenProvided() {
+        // 中文视图：基名前缀按引擎节名表翻为中文（保存时引擎反译回英文）
+        val names = buildCopyFromSectionNames(
+            withBasePrefix = true,
+            currentBase = "hiddenaction",
+            chainSectionNames = mapOf("hiddenaction" to setOf("开火")),
+            sectionToZh = { en -> if (en == "hiddenAction") "隐藏行动" else en }
+        )
+        assertEquals(listOf("隐藏行动_开火"), names, "传入节名映射时基名前缀翻为中文")
+        // 复制与（无基名前缀）不受影响
+        val copyFrom = buildCopyFromSectionNames(
+            withBasePrefix = false,
+            currentBase = "hiddenaction",
+            chainSectionNames = mapOf("hiddenaction" to setOf("开火")),
+            sectionToZh = { "隐藏行动" }
+        )
+        assertEquals(listOf("开火"), copyFrom, "复制与只给后缀名，基名映射不参与")
+    }
+
+    @Test
     fun currentBaseActionOnlySuggestsAction() {
         val names = build(withBasePrefix = true, currentBase = "action")
         assertEquals(listOf("action_巡逻"), names, "当前为行动时只给 action_yyy，不含 hiddenAction_开火")

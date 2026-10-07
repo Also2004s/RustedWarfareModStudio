@@ -49,7 +49,7 @@ internal fun isLogicBooleanValueType(type: String): Boolean =
 
 /** 是否为 LogicNumber/Logic 类型（归一化去空格小写后命中），如 透明度/帧/setHeight 等数字表达式属性 */
 internal fun isLogicNumberValueType(type: String): Boolean =
-    type.replace(" ", "").lowercase() in setOf("logicnumber", "logic")
+    type.replace(" ", "").lowercase() in setOf("logicnumber", "logic", "dynamic")
 
 /** 属性 type 是否为 dynamic resources（用逻辑设置资源/用逻辑添加资源 的 资源名=逻辑表达式 形态） */
 internal fun isDynamicResourcesValueType(type: String): Boolean =
@@ -60,15 +60,47 @@ internal fun isDynamicResourcesValueType(type: String): Boolean =
  * 覆盖 resources（价格/增加资源/根据AI难度添加资源）、price（流式造价/资源获取/资源需求）、
  * customPrice（提取资源）、resource（修正直接添加资源）与 dynamic resources（用逻辑设置/添加资源）。
  * 不含 resource ref / ResourceRef（`<resources:name>`）与 customResource（转换资源来源: 裸名）。
+ *
+ * 归一化：去空格 + 去括号后缀 + 按 `/` 拆分后逐段比对，兼容 code_reference 里的写法变体
+ * （core 价格 type=`int / price`、canBuild 价格 type=`price(s)`）——严格等值会漏判这两处，
+ * 导致连「资源名=」的 `=` 都补不出。`resource ref` 归一化后为 `resourceref`，仍被正确排除。
  */
-internal fun isResourceNameValueType(type: String): Boolean =
-    type.replace(" ", "").lowercase() in setOf(
-        "resources", "price", "customprice", "resource", "dynamicresources"
-    )
+internal fun isResourceNameValueType(type: String): Boolean {
+    val parts = type.lowercase().replace(" ", "").substringBefore('(').split('/')
+    return parts.any { it in setOf("resources", "price", "customprice", "resource", "dynamicresources") }
+}
 
-/** 属性 type 是否为 key value pairs（设置单位内存/更新单位内存 的 变量名=逻辑表达式 形态） */
+/** 属性 type 是否为 key value pairs（设置单位内存/更新单位内存 的 变量名=逻辑表达式 形态）。
+ *  归一化同时去空格与连字符，使 `key-value`（带数据发送消息）与 `key value pairs` 等价。 */
 internal fun isKeyValuePairsType(type: String): Boolean =
-    type.replace(" ", "").equals("keyvaluepairs", ignoreCase = true)
+    normKvType(type) in setOf("keyvaluepairs", "keyvalue")
+
+/** kvp 类型归一化：去空格与连字符、小写 */
+private fun normKvType(type: String): String =
+    type.replace(" ", "").replace("-", "").lowercase()
+
+/**
+ * 字符串中单/双引号是否成对闭合（三引号块定界 `"""`/`'''` 视为定界符，忽略不计）。
+ * 用于 kvp 逗号提示：值内引号未闭合（字符串还没写完）时，其中的空格不误弹「,」。
+ */
+internal fun balancedQuotes(s: String): Boolean {
+    var i = 0
+    var single = false
+    var dbl = false
+    while (i < s.length) {
+        val c = s[i]
+        if (c == '"' && !single) {
+            // 三引号块定界：跳过，不当内容引号
+            if (i + 2 < s.length && s[i + 1] == '"' && s[i + 2] == '"') { i += 3; continue }
+            dbl = !dbl
+        } else if (c == '\'' && !dbl) {
+            if (i + 2 < s.length && s[i + 1] == '\'' && s[i + 2] == '\'') { i += 3; continue }
+            single = !single
+        }
+        i++
+    }
+    return !single && !dbl
+}
 
 /** 属性 type 是否为 fields values（设置单位状态 setUnitStats，LHS=单位属性名，支持 =/+=/-=，RHS=动态数学/逻辑数值表达式） */
 internal fun isFieldsValuesValueType(type: String): Boolean =
@@ -261,6 +293,15 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
             currentSegmentRhs(request.textBeforeCursor) != null &&
             needsCommaSeparator(request)
         ) return emptyList()
+        // key value pairs（设置单位内存 xx=xxx / 带数据发送消息 fish="nice!"）与
+        // fields values（设置单位状态 护盾值 += 20）：
+        // 写完一个「变量名/字段=值」后打空格 = 用逗号分隔下一组 → 只弹「,」（吞掉空格成 `xx=xxx,`）。
+        // 该位置的「,」唯一由本 Provider 提供，MemoryValueCompletionProvider / EnumValueCompletionProvider 同步抑制。
+        // 值内引号未闭合（字符串还没写完）时其中的空格不误弹（balancedQuotes）。
+        if (propSpace != null && (isKeyValuePairsType(propSpace.type) || isFieldsValuesValueType(propSpace.type)) &&
+            currentSegmentRhs(request.textBeforeCursor)?.trim()?.isNotEmpty() == true &&
+            needsCommaSeparator(request) && balancedQuotes(request.valuePrefix)
+        ) return listOf(commaSeparatorItem("键值对分隔符（键值对之间用逗号分隔）"))
         val hasSelfPrefix = request.textBeforeCursor.endsWith("self.")
         // 加载原始英文数据，自行翻译，保证中英文两套匹配键都可用
         val data = ValueDataLoader.load(request.context, "logicboolean")

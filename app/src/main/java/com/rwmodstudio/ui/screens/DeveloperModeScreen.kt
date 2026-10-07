@@ -167,6 +167,14 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.Translate,
+                title = "英文名显示",
+                subtitle = "补全项说明位显示英文名（副名）；默认关闭，只显示中文说明",
+                checked = SettingsManager.completionShowEnglishName,
+                onCheckedChange = { SettingsManager.completionShowEnglishName = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.SpaceBar,
                 title = "节补全",
                 checked = SettingsManager.devSectionCompletion,

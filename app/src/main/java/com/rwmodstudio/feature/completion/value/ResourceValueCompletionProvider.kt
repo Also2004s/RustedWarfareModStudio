@@ -14,6 +14,8 @@ import com.rwmodstudio.feature.completion.completionMatchLevel
  * 2. 属性型：属性 type 含 price / resource / customPrice / customResource /
  *    ResourceRef / resource ref / resources / dynamic resources，或中文属性名含"资源"/"价格"；
  *    属性型在值内未闭合的 '(' 之后不触发。
+ * 3. 「资源名=值」列表（`增加资源: 资金=5, 能量=5`）：打空格（空格不是合法分隔符）时只弹「,」，
+ *    资源名只在 `=` 之前的 LHS 位置补全（RHS 是数值/表达式，不补资源名）。
  *
  * 数据：合并 resources + globalResources + 内置资源（Prices_Resources.json）。
  */
@@ -73,25 +75,19 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
                     )
                 }
         }
-        // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）的资源名 LHS
-        // （顶层 `=` 之前）：补全后紧跟 `=`
+        // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）：
+        // 值与值之间用逗号分隔，空格不是合法分隔符 —— 打空格时只弹「,」（与 dynamic resources 原有行为统一）。
         val prop = request.findProperty()
-        val isResourceNameLhs =
-            prop != null && isResourceNameValueType(prop.type) &&
-                currentSegmentRhs(request.textBeforeCursor) == null
-        // 价格/资源可填多组（`价格: 资金=5, 能量=5`）：在「资源名=」左侧打了空格 → 只提示「,」
-        if (isResourceNameLhs && needsCommaSeparator(request)) {
+        val isResourceNameType = prop != null && isResourceNameValueType(prop.type)
+        // LHS（`=` 之前，如 `价格: 500 `）与 RHS（`资源名=值` 之后，如 `增加资源: ammo=1 `）打空格都只弹「,」；
+        // 已用逗号分隔完（`资金=5, `）时 needsCommaSeparator 为 false，不拦截（转为补下一个资源名）。
+        if (isResourceNameType && needsCommaSeparator(request)) {
             return listOf(commaSeparatorItem("资源分隔符（值与值之间用逗号分隔）"))
         }
-        // dynamic resources（用逻辑设置资源/用逻辑添加资源）：写完一个 `资源名=表达式` 后打空格，
-        // 接下来用逗号分隔下一个键值对 → 提示「,」（选中吞掉空格成 `建造状态=3,`），供继续写下一组。
-        // 若此时走末尾属性型分支，会用空前缀把全部资源名无脑弹出（写成 `建造状态=3 能量` 的非法写法）。
-        if (prop != null && isDynamicResourcesValueType(prop.type) &&
-            currentSegmentRhs(request.textBeforeCursor) != null &&
-            needsCommaSeparator(request)
-        ) {
-            return listOf(commaSeparatorItem("资源分隔符（键值对之间用逗号分隔）"))
-        }
+        val isResourceNameLhs = isResourceNameType && currentSegmentRhs(request.textBeforeCursor) == null
+        // 「资源名=值」型在 `=` 之后（RHS）的值是数值/逻辑表达式，不补资源名——
+        // 否则空前缀会把整份资源名倒出（历史：`增加资源: ammo=1 ` 后倒出全部资源名，且不带 `=`）。
+        if (isResourceNameType && !isResourceNameLhs) return emptyList()
         // 属性型：按前缀过滤，替换整个值片段
         val allResources = collectResourceNames(request)
         val matching = allResources

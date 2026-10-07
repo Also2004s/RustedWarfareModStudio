@@ -128,8 +128,31 @@ class FunctionParameterCompletionTest {
         assertTrue(isLogicNumberValueType("logicNumber"))
         assertTrue(isLogicNumberValueType("logic"))
         assertTrue(isLogicNumberValueType(" LogicNumber "))
+        assertTrue(isLogicNumberValueType("dynamic"), "设置身体旋转 type=dynamic 应归数值表达式")
         assertFalse(isLogicNumberValueType("logicboolean"))
         assertFalse(isLogicNumberValueType("bool"))
+        assertFalse(isLogicNumberValueType("dynamic resources"), "dynamic resources 不等于 dynamic")
+    }
+
+    // ===== kvp 类型判定与引号配对 =====
+
+    @Test
+    fun keyValuePairsTypeNormalization() {
+        assertTrue(isKeyValuePairsType("key value pairs"), "设置单位内存")
+        assertTrue(isKeyValuePairsType("key-value"), "带数据发送消息")
+        assertTrue(isKeyValuePairsType("Key-Value"), "大小写不敏感")
+        assertFalse(isKeyValuePairsType("dynamic resources"))
+        assertFalse(isKeyValuePairsType("tags"))
+    }
+
+    @Test
+    fun balancedQuotesDetection() {
+        assertTrue(balancedQuotes("fish=\"nice!\""), "双引号成对")
+        assertTrue(balancedQuotes("xx=xxx"), "无引号")
+        assertTrue(balancedQuotes("a='b'"), "单引号成对")
+        assertFalse(balancedQuotes("fish=\"nice!"), "双引号未闭合")
+        assertFalse(balancedQuotes("a='b"), "单引号未闭合")
+        assertTrue(balancedQuotes("xx=\"\"\"\n内存.a+'b'\n\"\"\""), "三引号块定界忽略")
     }
 
     // ===== defineUnitMemory 类型位置判定 =====

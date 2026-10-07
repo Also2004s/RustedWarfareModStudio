@@ -91,6 +91,8 @@ class CompletionProvider(
     private val customCompletions: List<CompletionItem> = emptyList(),
     private val nativeCompletions: List<CompletionItem> = emptyList(),
     private val showDetail: Boolean = true,
+    /** 补全项是否在说明位显示英文名（副名）。默认关闭，说明位只显示中文说明 */
+    private val showEnglishName: Boolean = false,
     private val valueCompletionEnabled: Boolean = false,
     private val valueCompletionOptions: ValueCompletionAggregator.ValueCompletionOptions = ValueCompletionAggregator.ValueCompletionOptions(),
     private val nonValueCompletionLimited: Boolean = true
@@ -174,6 +176,11 @@ class CompletionProvider(
          */
         val nameEn: String = "",
         /**
+         * 副名（另一语言的名称，通常为英文名）。是否拼进 [detail] 由「英文名显示」开关决定；
+         * 关闭（默认）时说明位只显示 [detail]，不再显示副名。
+         */
+        val secondaryName: String = "",
+        /**
          * 值补全专用：该条目产生的原始值类型（如 unit/float/bool/any）。
          * 供补全查看器按「补全值类型」归类展示；非值补全或未知类型保持空串。
          */
@@ -240,7 +247,16 @@ class CompletionProvider(
     }
 
     private fun List<CompletionItem>.withDetail(): List<CompletionItem> {
-        return if (showDetail) this else map { it.copy(detail = "") }
+        return map { item ->
+            val detail = when {
+                !showDetail -> ""
+                // 英文名（副名）开关开启时拼在说明之前，与「副名 · 说明」的原有展示一致
+                showEnglishName && item.secondaryName.isNotBlank() ->
+                    if (item.detail.isBlank()) item.secondaryName else "${item.secondaryName} · ${item.detail}"
+                else -> item.detail
+            }
+            item.copy(detail = detail)
+        }
     }
 
     // 用户表覆盖原生表，且用户表优先显示
@@ -760,7 +776,7 @@ class CompletionProvider(
             if (level <= 0) null else Triple(zh, en, level)
         }.sortedWith(compareByDescending<Triple<String, String, Int>> { it.third })
         .map { (zh, en) ->
-            CompletionItem(label = "[$zh]", type = CompletionType.SECTION, detail = en, insertText = "[$zh]", category = listOf("节"))
+            CompletionItem(label = "[$zh]", type = CompletionType.SECTION, detail = "", secondaryName = en, insertText = "[$zh]", category = listOf("节"))
         }
     }
 
@@ -802,7 +818,7 @@ class CompletionProvider(
                 ?: item
             if (shaped.label in seen) continue
             seen.add(shaped.label)
-            results.add(shaped.copy(detail = if (showDetail) item.detail else ""))
+            results.add(shaped)
         }
 
         return sortCompletions(results)

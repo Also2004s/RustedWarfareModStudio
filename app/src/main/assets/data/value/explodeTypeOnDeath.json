@@ -2,13 +2,13 @@
   "name": "explodeTypeOnDeath",
   "example": "死亡时爆炸类型: normal",
   "data": [
+    { "name": "building", "description": "data.value.explodetypeondeath.building", "version": "1.14", "example": "死亡时爆炸类型: building" },
+    { "name": "buildingNoShockwaveOrSmoke", "description": "data.value.explodetypeondeath.buildingnoshockwaveorsmoke", "version": "1.14", "example": "死亡时爆炸类型: buildingNoShockwaveOrSmoke" },
     { "name": "verysmall", "description": "data.value.explodetypeondeath.verysmall", "version": "1.14", "example": "死亡时爆炸类型: verysmall" },
     { "name": "small", "description": "data.value.explodetypeondeath.small", "version": "1.14", "example": "死亡时爆炸类型: small" },
     { "name": "normal", "description": "data.value.explodetypeondeath.normal", "version": "1.14", "example": "死亡时爆炸类型: normal" },
     { "name": "large", "description": "data.value.explodetypeondeath.large", "version": "1.14", "example": "死亡时爆炸类型: large" },
     { "name": "largeUnit", "description": "data.value.explodetypeondeath.largeunit", "version": "1.14", "example": "死亡时爆炸类型: largeUnit" },
-    { "name": "building", "description": "data.value.explodetypeondeath.building", "version": "1.14", "example": "死亡时爆炸类型: building" },
-    { "name": "buildingNoShockwaveOrSmoke", "description": "data.value.explodetypeondeath.buildingnoshockwaveorsmoke", "version": "1.14", "example": "死亡时爆炸类型: buildingNoShockwaveOrSmoke" },
     { "name": "verylargeBuilding", "description": "data.value.explodetypeondeath.verylargebuilding", "version": "1.14", "example": "死亡时爆炸类型: verylargeBuilding" }
   ]
 }

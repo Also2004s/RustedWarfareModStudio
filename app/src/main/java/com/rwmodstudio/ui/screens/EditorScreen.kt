@@ -83,6 +83,7 @@ import com.rwmodstudio.editor.resolveEditorBackground
 import com.rwmodstudio.feature.completion.extractFileSymbols
 import com.rwmodstudio.feature.completion.mergeCompletionSymbols
 import com.rwmodstudio.feature.completion.sectionEnToZh
+import com.rwmodstudio.feature.completion.value.CodeDescriptionIndex
 import com.rwmodstudio.feature.completion.value.ProjectImageCache
 import com.rwmodstudio.feature.completion.value.ProjectIniFileCache
 import com.rwmodstudio.feature.completion.value.ProjectSoundCache
@@ -248,6 +249,8 @@ fun EditorScreen(
         val (userItems, nativeItems, extraItems) = withContext(Dispatchers.IO) {
             // 节内必备属性表（手动「代码提示」用）：后台预加载，避免首次点击时主线程读 assets
             SectionRequiredProperties.load(ctx)
+            // 代码说明索引（代码提示弹窗本地兜底）：后台预热，避免首次查询时主线程读 assets
+            CodeDescriptionIndex.prepare(ctx)
             Triple(loadUserItems(), loadNativeItemsVerified(engine), loadExtraItemsVerified(ctx, engine))
         }
         rawUserCompletions = userItems
@@ -287,6 +290,7 @@ fun EditorScreen(
                 customCompletions = customCompletions,
                 nativeCompletions = nativeCompletions,
                 showDetail = completionDetailEnabled,
+                showEnglishName = SettingsManager.completionShowEnglishName,
                 valueCompletionEnabled = SettingsManager.devValueCompletion,
                 valueCompletionOptions = com.rwmodstudio.feature.completion.value.ValueCompletionAggregator.ValueCompletionOptions(
                     boolEnabled = SettingsManager.devValueCompletionBool,
@@ -748,6 +752,7 @@ fun EditorScreen(
 
     LaunchedEffect(
         completionDetailEnabled,
+        SettingsManager.completionShowEnglishName,
         SettingsManager.devValueCompletion,
         SettingsManager.devValueCompletionBool,
         SettingsManager.devValueCompletionLogicBoolean,
@@ -758,6 +763,7 @@ fun EditorScreen(
     ) {
         if (SettingsManager.devCompletionProvider && cp != null && engine.isLoaded) {
             cp = engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
+                showEnglishName = SettingsManager.completionShowEnglishName,
                 valueSectionProperties = buildValueSectionProperties(mergedTables))
         }
     }
@@ -929,6 +935,7 @@ fun EditorScreen(
             }
             if (SettingsManager.devCompletionProvider && engine.isLoaded) {
                 cp = engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
+                    showEnglishName = SettingsManager.completionShowEnglishName,
                     valueSectionProperties = buildValueSectionProperties(mergeCompletionTables(userItems, nativeItems, extraItems)))
             }
             // 文件加载完成后立即解析节名，避免 debounce 延迟
@@ -2303,6 +2310,36 @@ fun EditorScreen(
                     if (seen.add(item.name)) merged.add(item.toPropertyInfo())
                 }
 
+                // 三表无命中时，在调用 AI 之前先做两级本地兜底：
+                // 1) 翻译库完全匹配；2) 代码说明模糊匹配。
+                if (merged.isEmpty() && qr.isNotBlank()) {
+                    // 1) 翻译库完全匹配（词条精确相等；引擎未加载则跳过）
+                    if (SettingsManager.devTranslationEngine && engine.isLoaded) {
+                        val q0 = qr.trim()
+                        val dict = engine.getTranslationDict()
+                        val zh = dict.getTranslation(q0)
+                        val en = dict.getTranslationBack(q0)
+                        when {
+                            zh != q0 -> merged.add(
+                                CodeReferenceRepository.PropertyInfo(name = q0, type = "翻译库", desc_zh = zh)
+                            )
+                            en != q0 -> merged.add(
+                                CodeReferenceRepository.PropertyInfo(name = en, type = "翻译库", desc_zh = q0)
+                            )
+                        }
+                    }
+                    // 2) 代码说明模糊匹配（关键词/中文说明，覆盖值/原版单位名/共享图/函数参数等）
+                    if (merged.isEmpty()) {
+                        CodeDescriptionIndex.search(ctx, qr).forEach { e ->
+                            merged.add(
+                                CodeReferenceRepository.PropertyInfo(
+                                    name = e.keyword, type = "代码说明", desc_zh = e.desc, example = e.example
+                                )
+                            )
+                        }
+                    }
+                }
+
                 // 「完全匹配优先」排序：名称 完全相等(3) > 前缀命中(2) > 子串包含(1) > 仅其它字段命中(0)
                 val q = qr.trim().lowercase()
                 fun namePriority(p: CodeReferenceRepository.PropertyInfo): Int {
@@ -2444,6 +2481,7 @@ fun EditorScreen(
                     }
                     cp = if (engine.isLoaded) {
                         engine.getCompletionProvider(customCompletions, nativeCompletions, completionDetailEnabled,
+                            showEnglishName = SettingsManager.completionShowEnglishName,
                             valueSectionProperties = buildValueSectionProperties(mergeCompletionTables(rawUserCompletions, nativeCustomCompletions, extraCustomCompletions)))
                     } else cp
                     showCompletionEditor = false

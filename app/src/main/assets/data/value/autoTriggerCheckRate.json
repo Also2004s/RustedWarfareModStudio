@@ -3,6 +3,12 @@
   "example": "autoTriggerCheckRate: everyFrame",
   "data": [
     {
+      "name": "every8Frames",
+      "description": "data.value.autotriggercheckrate.every8frames",
+      "version": "1.13.3-1.15p9",
+      "example": "autoTriggerCheckRate: every8Frames"
+    },
+    {
       "name": "everyFrame",
       "description": "data.value.autotriggercheckrate.everyframe",
       "version": "1.13.3-1.15p9",
@@ -13,12 +19,6 @@
       "description": "data.value.autotriggercheckrate.every4frames",
       "version": "1.13.3-1.15p9",
       "example": "autoTriggerCheckRate: every4Frames"
-    },
-    {
-      "name": "every8Frames",
-      "description": "data.value.autotriggercheckrate.every8frames",
-      "version": "1.13.3-1.15p9",
-      "example": "autoTriggerCheckRate: every8Frames"
     }
   ]
 }

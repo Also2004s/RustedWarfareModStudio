@@ -847,20 +847,17 @@ fun completionFormatInsert(item: CustomCompletion): String {
 
 fun customCompletionsToProviderItems(items: List<CustomCompletion>): List<com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem> {
     return items.map { item ->
-        // 双语展示：label=主名（中文优先），detail 首段=副名（另一种语言），其后接说明
+        // 双语展示：label=主名（中文优先），副名（另一种语言）存入 secondaryName，
+        // detail 只放说明文本；英文名是否显示由「英文名显示」开关在补全提供器里决定。
         val label = item.displayPrimary()
         val secondary = item.displaySecondary()
         val insertText = completionFormatInsert(item)
         val baseDesc = item.desc.ifEmpty { item.detail }
-        val detail = if (secondary.isNotEmpty()) {
-            if (baseDesc.isNotBlank()) "$secondary · $baseDesc" else secondary
-        } else {
-            baseDesc
-        }
         com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem(
             label = label,
             type = com.rwmodstudio.feature.completion.CompletionProvider.CompletionType.KEY,
-            detail = detail,
+            detail = baseDesc,
+            secondaryName = secondary,
             insertText = insertText,
             category = item.category,
             name = item.name,
