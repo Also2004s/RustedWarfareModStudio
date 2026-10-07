@@ -211,6 +211,19 @@ class FunctionParameterCompletionTest {
     }
 
     @Test
+    fun paramKeyNormalizationHandlesSelfPrefix() {
+        // 回归：参数表里 self.hasActiveWaypoint 带 self. 前缀（1.3.6 起），
+        // 而 resolveFunctionBaseKey 解析出的基名不含 self.；两处 map 构建必须同样去 self. 归一化，
+        // 否则「自身有活动的路径点(type=)」参数补全整体失效（map key 与查找键不一致）。
+        val data = loadParamFile("logicboolean")
+        val normalized = data.functions.map { it.key.lowercase().removePrefix("self.") }.toSet()
+        assertTrue("hasactivewaypoint" in normalized, "self.hasActiveWaypoint 归一化后应命中参数表")
+        val resolved = resolveFunctionBaseKey("requireConditional: if self.hasActiveWaypoint(") { it }
+        assertEquals("hasactivewaypoint", resolved, "带 self. 的英文函数名应解析为裸基名")
+        assertTrue(resolved in normalized, "解析出的基名必须能在参数表中命中")
+    }
+
+    @Test
     fun readUnitMemoryNameIsPositionalMemoryName() {
         val data = loadParamFile("logicboolean")
         for (k in listOf("readUnitMemory", "eventData")) {

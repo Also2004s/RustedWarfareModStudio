@@ -1,0 +1,2937 @@
+Compiled from "Content.java"
+public class io.github.rosemoe.sora.text.Content implements java.lang.CharSequence {
+  public static final int DEFAULT_MAX_UNDO_STACK_SIZE;
+
+  public static final int DEFAULT_LIST_CAPACITY;
+
+  public static final int CHECK_TYPE_READ;
+
+  public static final int CHECK_TYPE_CURSOR;
+
+  public static final int CHECK_TYPE_INDEX;
+
+  private static int sInitialListCapacity;
+
+  private final java.util.List<io.github.rosemoe.sora.text.ContentLine> lines;
+
+  private final java.util.List<io.github.rosemoe.sora.text.ContentListener> contentListeners;
+
+  private final java.util.concurrent.locks.ReadWriteLock lock;
+
+  private int textLength;
+
+  private int nestedBatchEdit;
+
+  private final java.util.concurrent.atomic.AtomicLong documentVersion;
+
+  private final io.github.rosemoe.sora.text.Indexer indexer;
+
+  private final io.github.rosemoe.sora.text.bidi.ContentBidi bidi;
+
+  private io.github.rosemoe.sora.text.UndoManager undoManager;
+
+  private io.github.rosemoe.sora.text.Cursor cursor;
+
+  public io.github.rosemoe.sora.text.Content();
+    Code:
+       0: aload_0
+       1: aconst_null
+       2: invokespecial #1                  // Method "<init>":(Ljava/lang/CharSequence;)V
+       5: return
+
+  public io.github.rosemoe.sora.text.Content(java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: iconst_1
+       3: invokespecial #7                  // Method "<init>":(Ljava/lang/CharSequence;Z)V
+       6: return
+
+  public io.github.rosemoe.sora.text.Content(java.lang.CharSequence, boolean);
+    Code:
+       0: aload_0
+       1: invokespecial #10                 // Method java/lang/Object."<init>":()V
+       4: aload_0
+       5: new           #15                 // class java/util/concurrent/atomic/AtomicLong
+       8: dup
+       9: lconst_1
+      10: invokespecial #17                 // Method java/util/concurrent/atomic/AtomicLong."<init>":(J)V
+      13: putfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+      16: aload_1
+      17: ifnonnull     23
+      20: ldc           #24                 // String
+      22: astore_1
+      23: iload_2
+      24: ifeq          41
+      27: aload_0
+      28: new           #26                 // class java/util/concurrent/locks/ReentrantReadWriteLock
+      31: dup
+      32: invokespecial #28                 // Method java/util/concurrent/locks/ReentrantReadWriteLock."<init>":()V
+      35: putfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      38: goto          46
+      41: aload_0
+      42: aconst_null
+      43: putfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      46: aload_0
+      47: iconst_0
+      48: putfield      #33                 // Field textLength:I
+      51: aload_0
+      52: iconst_0
+      53: putfield      #37                 // Field nestedBatchEdit:I
+      56: aload_0
+      57: new           #40                 // class java/util/ArrayList
+      60: dup
+      61: invokestatic  #42                 // Method getInitialLineCapacity:()I
+      64: invokespecial #46                 // Method java/util/ArrayList."<init>":(I)V
+      67: putfield      #49                 // Field lines:Ljava/util/List;
+      70: aload_0
+      71: getfield      #49                 // Field lines:Ljava/util/List;
+      74: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+      77: dup
+      78: invokespecial #55                 // Method io/github/rosemoe/sora/text/ContentLine."<init>":()V
+      81: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+      86: pop
+      87: aload_0
+      88: new           #40                 // class java/util/ArrayList
+      91: dup
+      92: invokespecial #62                 // Method java/util/ArrayList."<init>":()V
+      95: putfield      #63                 // Field contentListeners:Ljava/util/List;
+      98: aload_0
+      99: new           #66                 // class io/github/rosemoe/sora/text/bidi/ContentBidi
+     102: dup
+     103: aload_0
+     104: invokespecial #68                 // Method io/github/rosemoe/sora/text/bidi/ContentBidi."<init>":(Lio/github/rosemoe/sora/text/Content;)V
+     107: putfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+     110: aload_0
+     111: new           #75                 // class io/github/rosemoe/sora/text/UndoManager
+     114: dup
+     115: invokespecial #77                 // Method io/github/rosemoe/sora/text/UndoManager."<init>":()V
+     118: putfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+     121: aload_0
+     122: sipush        500
+     125: invokevirtual #82                 // Method setMaxUndoStackSize:(I)V
+     128: aload_0
+     129: new           #85                 // class io/github/rosemoe/sora/text/CachedIndexer
+     132: dup
+     133: aload_0
+     134: invokespecial #87                 // Method io/github/rosemoe/sora/text/CachedIndexer."<init>":(Lio/github/rosemoe/sora/text/Content;)V
+     137: putfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+     140: aload_1
+     141: invokeinterface #92,  1           // InterfaceMethod java/lang/CharSequence.length:()I
+     146: ifne          155
+     149: aload_0
+     150: iconst_1
+     151: invokevirtual #97                 // Method setUndoEnabled:(Z)V
+     154: return
+     155: aload_0
+     156: iconst_0
+     157: invokevirtual #97                 // Method setUndoEnabled:(Z)V
+     160: aload_0
+     161: iconst_0
+     162: iconst_0
+     163: aload_1
+     164: invokevirtual #101                // Method insert:(IILjava/lang/CharSequence;)V
+     167: aload_0
+     168: iconst_1
+     169: invokevirtual #97                 // Method setUndoEnabled:(Z)V
+     172: return
+
+  public static int getInitialLineCapacity();
+    Code:
+       0: getstatic     #105                // Field sInitialListCapacity:I
+       3: ireturn
+
+  public static void setInitialLineCapacity(int);
+    Code:
+       0: iload_0
+       1: ifgt          14
+       4: new           #108                // class java/lang/IllegalArgumentException
+       7: dup
+       8: ldc           #110                // String capacity can not be negative or zero
+      10: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      13: athrow
+      14: iload_0
+      15: putstatic     #105                // Field sInitialListCapacity:I
+      18: return
+
+  private static boolean textEquals(io.github.rosemoe.sora.text.ContentLine, io.github.rosemoe.sora.text.ContentLine);
+    Code:
+       0: aload_0
+       1: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+       4: aload_1
+       5: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+       8: if_icmpeq     13
+      11: iconst_0
+      12: ireturn
+      13: aload_0
+      14: aload_1
+      15: if_acmpne     20
+      18: iconst_1
+      19: ireturn
+      20: iconst_0
+      21: istore_2
+      22: iload_2
+      23: aload_0
+      24: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      27: if_icmpge     51
+      30: aload_0
+      31: iload_2
+      32: invokevirtual #116                // Method io/github/rosemoe/sora/text/ContentLine.charAt:(I)C
+      35: aload_1
+      36: iload_2
+      37: invokevirtual #116                // Method io/github/rosemoe/sora/text/ContentLine.charAt:(I)C
+      40: if_icmpeq     45
+      43: iconst_0
+      44: ireturn
+      45: iinc          2, 1
+      48: goto          22
+      51: iconst_1
+      52: ireturn
+
+  public boolean isThreadSafe();
+    Code:
+       0: aload_0
+       1: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+       4: ifnull        11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ireturn
+
+  protected void lock(boolean);
+    Code:
+       0: aload_0
+       1: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+       4: ifnonnull     8
+       7: return
+       8: iload_1
+       9: ifeq          24
+      12: aload_0
+      13: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      16: invokeinterface #120,  1          // InterfaceMethod java/util/concurrent/locks/ReadWriteLock.writeLock:()Ljava/util/concurrent/locks/Lock;
+      21: goto          33
+      24: aload_0
+      25: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      28: invokeinterface #126,  1          // InterfaceMethod java/util/concurrent/locks/ReadWriteLock.readLock:()Ljava/util/concurrent/locks/Lock;
+      33: invokeinterface #129,  1          // InterfaceMethod java/util/concurrent/locks/Lock.lock:()V
+      38: return
+
+  protected void unlock(boolean);
+    Code:
+       0: aload_0
+       1: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+       4: ifnonnull     8
+       7: return
+       8: iload_1
+       9: ifeq          24
+      12: aload_0
+      13: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      16: invokeinterface #120,  1          // InterfaceMethod java/util/concurrent/locks/ReadWriteLock.writeLock:()Ljava/util/concurrent/locks/Lock;
+      21: goto          33
+      24: aload_0
+      25: getfield      #29                 // Field lock:Ljava/util/concurrent/locks/ReadWriteLock;
+      28: invokeinterface #126,  1          // InterfaceMethod java/util/concurrent/locks/ReadWriteLock.readLock:()Ljava/util/concurrent/locks/Lock;
+      33: invokeinterface #133,  1          // InterfaceMethod java/util/concurrent/locks/Lock.unlock:()V
+      38: return
+
+  public char charAt(int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iconst_0
+       3: invokevirtual #136                // Method checkIndex:(II)V
+       6: aload_0
+       7: iconst_0
+       8: invokevirtual #140                // Method lock:(Z)V
+      11: aload_0
+      12: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      15: iload_1
+      16: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      21: astore_2
+      22: aload_0
+      23: getfield      #49                 // Field lines:Ljava/util/List;
+      26: aload_2
+      27: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      30: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      35: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      38: aload_2
+      39: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      42: invokevirtual #116                // Method io/github/rosemoe/sora/text/ContentLine.charAt:(I)C
+      45: istore_3
+      46: aload_0
+      47: iconst_0
+      48: invokevirtual #164                // Method unlock:(Z)V
+      51: iload_3
+      52: ireturn
+      53: astore        4
+      55: aload_0
+      56: iconst_0
+      57: invokevirtual #164                // Method unlock:(Z)V
+      60: aload         4
+      62: athrow
+    Exception table:
+       from    to  target type
+          11    46    53   any
+          53    55    53   any
+
+  public char charAt(int, int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: iload_1
+       7: iload_2
+       8: iconst_0
+       9: invokevirtual #166                // Method checkLineAndColumn:(III)V
+      12: aload_0
+      13: getfield      #49                 // Field lines:Ljava/util/List;
+      16: iload_1
+      17: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      22: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      25: iload_2
+      26: invokevirtual #116                // Method io/github/rosemoe/sora/text/ContentLine.charAt:(I)C
+      29: istore_3
+      30: aload_0
+      31: iconst_0
+      32: invokevirtual #164                // Method unlock:(Z)V
+      35: iload_3
+      36: ireturn
+      37: astore        4
+      39: aload_0
+      40: iconst_0
+      41: invokevirtual #164                // Method unlock:(Z)V
+      44: aload         4
+      46: athrow
+    Exception table:
+       from    to  target type
+           5    30    37   any
+          37    39    37   any
+
+  public int length();
+    Code:
+       0: aload_0
+       1: getfield      #33                 // Field textLength:I
+       4: ireturn
+
+  public java.lang.CharSequence subSequence(int, int);
+    Code:
+       0: iload_1
+       1: iload_2
+       2: if_icmple     15
+       5: new           #170                // class java/lang/StringIndexOutOfBoundsException
+       8: dup
+       9: ldc           #172                // String start > end
+      11: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      14: athrow
+      15: aload_0
+      16: iconst_0
+      17: invokevirtual #140                // Method lock:(Z)V
+      20: aload_0
+      21: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      24: iload_1
+      25: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      30: astore_3
+      31: aload_0
+      32: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      35: iload_2
+      36: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      41: astore        4
+      43: aload_0
+      44: aload_3
+      45: invokevirtual #175                // Method io/github/rosemoe/sora/text/CharPosition.getLine:()I
+      48: aload_3
+      49: invokevirtual #178                // Method io/github/rosemoe/sora/text/CharPosition.getColumn:()I
+      52: aload         4
+      54: invokevirtual #175                // Method io/github/rosemoe/sora/text/CharPosition.getLine:()I
+      57: aload         4
+      59: invokevirtual #178                // Method io/github/rosemoe/sora/text/CharPosition.getColumn:()I
+      62: iconst_1
+      63: invokevirtual #181                // Method subContentInternal:(IIIIZ)Lio/github/rosemoe/sora/text/Content;
+      66: astore        5
+      68: aload_0
+      69: iconst_0
+      70: invokevirtual #164                // Method unlock:(Z)V
+      73: aload         5
+      75: areturn
+      76: astore        6
+      78: aload_0
+      79: iconst_0
+      80: invokevirtual #164                // Method unlock:(Z)V
+      83: aload         6
+      85: athrow
+    Exception table:
+       from    to  target type
+          20    68    76   any
+          76    78    76   any
+
+  public java.lang.String substring(int, int);
+    Code:
+       0: iload_1
+       1: iload_2
+       2: if_icmple     15
+       5: new           #170                // class java/lang/StringIndexOutOfBoundsException
+       8: dup
+       9: ldc           #172                // String start > end
+      11: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      14: athrow
+      15: aload_0
+      16: iconst_0
+      17: invokevirtual #140                // Method lock:(Z)V
+      20: aload_0
+      21: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      24: iload_1
+      25: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      30: astore_3
+      31: aload_0
+      32: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      35: iload_2
+      36: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      41: astore        4
+      43: aload_0
+      44: aload_3
+      45: invokevirtual #175                // Method io/github/rosemoe/sora/text/CharPosition.getLine:()I
+      48: aload_3
+      49: invokevirtual #178                // Method io/github/rosemoe/sora/text/CharPosition.getColumn:()I
+      52: aload         4
+      54: invokevirtual #175                // Method io/github/rosemoe/sora/text/CharPosition.getLine:()I
+      57: aload         4
+      59: invokevirtual #178                // Method io/github/rosemoe/sora/text/CharPosition.getColumn:()I
+      62: iload_2
+      63: iload_1
+      64: isub
+      65: iconst_1
+      66: iadd
+      67: invokevirtual #185                // Method subStringBuilder:(IIIII)Ljava/lang/StringBuilder;
+      70: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      73: astore        5
+      75: aload_0
+      76: iconst_0
+      77: invokevirtual #164                // Method unlock:(Z)V
+      80: aload         5
+      82: areturn
+      83: astore        6
+      85: aload_0
+      86: iconst_0
+      87: invokevirtual #164                // Method unlock:(Z)V
+      90: aload         6
+      92: athrow
+    Exception table:
+       from    to  target type
+          20    75    83   any
+          83    85    83   any
+
+  public io.github.rosemoe.sora.text.ContentLine getLine(int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #49                 // Field lines:Ljava/util/List;
+       9: iload_1
+      10: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      15: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      18: astore_2
+      19: aload_0
+      20: iconst_0
+      21: invokevirtual #164                // Method unlock:(Z)V
+      24: aload_2
+      25: areturn
+      26: astore_3
+      27: aload_0
+      28: iconst_0
+      29: invokevirtual #164                // Method unlock:(Z)V
+      32: aload_3
+      33: athrow
+    Exception table:
+       from    to  target type
+           5    19    26   any
+
+  io.github.rosemoe.sora.text.ContentLine getLineUnsafe(int);
+    Code:
+       0: aload_0
+       1: getfield      #49                 // Field lines:Ljava/util/List;
+       4: iload_1
+       5: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      10: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      13: areturn
+
+  public int getLineCount();
+    Code:
+       0: aload_0
+       1: getfield      #49                 // Field lines:Ljava/util/List;
+       4: invokeinterface #195,  1          // InterfaceMethod java/util/List.size:()I
+       9: ireturn
+
+  public int getColumnCount(int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: invokevirtual #198                // Method getLine:(I)Lio/github/rosemoe/sora/text/ContentLine;
+       5: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+       8: ireturn
+
+  public java.lang.String getLineString(int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: iload_1
+       7: invokevirtual #201                // Method checkLine:(I)V
+      10: aload_0
+      11: getfield      #49                 // Field lines:Ljava/util/List;
+      14: iload_1
+      15: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      20: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      23: invokevirtual #204                // Method io/github/rosemoe/sora/text/ContentLine.toString:()Ljava/lang/String;
+      26: astore_2
+      27: aload_0
+      28: iconst_0
+      29: invokevirtual #164                // Method unlock:(Z)V
+      32: aload_2
+      33: areturn
+      34: astore_3
+      35: aload_0
+      36: iconst_0
+      37: invokevirtual #164                // Method unlock:(Z)V
+      40: aload_3
+      41: athrow
+    Exception table:
+       from    to  target type
+           5    27    34   any
+
+  public void getRegionOnLine(int, int, int, char[], int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #49                 // Field lines:Ljava/util/List;
+       9: iload_1
+      10: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      15: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      18: iload_2
+      19: iload_3
+      20: aload         4
+      22: iload         5
+      24: invokevirtual #205                // Method io/github/rosemoe/sora/text/ContentLine.getChars:(II[CI)V
+      27: aload_0
+      28: iconst_0
+      29: invokevirtual #164                // Method unlock:(Z)V
+      32: goto          45
+      35: astore        6
+      37: aload_0
+      38: iconst_0
+      39: invokevirtual #164                // Method unlock:(Z)V
+      42: aload         6
+      44: athrow
+      45: return
+    Exception table:
+       from    to  target type
+           5    27    35   any
+          35    37    35   any
+
+  public void getLineChars(int, char[]);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iconst_0
+       3: aload_0
+       4: iload_1
+       5: invokevirtual #209                // Method getColumnCount:(I)I
+       8: aload_2
+       9: iconst_0
+      10: invokevirtual #213                // Method getRegionOnLine:(III[CI)V
+      13: return
+
+  public int getCharIndex(int, int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+       9: iload_1
+      10: iload_2
+      11: invokeinterface #217,  3          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharIndex:(II)I
+      16: istore_3
+      17: aload_0
+      18: iconst_0
+      19: invokevirtual #164                // Method unlock:(Z)V
+      22: iload_3
+      23: ireturn
+      24: astore        4
+      26: aload_0
+      27: iconst_0
+      28: invokevirtual #164                // Method unlock:(Z)V
+      31: aload         4
+      33: athrow
+    Exception table:
+       from    to  target type
+           5    17    24   any
+          24    26    24   any
+
+  public boolean isValidPosition(io.github.rosemoe.sora.text.CharPosition);
+    Code:
+       0: aload_1
+       1: ifnonnull     6
+       4: iconst_0
+       5: ireturn
+       6: aload_1
+       7: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      10: istore_2
+      11: aload_1
+      12: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      15: istore_3
+      16: aload_1
+      17: getfield      #221                // Field io/github/rosemoe/sora/text/CharPosition.index:I
+      20: istore        4
+      22: aload_0
+      23: iconst_0
+      24: invokevirtual #140                // Method lock:(Z)V
+      27: iload_2
+      28: iflt          39
+      31: iload_2
+      32: aload_0
+      33: invokevirtual #224                // Method getLineCount:()I
+      36: if_icmplt     50
+      39: iconst_0
+      40: istore        5
+      42: aload_0
+      43: iconst_0
+      44: invokevirtual #164                // Method unlock:(Z)V
+      47: iload         5
+      49: ireturn
+      50: aload_0
+      51: iload_2
+      52: invokevirtual #198                // Method getLine:(I)Lio/github/rosemoe/sora/text/ContentLine;
+      55: astore        5
+      57: iload_3
+      58: aload         5
+      60: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      63: aload         5
+      65: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      68: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+      71: iadd
+      72: if_icmpgt     79
+      75: iload_3
+      76: ifge          90
+      79: iconst_0
+      80: istore        6
+      82: aload_0
+      83: iconst_0
+      84: invokevirtual #164                // Method unlock:(Z)V
+      87: iload         6
+      89: ireturn
+      90: aload_0
+      91: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      94: iload_2
+      95: iload_3
+      96: invokeinterface #217,  3          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharIndex:(II)I
+     101: iload         4
+     103: if_icmpne     110
+     106: iconst_1
+     107: goto          111
+     110: iconst_0
+     111: istore        6
+     113: aload_0
+     114: iconst_0
+     115: invokevirtual #164                // Method unlock:(Z)V
+     118: iload         6
+     120: ireturn
+     121: astore        7
+     123: aload_0
+     124: iconst_0
+     125: invokevirtual #164                // Method unlock:(Z)V
+     128: aload         7
+     130: athrow
+    Exception table:
+       from    to  target type
+          27    42   121   any
+          50    82   121   any
+          90   113   121   any
+         121   123   121   any
+
+  public void insert(int, int, java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+       9: invokevirtual #236                // Method java/util/concurrent/atomic/AtomicLong.getAndIncrement:()J
+      12: pop2
+      13: aload_0
+      14: iload_1
+      15: iload_2
+      16: aload_3
+      17: invokevirtual #240                // Method insertInternal:(IILjava/lang/CharSequence;)V
+      20: aload_0
+      21: iconst_1
+      22: invokevirtual #164                // Method unlock:(Z)V
+      25: goto          38
+      28: astore        4
+      30: aload_0
+      31: iconst_1
+      32: invokevirtual #164                // Method unlock:(Z)V
+      35: aload         4
+      37: athrow
+      38: return
+    Exception table:
+       from    to  target type
+          13    20    28   any
+          28    30    28   any
+
+  private void insertInternal(int, int, java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iload_2
+       3: iconst_1
+       4: invokevirtual #166                // Method checkLineAndColumn:(III)V
+       7: aload_3
+       8: ifnonnull     21
+      11: new           #108                // class java/lang/IllegalArgumentException
+      14: dup
+      15: ldc           #243                // String text can not be null
+      17: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      20: athrow
+      21: iload_2
+      22: aload_0
+      23: getfield      #49                 // Field lines:Ljava/util/List;
+      26: iload_1
+      27: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      32: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      35: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      38: if_icmple     58
+      41: aload_0
+      42: getfield      #49                 // Field lines:Ljava/util/List;
+      45: iload_1
+      46: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      51: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      54: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      57: istore_2
+      58: aload_0
+      59: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      62: ifnull        74
+      65: aload_0
+      66: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      69: iload_1
+      70: iload_2
+      71: invokevirtual #249                // Method io/github/rosemoe/sora/text/Cursor.beforeInsert:(II)V
+      74: aload_0
+      75: invokevirtual #254                // Method dispatchBeforeModification:()V
+      78: iload_1
+      79: istore        4
+      81: iload_2
+      82: istore        5
+      84: aload_0
+      85: iload         4
+      87: invokevirtual #257                // Method makeLineMutable:(I)Lio/github/rosemoe/sora/text/ContentLine;
+      90: astore        6
+      92: aload_3
+      93: invokestatic  #260                // Method io/github/rosemoe/sora/text/InsertTextHelper.forInsertion:(Ljava/lang/CharSequence;)Lio/github/rosemoe/sora/text/InsertTextHelper;
+      96: astore        7
+      98: getstatic     #266                // Field io/github/rosemoe/sora/text/InsertTextHelper.TYPE_EOF:I
+     101: istore        9
+     103: iconst_0
+     104: istore        10
+     106: new           #269                // class java/util/LinkedList
+     109: dup
+     110: invokespecial #271                // Method java/util/LinkedList."<init>":()V
+     113: astore        11
+     115: aload         6
+     117: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     120: astore        12
+     122: iload         10
+     124: ifeq          132
+     127: iload         9
+     129: goto          137
+     132: aload         7
+     134: invokevirtual #272                // Method io/github/rosemoe/sora/text/InsertTextHelper.forward:()I
+     137: istore        8
+     139: iconst_0
+     140: istore        10
+     142: iload         8
+     144: getstatic     #266                // Field io/github/rosemoe/sora/text/InsertTextHelper.TYPE_EOF:I
+     147: if_icmpne     153
+     150: goto          314
+     153: iload         8
+     155: getstatic     #275                // Field io/github/rosemoe/sora/text/InsertTextHelper.TYPE_LINE_CONTENT:I
+     158: if_icmpne     199
+     161: aload         6
+     163: iload         5
+     165: aload_3
+     166: aload         7
+     168: invokevirtual #278                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndex:()I
+     171: aload         7
+     173: invokevirtual #281                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndexNext:()I
+     176: invokevirtual #284                // Method io/github/rosemoe/sora/text/ContentLine.insert:(ILjava/lang/CharSequence;II)Lio/github/rosemoe/sora/text/ContentLine;
+     179: pop
+     180: iload         5
+     182: aload         7
+     184: invokevirtual #281                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndexNext:()I
+     187: aload         7
+     189: invokevirtual #278                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndex:()I
+     192: isub
+     193: iadd
+     194: istore        5
+     196: goto          122
+     199: aload_3
+     200: aload         7
+     202: invokevirtual #278                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndex:()I
+     205: aload         7
+     207: invokevirtual #281                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndexNext:()I
+     210: invokestatic  #287                // Method io/github/rosemoe/sora/text/LineSeparator.fromSeparatorString:(Ljava/lang/CharSequence;II)Lio/github/rosemoe/sora/text/LineSeparator;
+     213: astore        13
+     215: aload         6
+     217: aload         13
+     219: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     222: aload         7
+     224: invokevirtual #272                // Method io/github/rosemoe/sora/text/InsertTextHelper.forward:()I
+     227: istore        9
+     229: iconst_1
+     230: istore        10
+     232: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     235: dup
+     236: aload         6
+     238: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     241: iload         5
+     243: isub
+     244: aload         7
+     246: invokevirtual #281                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndexNext:()I
+     249: iadd
+     250: aload         7
+     252: invokevirtual #278                // Method io/github/rosemoe/sora/text/InsertTextHelper.getIndex:()I
+     255: isub
+     256: bipush        10
+     258: iadd
+     259: invokespecial #295                // Method io/github/rosemoe/sora/text/ContentLine."<init>":(I)V
+     262: astore        14
+     264: aload         14
+     266: iconst_0
+     267: aload         6
+     269: iload         5
+     271: aload         6
+     273: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     276: invokevirtual #284                // Method io/github/rosemoe/sora/text/ContentLine.insert:(ILjava/lang/CharSequence;II)Lio/github/rosemoe/sora/text/ContentLine;
+     279: pop
+     280: aload         6
+     282: iload         5
+     284: aload         6
+     286: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     289: invokevirtual #296                // Method io/github/rosemoe/sora/text/ContentLine.delete:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     292: pop
+     293: iconst_0
+     294: istore        5
+     296: aload         14
+     298: astore        6
+     300: aload         11
+     302: aload         14
+     304: invokevirtual #300                // Method java/util/LinkedList.add:(Ljava/lang/Object;)Z
+     307: pop
+     308: iinc          4, 1
+     311: goto          122
+     314: aload         6
+     316: aload         12
+     318: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     321: aload_0
+     322: getfield      #49                 // Field lines:Ljava/util/List;
+     325: iload_1
+     326: iconst_1
+     327: iadd
+     328: aload         11
+     330: invokeinterface #301,  3          // InterfaceMethod java/util/List.addAll:(ILjava/util/Collection;)Z
+     335: pop
+     336: aload         7
+     338: invokevirtual #305                // Method io/github/rosemoe/sora/text/InsertTextHelper.recycle:()V
+     341: aload_0
+     342: dup
+     343: getfield      #33                 // Field textLength:I
+     346: aload_3
+     347: invokeinterface #92,  1           // InterfaceMethod java/lang/CharSequence.length:()I
+     352: iadd
+     353: putfield      #33                 // Field textLength:I
+     356: aload_0
+     357: iload_1
+     358: iload_2
+     359: iload         4
+     361: iload         5
+     363: aload_3
+     364: invokevirtual #308                // Method dispatchAfterInsert:(IIIILjava/lang/CharSequence;)V
+     367: return
+
+  public void delete(int, int);
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: iload_1
+       7: iconst_1
+       8: invokevirtual #136                // Method checkIndex:(II)V
+      11: aload_0
+      12: iload_2
+      13: iconst_1
+      14: invokevirtual #136                // Method checkIndex:(II)V
+      17: aload_0
+      18: getfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+      21: invokevirtual #236                // Method java/util/concurrent/atomic/AtomicLong.getAndIncrement:()J
+      24: pop2
+      25: aload_0
+      26: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      29: iload_1
+      30: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      35: astore_3
+      36: aload_0
+      37: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      40: iload_2
+      41: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      46: astore        4
+      48: iload_1
+      49: iload_2
+      50: if_icmpeq     75
+      53: aload_0
+      54: aload_3
+      55: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      58: aload_3
+      59: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      62: aload         4
+      64: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      67: aload         4
+      69: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      72: invokevirtual #312                // Method deleteInternal:(IIII)V
+      75: aload_0
+      76: iconst_1
+      77: invokevirtual #164                // Method unlock:(Z)V
+      80: goto          93
+      83: astore        5
+      85: aload_0
+      86: iconst_1
+      87: invokevirtual #164                // Method unlock:(Z)V
+      90: aload         5
+      92: athrow
+      93: return
+    Exception table:
+       from    to  target type
+          25    75    83   any
+          83    85    83   any
+
+  public void delete(int, int, int, int);
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+       9: invokevirtual #236                // Method java/util/concurrent/atomic/AtomicLong.getAndIncrement:()J
+      12: pop2
+      13: aload_0
+      14: iload_1
+      15: iload_2
+      16: iload_3
+      17: iload         4
+      19: invokevirtual #312                // Method deleteInternal:(IIII)V
+      22: aload_0
+      23: iconst_1
+      24: invokevirtual #164                // Method unlock:(Z)V
+      27: goto          40
+      30: astore        5
+      32: aload_0
+      33: iconst_1
+      34: invokevirtual #164                // Method unlock:(Z)V
+      37: aload         5
+      39: athrow
+      40: return
+    Exception table:
+       from    to  target type
+          13    22    30   any
+          30    32    30   any
+
+  private void deleteInternal(int, int, int, int);
+    Code:
+       0: aload_0
+       1: iload_3
+       2: iload         4
+       4: iconst_1
+       5: invokevirtual #166                // Method checkLineAndColumn:(III)V
+       8: aload_0
+       9: iload_1
+      10: iload_2
+      11: iconst_1
+      12: invokevirtual #166                // Method checkLineAndColumn:(III)V
+      15: iload_1
+      16: iload_3
+      17: if_icmpne     27
+      20: iload_2
+      21: iload         4
+      23: if_icmpne     27
+      26: return
+      27: aload_0
+      28: getfield      #49                 // Field lines:Ljava/util/List;
+      31: iload_3
+      32: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      37: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      40: astore        5
+      42: iload         4
+      44: aload         5
+      46: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      49: if_icmple     73
+      52: iload_3
+      53: iconst_1
+      54: iadd
+      55: aload_0
+      56: invokevirtual #224                // Method getLineCount:()I
+      59: if_icmpge     73
+      62: aload_0
+      63: iload_1
+      64: iload_2
+      65: iload_3
+      66: iconst_1
+      67: iadd
+      68: iconst_0
+      69: invokevirtual #312                // Method deleteInternal:(IIII)V
+      72: return
+      73: aload_0
+      74: getfield      #49                 // Field lines:Ljava/util/List;
+      77: iload_1
+      78: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      83: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      86: astore        6
+      88: iload_2
+      89: aload         6
+      91: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      94: if_icmple     111
+      97: aload_0
+      98: iload_1
+      99: aload         6
+     101: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     104: iload_3
+     105: iload         4
+     107: invokevirtual #312                // Method deleteInternal:(IIII)V
+     110: return
+     111: new           #190                // class java/lang/StringBuilder
+     114: dup
+     115: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+     118: astore        7
+     120: iload_1
+     121: iload_3
+     122: if_icmpne     226
+     125: aload_0
+     126: iload_1
+     127: invokevirtual #257                // Method makeLineMutable:(I)Lio/github/rosemoe/sora/text/ContentLine;
+     130: astore        8
+     132: aload         8
+     134: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     137: istore        9
+     139: iload_2
+     140: iflt          156
+     143: iload         4
+     145: iload         9
+     147: if_icmpgt     156
+     150: iload_2
+     151: iload         4
+     153: if_icmple     167
+     156: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     159: dup
+     160: ldc_w         #317                // String invalid bounds
+     163: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     166: athrow
+     167: aload_0
+     168: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+     171: ifnull        186
+     174: aload_0
+     175: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+     178: iload_1
+     179: iload_2
+     180: iload_3
+     181: iload         4
+     183: invokevirtual #319                // Method io/github/rosemoe/sora/text/Cursor.beforeDelete:(IIII)V
+     186: aload_0
+     187: invokevirtual #254                // Method dispatchBeforeModification:()V
+     190: aload         7
+     192: aload         8
+     194: iload_2
+     195: iload         4
+     197: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     200: pop
+     201: aload         8
+     203: iload_2
+     204: iload         4
+     206: invokevirtual #296                // Method io/github/rosemoe/sora/text/ContentLine.delete:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     209: pop
+     210: aload_0
+     211: dup
+     212: getfield      #33                 // Field textLength:I
+     215: iload         4
+     217: iload_2
+     218: isub
+     219: isub
+     220: putfield      #33                 // Field textLength:I
+     223: goto          567
+     226: iload_1
+     227: iload_3
+     228: if_icmpge     556
+     231: aload_0
+     232: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+     235: ifnull        250
+     238: aload_0
+     239: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+     242: iload_1
+     243: iload_2
+     244: iload_3
+     245: iload         4
+     247: invokevirtual #319                // Method io/github/rosemoe/sora/text/Cursor.beforeDelete:(IIII)V
+     250: aload_0
+     251: invokevirtual #254                // Method dispatchBeforeModification:()V
+     254: iload_1
+     255: iconst_1
+     256: iadd
+     257: istore        8
+     259: iload         8
+     261: iload_3
+     262: iconst_1
+     263: isub
+     264: if_icmpgt     351
+     267: aload_0
+     268: getfield      #49                 // Field lines:Ljava/util/List;
+     271: iload         8
+     273: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     278: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     281: astore        9
+     283: aload_0
+     284: getfield      #49                 // Field lines:Ljava/util/List;
+     287: iload         8
+     289: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     294: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     297: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     300: astore        10
+     302: aload_0
+     303: dup
+     304: getfield      #33                 // Field textLength:I
+     307: aload         9
+     309: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     312: aload         10
+     314: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     317: iadd
+     318: isub
+     319: putfield      #33                 // Field textLength:I
+     322: aload         9
+     324: aload         7
+     326: invokevirtual #326                // Method io/github/rosemoe/sora/text/ContentLine.appendTo:(Ljava/lang/StringBuilder;)V
+     329: aload         7
+     331: aload         10
+     333: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     336: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     339: pop
+     340: aload         9
+     342: invokevirtual #336                // Method io/github/rosemoe/sora/text/ContentLine.release:()V
+     345: iinc          8, 1
+     348: goto          259
+     351: iload_3
+     352: iload_1
+     353: iconst_1
+     354: iadd
+     355: if_icmple     376
+     358: aload_0
+     359: getfield      #49                 // Field lines:Ljava/util/List;
+     362: iload_1
+     363: iconst_1
+     364: iadd
+     365: iload_3
+     366: invokeinterface #339,  3          // InterfaceMethod java/util/List.subList:(II)Ljava/util/List;
+     371: invokeinterface #343,  1          // InterfaceMethod java/util/List.clear:()V
+     376: iload_1
+     377: iconst_1
+     378: iadd
+     379: istore        8
+     381: aload_0
+     382: iload_1
+     383: invokevirtual #257                // Method makeLineMutable:(I)Lio/github/rosemoe/sora/text/ContentLine;
+     386: astore        9
+     388: aload_0
+     389: getfield      #49                 // Field lines:Ljava/util/List;
+     392: iload         8
+     394: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     399: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     402: astore        10
+     404: aload_0
+     405: dup
+     406: getfield      #33                 // Field textLength:I
+     409: aload         9
+     411: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     414: iload_2
+     415: isub
+     416: isub
+     417: putfield      #33                 // Field textLength:I
+     420: aload         7
+     422: iconst_0
+     423: aload         9
+     425: iload_2
+     426: aload         9
+     428: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     431: invokevirtual #346                // Method java/lang/StringBuilder.insert:(ILjava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     434: aload         9
+     436: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     439: iload_2
+     440: isub
+     441: aload         9
+     443: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     446: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     449: invokevirtual #349                // Method java/lang/StringBuilder.insert:(ILjava/lang/String;)Ljava/lang/StringBuilder;
+     452: pop
+     453: aload         9
+     455: iload_2
+     456: aload         9
+     458: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     461: invokevirtual #296                // Method io/github/rosemoe/sora/text/ContentLine.delete:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     464: pop
+     465: aload_0
+     466: dup
+     467: getfield      #33                 // Field textLength:I
+     470: iload         4
+     472: isub
+     473: putfield      #33                 // Field textLength:I
+     476: aload         7
+     478: aload         10
+     480: iconst_0
+     481: iload         4
+     483: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     486: pop
+     487: aload_0
+     488: dup
+     489: getfield      #33                 // Field textLength:I
+     492: aload         9
+     494: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     497: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     500: isub
+     501: putfield      #33                 // Field textLength:I
+     504: aload_0
+     505: getfield      #49                 // Field lines:Ljava/util/List;
+     508: iload         8
+     510: invokeinterface #352,  2          // InterfaceMethod java/util/List.remove:(I)Ljava/lang/Object;
+     515: pop
+     516: aload         9
+     518: new           #355                // class io/github/rosemoe/sora/text/TextReference
+     521: dup
+     522: aload         10
+     524: iload         4
+     526: aload         10
+     528: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     531: invokespecial #357                // Method io/github/rosemoe/sora/text/TextReference."<init>":(Ljava/lang/CharSequence;II)V
+     534: invokevirtual #360                // Method io/github/rosemoe/sora/text/ContentLine.append:(Ljava/lang/CharSequence;)Lio/github/rosemoe/sora/text/ContentLine;
+     537: pop
+     538: aload         9
+     540: aload         10
+     542: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     545: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     548: aload         10
+     550: invokevirtual #336                // Method io/github/rosemoe/sora/text/ContentLine.release:()V
+     553: goto          567
+     556: new           #108                // class java/lang/IllegalArgumentException
+     559: dup
+     560: ldc_w         #363                // String start line > end line
+     563: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+     566: athrow
+     567: aload_0
+     568: iload_1
+     569: iload_2
+     570: iload_3
+     571: iload         4
+     573: aload         7
+     575: invokevirtual #365                // Method dispatchAfterDelete:(IIIILjava/lang/CharSequence;)V
+     578: return
+
+  private io.github.rosemoe.sora.text.ContentLine makeLineMutable(int);
+    Code:
+       0: aload_0
+       1: getfield      #49                 // Field lines:Ljava/util/List;
+       4: iload_1
+       5: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      10: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      13: astore_2
+      14: aload_2
+      15: invokevirtual #368                // Method io/github/rosemoe/sora/text/ContentLine.toMutable:()Lio/github/rosemoe/sora/text/ContentLine;
+      18: astore_3
+      19: aload_3
+      20: aload_2
+      21: if_acmpeq     40
+      24: aload_0
+      25: getfield      #49                 // Field lines:Ljava/util/List;
+      28: iload_1
+      29: aload_3
+      30: invokeinterface #372,  3          // InterfaceMethod java/util/List.set:(ILjava/lang/Object;)Ljava/lang/Object;
+      35: pop
+      36: aload_2
+      37: invokevirtual #336                // Method io/github/rosemoe/sora/text/ContentLine.release:()V
+      40: aload_3
+      41: areturn
+
+  public void replace(int, int, int, int, java.lang.CharSequence);
+    Code:
+       0: aload         5
+       2: ifnonnull     15
+       5: new           #108                // class java/lang/IllegalArgumentException
+       8: dup
+       9: ldc           #243                // String text can not be null
+      11: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      14: athrow
+      15: aload_0
+      16: iconst_1
+      17: invokevirtual #140                // Method lock:(Z)V
+      20: aload_0
+      21: getfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+      24: invokevirtual #236                // Method java/util/concurrent/atomic/AtomicLong.getAndIncrement:()J
+      27: pop2
+      28: aload_0
+      29: invokevirtual #376                // Method dispatchBeforeReplace:()V
+      32: aload_0
+      33: iload_1
+      34: iload_2
+      35: iload_3
+      36: iload         4
+      38: invokevirtual #312                // Method deleteInternal:(IIII)V
+      41: aload_0
+      42: iload_1
+      43: iload_2
+      44: aload         5
+      46: invokevirtual #240                // Method insertInternal:(IILjava/lang/CharSequence;)V
+      49: aload_0
+      50: iconst_1
+      51: invokevirtual #164                // Method unlock:(Z)V
+      54: goto          67
+      57: astore        6
+      59: aload_0
+      60: iconst_1
+      61: invokevirtual #164                // Method unlock:(Z)V
+      64: aload         6
+      66: athrow
+      67: return
+    Exception table:
+       from    to  target type
+          28    49    57   any
+          57    59    57   any
+
+  public void replace(int, int, java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+       4: iload_1
+       5: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      10: astore        4
+      12: aload_0
+      13: invokevirtual #142                // Method getIndexer:()Lio/github/rosemoe/sora/text/Indexer;
+      16: iload_2
+      17: invokeinterface #146,  2          // InterfaceMethod io/github/rosemoe/sora/text/Indexer.getCharPosition:(I)Lio/github/rosemoe/sora/text/CharPosition;
+      22: astore        5
+      24: aload_0
+      25: aload         4
+      27: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      30: aload         4
+      32: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      35: aload         5
+      37: getfield      #152                // Field io/github/rosemoe/sora/text/CharPosition.line:I
+      40: aload         5
+      42: getfield      #161                // Field io/github/rosemoe/sora/text/CharPosition.column:I
+      45: aload_3
+      46: invokevirtual #379                // Method replace:(IIIILjava/lang/CharSequence;)V
+      49: return
+
+  public long getDocumentVersion();
+    Code:
+       0: aload_0
+       1: getfield      #20                 // Field documentVersion:Ljava/util/concurrent/atomic/AtomicLong;
+       4: invokevirtual #382                // Method java/util/concurrent/atomic/AtomicLong.get:()J
+       7: lreturn
+
+  public io.github.rosemoe.sora.text.TextRange undo();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: invokevirtual #384                // Method io/github/rosemoe/sora/text/UndoManager.undo:(Lio/github/rosemoe/sora/text/Content;)Lio/github/rosemoe/sora/text/TextRange;
+       8: areturn
+
+  public void redo();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: invokevirtual #388                // Method io/github/rosemoe/sora/text/UndoManager.redo:(Lio/github/rosemoe/sora/text/Content;)V
+       8: return
+
+  public boolean isUndoManagerWorking();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: invokevirtual #391                // Method io/github/rosemoe/sora/text/UndoManager.isModifyingContent:()Z
+       7: ireturn
+
+  public boolean canUndo();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: invokevirtual #395                // Method io/github/rosemoe/sora/text/UndoManager.canUndo:()Z
+       7: ireturn
+
+  public boolean canRedo();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: invokevirtual #398                // Method io/github/rosemoe/sora/text/UndoManager.canRedo:()Z
+       7: ireturn
+
+  public boolean isUndoEnabled();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: invokevirtual #401                // Method io/github/rosemoe/sora/text/UndoManager.isUndoEnabled:()Z
+       7: ireturn
+
+  public void setUndoEnabled(boolean);
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: iload_1
+       5: invokevirtual #404                // Method io/github/rosemoe/sora/text/UndoManager.setUndoEnabled:(Z)V
+       8: return
+
+  public int getMaxUndoStackSize();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: invokevirtual #405                // Method io/github/rosemoe/sora/text/UndoManager.getMaxUndoStackSize:()I
+       7: ireturn
+
+  public void setMaxUndoStackSize(int);
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: iload_1
+       5: invokevirtual #408                // Method io/github/rosemoe/sora/text/UndoManager.setMaxUndoStackSize:(I)V
+       8: return
+
+  public boolean beginBatchEdit();
+    Code:
+       0: aload_0
+       1: dup
+       2: getfield      #37                 // Field nestedBatchEdit:I
+       5: iconst_1
+       6: iadd
+       7: putfield      #37                 // Field nestedBatchEdit:I
+      10: aload_0
+      11: invokevirtual #409                // Method isInBatchEdit:()Z
+      14: ireturn
+
+  public boolean endBatchEdit();
+    Code:
+       0: aload_0
+       1: dup
+       2: getfield      #37                 // Field nestedBatchEdit:I
+       5: iconst_1
+       6: isub
+       7: putfield      #37                 // Field nestedBatchEdit:I
+      10: aload_0
+      11: getfield      #37                 // Field nestedBatchEdit:I
+      14: ifne          24
+      17: aload_0
+      18: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+      21: invokevirtual #412                // Method io/github/rosemoe/sora/text/UndoManager.onExitBatchEdit:()V
+      24: aload_0
+      25: getfield      #37                 // Field nestedBatchEdit:I
+      28: ifge          36
+      31: aload_0
+      32: iconst_0
+      33: putfield      #37                 // Field nestedBatchEdit:I
+      36: aload_0
+      37: invokevirtual #409                // Method isInBatchEdit:()Z
+      40: ireturn
+
+  public int getNestedBatchEdit();
+    Code:
+       0: aload_0
+       1: getfield      #37                 // Field nestedBatchEdit:I
+       4: ireturn
+
+  public void resetBatchEdit();
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: putfield      #37                 // Field nestedBatchEdit:I
+       5: return
+
+  public boolean isInBatchEdit();
+    Code:
+       0: aload_0
+       1: getfield      #37                 // Field nestedBatchEdit:I
+       4: ifle          11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ireturn
+
+  public void addContentListener(io.github.rosemoe.sora.text.ContentListener);
+    Code:
+       0: aload_1
+       1: ifnonnull     15
+       4: new           #108                // class java/lang/IllegalArgumentException
+       7: dup
+       8: ldc_w         #415                // String listener can not be null
+      11: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      14: athrow
+      15: aload_1
+      16: instanceof    #147                // class io/github/rosemoe/sora/text/Indexer
+      19: ifeq          33
+      22: new           #108                // class java/lang/IllegalArgumentException
+      25: dup
+      26: ldc_w         #417                // String Permission denied
+      29: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      32: athrow
+      33: aload_0
+      34: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      37: aload_1
+      38: invokeinterface #419,  2          // InterfaceMethod java/util/List.contains:(Ljava/lang/Object;)Z
+      43: ifne          57
+      46: aload_0
+      47: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      50: aload_1
+      51: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+      56: pop
+      57: return
+
+  public void removeContentListener(io.github.rosemoe.sora.text.ContentListener);
+    Code:
+       0: aload_1
+       1: instanceof    #147                // class io/github/rosemoe/sora/text/Indexer
+       4: ifeq          18
+       7: new           #108                // class java/lang/IllegalArgumentException
+      10: dup
+      11: ldc_w         #417                // String Permission denied
+      14: invokespecial #112                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+      17: athrow
+      18: aload_0
+      19: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      22: aload_1
+      23: invokeinterface #422,  2          // InterfaceMethod java/util/List.remove:(Ljava/lang/Object;)Z
+      28: pop
+      29: return
+
+  public io.github.rosemoe.sora.text.Indexer getIndexer();
+    Code:
+       0: aload_0
+       1: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+       4: ifnull        15
+       7: aload_0
+       8: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      11: invokevirtual #424                // Method io/github/rosemoe/sora/text/Cursor.getIndexer:()Lio/github/rosemoe/sora/text/CachedIndexer;
+      14: areturn
+      15: aload_0
+      16: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      19: areturn
+
+  public io.github.rosemoe.sora.text.Content subContent(int, int, int, int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iload_2
+       3: iload_3
+       4: iload         4
+       6: iconst_1
+       7: invokevirtual #427                // Method subContent:(IIIIZ)Lio/github/rosemoe/sora/text/Content;
+      10: areturn
+
+  public io.github.rosemoe.sora.text.Content subContent(int, int, int, int, boolean);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: iload_1
+       7: iload_2
+       8: iload_3
+       9: iload         4
+      11: iload         5
+      13: invokevirtual #181                // Method subContentInternal:(IIIIZ)Lio/github/rosemoe/sora/text/Content;
+      16: astore        6
+      18: aload_0
+      19: iconst_0
+      20: invokevirtual #164                // Method unlock:(Z)V
+      23: aload         6
+      25: areturn
+      26: astore        7
+      28: aload_0
+      29: iconst_0
+      30: invokevirtual #164                // Method unlock:(Z)V
+      33: aload         7
+      35: athrow
+    Exception table:
+       from    to  target type
+           5    18    26   any
+          26    28    26   any
+
+  private io.github.rosemoe.sora.text.Content subContentInternal(int, int, int, int, boolean);
+    Code:
+       0: new           #2                  // class io/github/rosemoe/sora/text/Content
+       3: dup
+       4: aconst_null
+       5: iload         5
+       7: invokespecial #7                  // Method "<init>":(Ljava/lang/CharSequence;Z)V
+      10: astore        6
+      12: aload         6
+      14: iconst_0
+      15: invokevirtual #97                 // Method setUndoEnabled:(Z)V
+      18: iload_1
+      19: iload_3
+      20: if_icmpne     155
+      23: aload_0
+      24: getfield      #49                 // Field lines:Ljava/util/List;
+      27: iload_1
+      28: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      33: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      36: astore        7
+      38: iload         4
+      40: aload         7
+      42: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      45: iconst_1
+      46: iadd
+      47: if_icmpne     137
+      50: aload         7
+      52: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      55: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+      58: if_acmpne     137
+      61: iload_2
+      62: iload         4
+      64: if_icmpge     152
+      67: aload         6
+      69: iconst_0
+      70: iconst_0
+      71: aload         7
+      73: iload_2
+      74: aload         7
+      76: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      79: invokevirtual #434                // Method io/github/rosemoe/sora/text/ContentLine.subSequence:(II)Lio/github/rosemoe/sora/text/ContentLine;
+      82: invokevirtual #101                // Method insert:(IILjava/lang/CharSequence;)V
+      85: aload         6
+      87: getfield      #49                 // Field lines:Ljava/util/List;
+      90: iconst_0
+      91: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      96: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      99: getstatic     #437                // Field io/github/rosemoe/sora/text/LineSeparator.CR:Lio/github/rosemoe/sora/text/LineSeparator;
+     102: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     105: aload         6
+     107: dup
+     108: getfield      #33                 // Field textLength:I
+     111: iconst_1
+     112: iadd
+     113: putfield      #33                 // Field textLength:I
+     116: aload         6
+     118: getfield      #49                 // Field lines:Ljava/util/List;
+     121: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     124: dup
+     125: invokespecial #55                 // Method io/github/rosemoe/sora/text/ContentLine."<init>":()V
+     128: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+     133: pop
+     134: goto          152
+     137: aload         6
+     139: iconst_0
+     140: iconst_0
+     141: aload         7
+     143: iload_2
+     144: iload         4
+     146: invokevirtual #434                // Method io/github/rosemoe/sora/text/ContentLine.subSequence:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     149: invokevirtual #101                // Method insert:(IILjava/lang/CharSequence;)V
+     152: goto          597
+     155: iload_1
+     156: iload_3
+     157: if_icmpge     587
+     160: aload_0
+     161: getfield      #49                 // Field lines:Ljava/util/List;
+     164: iload_1
+     165: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     170: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     173: astore        7
+     175: aload         7
+     177: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     180: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+     183: if_acmpne     314
+     186: iload_2
+     187: aload         7
+     189: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     192: if_icmpgt     256
+     195: aload         6
+     197: iconst_0
+     198: iconst_0
+     199: aload         7
+     201: iload_2
+     202: aload         7
+     204: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     207: invokevirtual #434                // Method io/github/rosemoe/sora/text/ContentLine.subSequence:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     210: invokevirtual #101                // Method insert:(IILjava/lang/CharSequence;)V
+     213: aload         6
+     215: getfield      #49                 // Field lines:Ljava/util/List;
+     218: iconst_0
+     219: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     224: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     227: aload         7
+     229: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     232: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     235: aload         6
+     237: dup
+     238: getfield      #33                 // Field textLength:I
+     241: aload         7
+     243: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     246: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     249: iadd
+     250: putfield      #33                 // Field textLength:I
+     253: goto          372
+     256: iload_2
+     257: aload         7
+     259: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     262: iconst_1
+     263: iadd
+     264: if_icmpne     306
+     267: aload         6
+     269: getfield      #49                 // Field lines:Ljava/util/List;
+     272: iconst_0
+     273: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     278: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     281: getstatic     #440                // Field io/github/rosemoe/sora/text/LineSeparator.LF:Lio/github/rosemoe/sora/text/LineSeparator;
+     284: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     287: aload         6
+     289: dup
+     290: getfield      #33                 // Field textLength:I
+     293: getstatic     #440                // Field io/github/rosemoe/sora/text/LineSeparator.LF:Lio/github/rosemoe/sora/text/LineSeparator;
+     296: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     299: iadd
+     300: putfield      #33                 // Field textLength:I
+     303: goto          372
+     306: new           #443                // class java/lang/IndexOutOfBoundsException
+     309: dup
+     310: invokespecial #445                // Method java/lang/IndexOutOfBoundsException."<init>":()V
+     313: athrow
+     314: aload         6
+     316: iconst_0
+     317: iconst_0
+     318: aload         7
+     320: iload_2
+     321: aload         7
+     323: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     326: invokevirtual #434                // Method io/github/rosemoe/sora/text/ContentLine.subSequence:(II)Lio/github/rosemoe/sora/text/ContentLine;
+     329: invokevirtual #101                // Method insert:(IILjava/lang/CharSequence;)V
+     332: aload         6
+     334: getfield      #49                 // Field lines:Ljava/util/List;
+     337: iconst_0
+     338: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     343: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     346: aload         7
+     348: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     351: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     354: aload         6
+     356: dup
+     357: getfield      #33                 // Field textLength:I
+     360: aload         7
+     362: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     365: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     368: iadd
+     369: putfield      #33                 // Field textLength:I
+     372: iload_1
+     373: iconst_1
+     374: iadd
+     375: istore        8
+     377: iload         8
+     379: iload_3
+     380: if_icmpge     449
+     383: aload_0
+     384: getfield      #49                 // Field lines:Ljava/util/List;
+     387: iload         8
+     389: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     394: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     397: astore        9
+     399: aload         6
+     401: getfield      #49                 // Field lines:Ljava/util/List;
+     404: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     407: dup
+     408: aload         9
+     410: invokespecial #446                // Method io/github/rosemoe/sora/text/ContentLine."<init>":(Lio/github/rosemoe/sora/text/ContentLine;)V
+     413: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+     418: pop
+     419: aload         6
+     421: dup
+     422: getfield      #33                 // Field textLength:I
+     425: aload         9
+     427: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     430: aload         9
+     432: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     435: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     438: iadd
+     439: iadd
+     440: putfield      #33                 // Field textLength:I
+     443: iinc          8, 1
+     446: goto          377
+     449: aload_0
+     450: getfield      #49                 // Field lines:Ljava/util/List;
+     453: iload_3
+     454: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     459: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     462: astore        8
+     464: iload         4
+     466: aload         8
+     468: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     471: iconst_1
+     472: iadd
+     473: if_icmpne     545
+     476: aload         8
+     478: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     481: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+     484: if_acmpne     545
+     487: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     490: dup
+     491: invokespecial #55                 // Method io/github/rosemoe/sora/text/ContentLine."<init>":()V
+     494: iconst_0
+     495: aload         8
+     497: iconst_0
+     498: iload         4
+     500: iconst_1
+     501: isub
+     502: invokevirtual #284                // Method io/github/rosemoe/sora/text/ContentLine.insert:(ILjava/lang/CharSequence;II)Lio/github/rosemoe/sora/text/ContentLine;
+     505: astore        9
+     507: aload         6
+     509: getfield      #49                 // Field lines:Ljava/util/List;
+     512: aload         9
+     514: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+     519: pop
+     520: aload         9
+     522: getstatic     #437                // Field io/github/rosemoe/sora/text/LineSeparator.CR:Lio/github/rosemoe/sora/text/LineSeparator;
+     525: invokevirtual #291                // Method io/github/rosemoe/sora/text/ContentLine.setLineSeparator:(Lio/github/rosemoe/sora/text/LineSeparator;)V
+     528: aload         6
+     530: dup
+     531: getfield      #33                 // Field textLength:I
+     534: iload         4
+     536: iconst_1
+     537: iadd
+     538: iadd
+     539: putfield      #33                 // Field textLength:I
+     542: goto          584
+     545: aload         6
+     547: getfield      #49                 // Field lines:Ljava/util/List;
+     550: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     553: dup
+     554: invokespecial #55                 // Method io/github/rosemoe/sora/text/ContentLine."<init>":()V
+     557: iconst_0
+     558: aload         8
+     560: iconst_0
+     561: iload         4
+     563: invokevirtual #284                // Method io/github/rosemoe/sora/text/ContentLine.insert:(ILjava/lang/CharSequence;II)Lio/github/rosemoe/sora/text/ContentLine;
+     566: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+     571: pop
+     572: aload         6
+     574: dup
+     575: getfield      #33                 // Field textLength:I
+     578: iload         4
+     580: iadd
+     581: putfield      #33                 // Field textLength:I
+     584: goto          597
+     587: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     590: dup
+     591: ldc           #172                // String start > end
+     593: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     596: athrow
+     597: aload         6
+     599: iconst_1
+     600: invokevirtual #97                 // Method setUndoEnabled:(Z)V
+     603: aload         6
+     605: areturn
+
+  private java.lang.StringBuilder subStringBuilder(int, int, int, int, int);
+    Code:
+       0: new           #190                // class java/lang/StringBuilder
+       3: dup
+       4: iload         5
+       6: invokespecial #449                // Method java/lang/StringBuilder."<init>":(I)V
+       9: astore        6
+      11: iload_1
+      12: iload_3
+      13: if_icmpne     122
+      16: aload_0
+      17: getfield      #49                 // Field lines:Ljava/util/List;
+      20: iload_1
+      21: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      26: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      29: astore        7
+      31: iload         4
+      33: aload         7
+      35: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      38: iconst_1
+      39: iadd
+      40: if_icmpne     97
+      43: aload         7
+      45: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      48: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+      51: if_acmpne     97
+      54: iload_2
+      55: iload         4
+      57: if_icmpge     119
+      60: aload         6
+      62: aload_0
+      63: getfield      #49                 // Field lines:Ljava/util/List;
+      66: iload_1
+      67: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      72: checkcast     #93                 // class java/lang/CharSequence
+      75: iload_2
+      76: aload         7
+      78: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      81: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+      84: getstatic     #437                // Field io/github/rosemoe/sora/text/LineSeparator.CR:Lio/github/rosemoe/sora/text/LineSeparator;
+      87: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+      90: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      93: pop
+      94: goto          119
+      97: aload         6
+      99: aload_0
+     100: getfield      #49                 // Field lines:Ljava/util/List;
+     103: iload_1
+     104: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     109: checkcast     #93                 // class java/lang/CharSequence
+     112: iload_2
+     113: iload         4
+     115: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     118: pop
+     119: goto          392
+     122: iload_1
+     123: iload_3
+     124: if_icmpge     382
+     127: aload_0
+     128: getfield      #49                 // Field lines:Ljava/util/List;
+     131: iload_1
+     132: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     137: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     140: astore        7
+     142: aload         7
+     144: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     147: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+     150: if_acmpne     227
+     153: iload_2
+     154: aload         7
+     156: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     159: if_icmpgt     193
+     162: aload         6
+     164: aload         7
+     166: iload_2
+     167: aload         7
+     169: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     172: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     175: pop
+     176: aload         6
+     178: aload         7
+     180: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     183: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     186: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     189: pop
+     190: goto          255
+     193: iload_2
+     194: aload         7
+     196: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     199: iconst_1
+     200: iadd
+     201: if_icmpne     219
+     204: aload         6
+     206: getstatic     #440                // Field io/github/rosemoe/sora/text/LineSeparator.LF:Lio/github/rosemoe/sora/text/LineSeparator;
+     209: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     212: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     215: pop
+     216: goto          255
+     219: new           #443                // class java/lang/IndexOutOfBoundsException
+     222: dup
+     223: invokespecial #445                // Method java/lang/IndexOutOfBoundsException."<init>":()V
+     226: athrow
+     227: aload         6
+     229: aload         7
+     231: iload_2
+     232: aload         7
+     234: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     237: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     240: pop
+     241: aload         6
+     243: aload         7
+     245: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     248: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     251: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     254: pop
+     255: iload_1
+     256: iconst_1
+     257: iadd
+     258: istore        8
+     260: iload         8
+     262: iload_3
+     263: if_icmpge     307
+     266: aload_0
+     267: getfield      #49                 // Field lines:Ljava/util/List;
+     270: iload         8
+     272: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     277: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     280: astore        9
+     282: aload         6
+     284: aload         9
+     286: invokevirtual #450                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;)Ljava/lang/StringBuilder;
+     289: aload         9
+     291: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     294: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     297: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     300: pop
+     301: iinc          8, 1
+     304: goto          260
+     307: aload_0
+     308: getfield      #49                 // Field lines:Ljava/util/List;
+     311: iload_3
+     312: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+     317: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     320: astore        8
+     322: iload         4
+     324: aload         8
+     326: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     329: iconst_1
+     330: iadd
+     331: if_icmpne     368
+     334: aload         8
+     336: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     339: getstatic     #430                // Field io/github/rosemoe/sora/text/LineSeparator.CRLF:Lio/github/rosemoe/sora/text/LineSeparator;
+     342: if_acmpne     368
+     345: aload         6
+     347: aload         8
+     349: iconst_0
+     350: iload         4
+     352: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     355: getstatic     #437                // Field io/github/rosemoe/sora/text/LineSeparator.CR:Lio/github/rosemoe/sora/text/LineSeparator;
+     358: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+     361: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     364: pop
+     365: goto          379
+     368: aload         6
+     370: aload         8
+     372: iconst_0
+     373: iload         4
+     375: invokevirtual #322                // Method java/lang/StringBuilder.append:(Ljava/lang/CharSequence;II)Ljava/lang/StringBuilder;
+     378: pop
+     379: goto          392
+     382: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     385: dup
+     386: ldc           #172                // String start > end
+     388: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     391: athrow
+     392: aload         6
+     394: areturn
+
+  public io.github.rosemoe.sora.text.bidi.Directions getLineDirections(int);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+       9: aload_0
+      10: getfield      #49                 // Field lines:Ljava/util/List;
+      13: iload_1
+      14: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      19: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      22: iload_1
+      23: invokevirtual #453                // Method io/github/rosemoe/sora/text/bidi/ContentBidi.getLineDirections:(Lio/github/rosemoe/sora/text/ContentLine;I)Lio/github/rosemoe/sora/text/bidi/Directions;
+      26: astore_2
+      27: aload_0
+      28: iconst_0
+      29: invokevirtual #164                // Method unlock:(Z)V
+      32: aload_2
+      33: areturn
+      34: astore_3
+      35: aload_0
+      36: iconst_0
+      37: invokevirtual #164                // Method unlock:(Z)V
+      40: aload_3
+      41: athrow
+    Exception table:
+       from    to  target type
+           5    27    34   any
+
+  public void setBidiEnabled(boolean);
+    Code:
+       0: aload_0
+       1: getfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+       4: iload_1
+       5: invokevirtual #457                // Method io/github/rosemoe/sora/text/bidi/ContentBidi.setEnabled:(Z)V
+       8: return
+
+  public boolean isBidiEnabled();
+    Code:
+       0: aload_0
+       1: getfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+       4: invokevirtual #460                // Method io/github/rosemoe/sora/text/bidi/ContentBidi.isEnabled:()Z
+       7: ireturn
+
+  public boolean isRtlAt(int, int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: invokevirtual #463                // Method getLineDirections:(I)Lio/github/rosemoe/sora/text/bidi/Directions;
+       5: astore_3
+       6: iconst_0
+       7: istore        4
+       9: iload         4
+      11: aload_3
+      12: invokevirtual #466                // Method io/github/rosemoe/sora/text/bidi/Directions.getRunCount:()I
+      15: if_icmpge     51
+      18: iload_2
+      19: aload_3
+      20: iload         4
+      22: invokevirtual #471                // Method io/github/rosemoe/sora/text/bidi/Directions.getRunStart:(I)I
+      25: if_icmplt     45
+      28: iload_2
+      29: aload_3
+      30: iload         4
+      32: invokevirtual #474                // Method io/github/rosemoe/sora/text/bidi/Directions.getRunEnd:(I)I
+      35: if_icmpge     45
+      38: aload_3
+      39: iload         4
+      41: invokevirtual #477                // Method io/github/rosemoe/sora/text/bidi/Directions.isRunRtl:(I)Z
+      44: ireturn
+      45: iinc          4, 1
+      48: goto          9
+      51: iconst_0
+      52: ireturn
+
+  public boolean equals(java.lang.Object);
+    Code:
+       0: aload_1
+       1: instanceof    #2                  // class io/github/rosemoe/sora/text/Content
+       4: ifeq          77
+       7: aload_1
+       8: checkcast     #2                  // class io/github/rosemoe/sora/text/Content
+      11: astore_2
+      12: aload_2
+      13: invokevirtual #481                // Method length:()I
+      16: aload_0
+      17: invokevirtual #481                // Method length:()I
+      20: if_icmpeq     25
+      23: iconst_0
+      24: ireturn
+      25: iconst_0
+      26: istore_3
+      27: iload_3
+      28: aload_0
+      29: invokevirtual #224                // Method getLineCount:()I
+      32: if_icmpge     75
+      35: aload_0
+      36: getfield      #49                 // Field lines:Ljava/util/List;
+      39: iload_3
+      40: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      45: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      48: aload_2
+      49: getfield      #49                 // Field lines:Ljava/util/List;
+      52: iload_3
+      53: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      58: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      61: invokestatic  #482                // Method textEquals:(Lio/github/rosemoe/sora/text/ContentLine;Lio/github/rosemoe/sora/text/ContentLine;)Z
+      64: ifne          69
+      67: iconst_0
+      68: ireturn
+      69: iinc          3, 1
+      72: goto          27
+      75: iconst_1
+      76: ireturn
+      77: iconst_0
+      78: ireturn
+
+  public int hashCode();
+    Code:
+       0: iconst_2
+       1: anewarray     #11                 // class java/lang/Object
+       4: dup
+       5: iconst_0
+       6: aload_0
+       7: getfield      #49                 // Field lines:Ljava/util/List;
+      10: aastore
+      11: dup
+      12: iconst_1
+      13: aload_0
+      14: getfield      #33                 // Field textLength:I
+      17: invokestatic  #486                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      20: aastore
+      21: invokestatic  #492                // Method java/util/Objects.hash:([Ljava/lang/Object;)I
+      24: ireturn
+
+  public java.lang.String toString();
+    Code:
+       0: aload_0
+       1: invokevirtual #498                // Method toStringBuilder:()Ljava/lang/StringBuilder;
+       4: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+       7: areturn
+
+  public java.lang.StringBuilder toStringBuilder();
+    Code:
+       0: new           #190                // class java/lang/StringBuilder
+       3: dup
+       4: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+       7: astore_1
+       8: aload_0
+       9: aload_1
+      10: invokevirtual #502                // Method appendToStringBuilder:(Ljava/lang/StringBuilder;)V
+      13: aload_1
+      14: areturn
+
+  public io.github.rosemoe.sora.text.UndoManager getUndoManager();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: areturn
+
+  public void setUndoManager(io.github.rosemoe.sora.text.UndoManager);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: putfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       5: return
+
+  public void appendToStringBuilder(java.lang.StringBuilder);
+    Code:
+       0: aload_1
+       1: aload_1
+       2: invokevirtual #505                // Method java/lang/StringBuilder.length:()I
+       5: aload_0
+       6: invokevirtual #481                // Method length:()I
+       9: iadd
+      10: invokevirtual #506                // Method java/lang/StringBuilder.ensureCapacity:(I)V
+      13: aload_0
+      14: iconst_0
+      15: invokevirtual #140                // Method lock:(Z)V
+      18: aload_0
+      19: invokevirtual #224                // Method getLineCount:()I
+      22: istore_2
+      23: iconst_0
+      24: istore_3
+      25: iload_3
+      26: iload_2
+      27: if_icmpge     70
+      30: aload_0
+      31: getfield      #49                 // Field lines:Ljava/util/List;
+      34: iload_3
+      35: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      40: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      43: astore        4
+      45: aload         4
+      47: aload_1
+      48: invokevirtual #326                // Method io/github/rosemoe/sora/text/ContentLine.appendTo:(Ljava/lang/StringBuilder;)V
+      51: aload_1
+      52: aload         4
+      54: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      57: invokevirtual #330                // Method io/github/rosemoe/sora/text/LineSeparator.getContent:()Ljava/lang/String;
+      60: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      63: pop
+      64: iinc          3, 1
+      67: goto          25
+      70: aload_0
+      71: iconst_0
+      72: invokevirtual #164                // Method unlock:(Z)V
+      75: goto          88
+      78: astore        5
+      80: aload_0
+      81: iconst_0
+      82: invokevirtual #164                // Method unlock:(Z)V
+      85: aload         5
+      87: athrow
+      88: return
+    Exception table:
+       from    to  target type
+          18    70    78   any
+          78    80    78   any
+
+  public io.github.rosemoe.sora.text.Cursor getCursor();
+    Code:
+       0: aload_0
+       1: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+       4: ifnonnull     19
+       7: aload_0
+       8: new           #250                // class io/github/rosemoe/sora/text/Cursor
+      11: dup
+      12: aload_0
+      13: invokespecial #509                // Method io/github/rosemoe/sora/text/Cursor."<init>":(Lio/github/rosemoe/sora/text/Content;)V
+      16: putfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      19: aload_0
+      20: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      23: areturn
+
+  public boolean isCursorCreated();
+    Code:
+       0: aload_0
+       1: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+       4: ifnull        11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ireturn
+
+  private void dispatchBeforeReplace();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: invokevirtual #510                // Method io/github/rosemoe/sora/text/UndoManager.beforeReplace:(Lio/github/rosemoe/sora/text/Content;)V
+       8: aload_0
+       9: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      12: ifnull        22
+      15: aload_0
+      16: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      19: invokevirtual #513                // Method io/github/rosemoe/sora/text/Cursor.beforeReplace:()V
+      22: aload_0
+      23: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      26: instanceof    #515                // class io/github/rosemoe/sora/text/ContentListener
+      29: ifeq          45
+      32: aload_0
+      33: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      36: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      39: aload_0
+      40: invokeinterface #517,  2          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.beforeReplace:(Lio/github/rosemoe/sora/text/Content;)V
+      45: aload_0
+      46: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      49: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      54: astore_1
+      55: aload_1
+      56: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      61: ifeq          84
+      64: aload_1
+      65: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      70: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      73: astore_2
+      74: aload_2
+      75: aload_0
+      76: invokeinterface #517,  2          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.beforeReplace:(Lio/github/rosemoe/sora/text/Content;)V
+      81: goto          55
+      84: return
+
+  private void dispatchAfterDelete(int, int, int, int, java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: iload_1
+       6: iload_2
+       7: iload_3
+       8: iload         4
+      10: aload         5
+      12: invokevirtual #531                // Method io/github/rosemoe/sora/text/UndoManager.afterDelete:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+      15: aload_0
+      16: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      19: ifnull        36
+      22: aload_0
+      23: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      26: iload_1
+      27: iload_2
+      28: iload_3
+      29: iload         4
+      31: aload         5
+      33: invokevirtual #535                // Method io/github/rosemoe/sora/text/Cursor.afterDelete:(IIIILjava/lang/CharSequence;)V
+      36: aload_0
+      37: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      40: instanceof    #515                // class io/github/rosemoe/sora/text/ContentListener
+      43: ifeq          66
+      46: aload_0
+      47: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      50: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      53: aload_0
+      54: iload_1
+      55: iload_2
+      56: iload_3
+      57: iload         4
+      59: aload         5
+      61: invokeinterface #537,  7          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.afterDelete:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+      66: aload_0
+      67: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      70: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      75: astore        6
+      77: aload         6
+      79: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      84: ifeq          117
+      87: aload         6
+      89: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      94: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      97: astore        7
+      99: aload         7
+     101: aload_0
+     102: iload_1
+     103: iload_2
+     104: iload_3
+     105: iload         4
+     107: aload         5
+     109: invokeinterface #537,  7          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.afterDelete:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+     114: goto          77
+     117: return
+
+  private void dispatchBeforeModification();
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: invokevirtual #538                // Method io/github/rosemoe/sora/text/UndoManager.beforeModification:(Lio/github/rosemoe/sora/text/Content;)V
+       8: aload_0
+       9: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      12: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      17: astore_1
+      18: aload_1
+      19: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      24: ifeq          47
+      27: aload_1
+      28: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      33: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      36: astore_2
+      37: aload_2
+      38: aload_0
+      39: invokeinterface #541,  2          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.beforeModification:(Lio/github/rosemoe/sora/text/Content;)V
+      44: goto          18
+      47: return
+
+  private void dispatchAfterInsert(int, int, int, int, java.lang.CharSequence);
+    Code:
+       0: aload_0
+       1: getfield      #78                 // Field undoManager:Lio/github/rosemoe/sora/text/UndoManager;
+       4: aload_0
+       5: iload_1
+       6: iload_2
+       7: iload_3
+       8: iload         4
+      10: aload         5
+      12: invokevirtual #542                // Method io/github/rosemoe/sora/text/UndoManager.afterInsert:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+      15: aload_0
+      16: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      19: ifnull        36
+      22: aload_0
+      23: getfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      26: iload_1
+      27: iload_2
+      28: iload_3
+      29: iload         4
+      31: aload         5
+      33: invokevirtual #545                // Method io/github/rosemoe/sora/text/Cursor.afterInsert:(IIIILjava/lang/CharSequence;)V
+      36: aload_0
+      37: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      40: instanceof    #515                // class io/github/rosemoe/sora/text/ContentListener
+      43: ifeq          66
+      46: aload_0
+      47: getfield      #88                 // Field indexer:Lio/github/rosemoe/sora/text/Indexer;
+      50: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      53: aload_0
+      54: iload_1
+      55: iload_2
+      56: iload_3
+      57: iload         4
+      59: aload         5
+      61: invokeinterface #547,  7          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.afterInsert:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+      66: aload_0
+      67: getfield      #63                 // Field contentListeners:Ljava/util/List;
+      70: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      75: astore        6
+      77: aload         6
+      79: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      84: ifeq          117
+      87: aload         6
+      89: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      94: checkcast     #515                // class io/github/rosemoe/sora/text/ContentListener
+      97: astore        7
+      99: aload         7
+     101: aload_0
+     102: iload_1
+     103: iload_2
+     104: iload_3
+     105: iload         4
+     107: aload         5
+     109: invokeinterface #547,  7          // InterfaceMethod io/github/rosemoe/sora/text/ContentListener.afterInsert:(Lio/github/rosemoe/sora/text/Content;IIIILjava/lang/CharSequence;)V
+     114: goto          77
+     117: return
+
+  protected void checkIndex(int, int);
+    Code:
+       0: iload_2
+       1: ifne          15
+       4: iload_1
+       5: aload_0
+       6: invokevirtual #481                // Method length:()I
+       9: if_icmplt     23
+      12: goto          27
+      15: iload_1
+      16: aload_0
+      17: invokevirtual #481                // Method length:()I
+      20: if_icmpgt     27
+      23: iload_1
+      24: ifge          68
+      27: new           #170                // class java/lang/StringIndexOutOfBoundsException
+      30: dup
+      31: new           #190                // class java/lang/StringBuilder
+      34: dup
+      35: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+      38: ldc_w         #548                // String Index
+      41: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      44: iload_1
+      45: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      48: ldc_w         #553                // String  out of bounds. length:
+      51: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      54: aload_0
+      55: invokevirtual #481                // Method length:()I
+      58: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      61: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      64: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      67: athrow
+      68: return
+
+  protected void checkLine(int);
+    Code:
+       0: iload_1
+       1: aload_0
+       2: invokevirtual #224                // Method getLineCount:()I
+       5: if_icmpge     12
+       8: iload_1
+       9: ifge          53
+      12: new           #170                // class java/lang/StringIndexOutOfBoundsException
+      15: dup
+      16: new           #190                // class java/lang/StringBuilder
+      19: dup
+      20: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+      23: ldc_w         #555                // String Line
+      26: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      29: iload_1
+      30: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      33: ldc_w         #557                // String  out of bounds. line count:
+      36: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      39: aload_0
+      40: invokevirtual #224                // Method getLineCount:()I
+      43: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      46: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      49: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      52: athrow
+      53: return
+
+  protected void checkLineAndColumn(int, int, int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: invokevirtual #201                // Method checkLine:(I)V
+       5: aload_0
+       6: getfield      #49                 // Field lines:Ljava/util/List;
+       9: iload_1
+      10: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      15: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      18: astore        4
+      20: iload_3
+      21: tableswitch   { // 0 to 2
+                     0: 48
+                     1: 132
+                     2: 207
+               default: 363
+          }
+      48: aload         4
+      50: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      53: aload         4
+      55: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      58: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+      61: iadd
+      62: istore        5
+      64: iload_2
+      65: iload         5
+      67: if_icmpge     74
+      70: iload_2
+      71: ifge          129
+      74: new           #170                // class java/lang/StringIndexOutOfBoundsException
+      77: dup
+      78: new           #190                // class java/lang/StringBuilder
+      81: dup
+      82: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+      85: ldc_w         #559                // String Column
+      88: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      91: iload_2
+      92: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      95: ldc_w         #561                // String  out of bounds for READ. line:
+      98: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     101: iload_1
+     102: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     105: ldc_w         #563                // String , valid range: [0,
+     108: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     111: iload         5
+     113: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     116: ldc_w         #565                // String )
+     119: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     122: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+     125: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     128: athrow
+     129: goto          363
+     132: aload         4
+     134: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     137: istore        5
+     139: iload_2
+     140: iload         5
+     142: if_icmpgt     149
+     145: iload_2
+     146: ifge          204
+     149: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     152: dup
+     153: new           #190                // class java/lang/StringBuilder
+     156: dup
+     157: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+     160: ldc_w         #559                // String Column
+     163: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     166: iload_2
+     167: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     170: ldc_w         #567                // String  out of bounds for CURSOR. line:
+     173: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     176: iload_1
+     177: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     180: ldc_w         #563                // String , valid range: [0,
+     183: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     186: iload         5
+     188: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     191: ldc_w         #569                // String ]
+     194: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     197: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+     200: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     203: athrow
+     204: goto          363
+     207: aload         4
+     209: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+     212: aload         4
+     214: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+     217: invokevirtual #231                // Method io/github/rosemoe/sora/text/LineSeparator.getLength:()I
+     220: iadd
+     221: istore        5
+     223: iload_1
+     224: aload_0
+     225: invokevirtual #224                // Method getLineCount:()I
+     228: iconst_1
+     229: isub
+     230: if_icmpne     298
+     233: iload_2
+     234: iload         5
+     236: if_icmpgt     243
+     239: iload_2
+     240: ifge          363
+     243: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     246: dup
+     247: new           #190                // class java/lang/StringBuilder
+     250: dup
+     251: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+     254: ldc_w         #559                // String Column
+     257: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     260: iload_2
+     261: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     264: ldc_w         #571                // String  out of bounds for INDEX. line:
+     267: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     270: iload_1
+     271: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     274: ldc_w         #563                // String , valid range: [0,
+     277: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     280: iload         5
+     282: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     285: ldc_w         #569                // String ]
+     288: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     291: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+     294: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     297: athrow
+     298: iload_2
+     299: iload         5
+     301: if_icmpge     308
+     304: iload_2
+     305: ifge          363
+     308: new           #170                // class java/lang/StringIndexOutOfBoundsException
+     311: dup
+     312: new           #190                // class java/lang/StringBuilder
+     315: dup
+     316: invokespecial #316                // Method java/lang/StringBuilder."<init>":()V
+     319: ldc_w         #559                // String Column
+     322: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     325: iload_2
+     326: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     329: ldc_w         #571                // String  out of bounds for INDEX. line:
+     332: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     335: iload_1
+     336: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     339: ldc_w         #563                // String , valid range: [0,
+     342: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     345: iload         5
+     347: invokevirtual #550                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     350: ldc_w         #565                // String )
+     353: invokevirtual #333                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     356: invokevirtual #189                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+     359: invokespecial #174                // Method java/lang/StringIndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+     362: athrow
+     363: return
+
+  public io.github.rosemoe.sora.text.Content copyText();
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #573                // Method copyText:(Z)Lio/github/rosemoe/sora/text/Content;
+       5: areturn
+
+  public io.github.rosemoe.sora.text.Content copyText(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iconst_0
+       3: invokevirtual #577                // Method copyText:(ZZ)Lio/github/rosemoe/sora/text/Content;
+       6: areturn
+
+  public io.github.rosemoe.sora.text.Content copyText(boolean, boolean);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: new           #2                  // class io/github/rosemoe/sora/text/Content
+       8: dup
+       9: aconst_null
+      10: iload_1
+      11: invokespecial #7                  // Method "<init>":(Ljava/lang/CharSequence;Z)V
+      14: astore_3
+      15: aload_3
+      16: getfield      #49                 // Field lines:Ljava/util/List;
+      19: iconst_0
+      20: invokeinterface #352,  2          // InterfaceMethod java/util/List.remove:(I)Ljava/lang/Object;
+      25: pop
+      26: aload_3
+      27: getfield      #49                 // Field lines:Ljava/util/List;
+      30: checkcast     #40                 // class java/util/ArrayList
+      33: aload_0
+      34: invokevirtual #224                // Method getLineCount:()I
+      37: invokevirtual #580                // Method java/util/ArrayList.ensureCapacity:(I)V
+      40: iload_2
+      41: ifeq          102
+      44: aload_0
+      45: getfield      #49                 // Field lines:Ljava/util/List;
+      48: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      53: astore        4
+      55: aload         4
+      57: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      62: ifeq          85
+      65: aload         4
+      67: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      72: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      75: astore        5
+      77: aload         5
+      79: invokevirtual #581                // Method io/github/rosemoe/sora/text/ContentLine.retain:()V
+      82: goto          55
+      85: aload_3
+      86: getfield      #49                 // Field lines:Ljava/util/List;
+      89: aload_0
+      90: getfield      #49                 // Field lines:Ljava/util/List;
+      93: invokeinterface #584,  2          // InterfaceMethod java/util/List.addAll:(Ljava/util/Collection;)Z
+      98: pop
+      99: goto          157
+     102: aload_0
+     103: getfield      #49                 // Field lines:Ljava/util/List;
+     106: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+     111: astore        4
+     113: aload         4
+     115: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+     120: ifeq          157
+     123: aload         4
+     125: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+     130: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+     133: astore        5
+     135: aload_3
+     136: getfield      #49                 // Field lines:Ljava/util/List;
+     139: new           #53                 // class io/github/rosemoe/sora/text/ContentLine
+     142: dup
+     143: aload         5
+     145: invokespecial #446                // Method io/github/rosemoe/sora/text/ContentLine."<init>":(Lio/github/rosemoe/sora/text/ContentLine;)V
+     148: invokeinterface #56,  2           // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+     153: pop
+     154: goto          113
+     157: aload_3
+     158: aload_0
+     159: getfield      #33                 // Field textLength:I
+     162: putfield      #33                 // Field textLength:I
+     165: aload_3
+     166: astore        4
+     168: aload_0
+     169: iconst_0
+     170: invokevirtual #164                // Method unlock:(Z)V
+     173: aload         4
+     175: areturn
+     176: astore        6
+     178: aload_0
+     179: iconst_0
+     180: invokevirtual #164                // Method unlock:(Z)V
+     183: aload         6
+     185: athrow
+    Exception table:
+       from    to  target type
+           5   168   176   any
+         176   178   176   any
+
+  public io.github.rosemoe.sora.text.Content copyTextShallow();
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #587                // Method copyTextShallow:(Z)Lio/github/rosemoe/sora/text/Content;
+       5: areturn
+
+  public io.github.rosemoe.sora.text.Content copyTextShallow(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: iconst_1
+       3: invokevirtual #577                // Method copyText:(ZZ)Lio/github/rosemoe/sora/text/Content;
+       6: areturn
+
+  public void release();
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: aload_0
+       6: getfield      #49                 // Field lines:Ljava/util/List;
+       9: invokeinterface #518,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+      14: astore_1
+      15: aload_1
+      16: invokeinterface #522,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      21: ifeq          41
+      24: aload_1
+      25: invokeinterface #527,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      30: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      33: astore_2
+      34: aload_2
+      35: invokevirtual #336                // Method io/github/rosemoe/sora/text/ContentLine.release:()V
+      38: goto          15
+      41: aload_0
+      42: getfield      #49                 // Field lines:Ljava/util/List;
+      45: invokeinterface #343,  1          // InterfaceMethod java/util/List.clear:()V
+      50: aload_0
+      51: iconst_0
+      52: putfield      #33                 // Field textLength:I
+      55: aload_0
+      56: aconst_null
+      57: putfield      #245                // Field cursor:Lio/github/rosemoe/sora/text/Cursor;
+      60: aload_0
+      61: getfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+      64: invokevirtual #590                // Method io/github/rosemoe/sora/text/bidi/ContentBidi.destroy:()V
+      67: aload_0
+      68: iconst_1
+      69: invokevirtual #164                // Method unlock:(Z)V
+      72: goto          83
+      75: astore_3
+      76: aload_0
+      77: iconst_1
+      78: invokevirtual #164                // Method unlock:(Z)V
+      81: aload_3
+      82: athrow
+      83: return
+    Exception table:
+       from    to  target type
+           5    67    75   any
+
+  protected int getColumnCountUnsafe(int);
+    Code:
+       0: aload_0
+       1: getfield      #49                 // Field lines:Ljava/util/List;
+       4: iload_1
+       5: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      10: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      13: invokevirtual #115                // Method io/github/rosemoe/sora/text/ContentLine.length:()I
+      16: ireturn
+
+  protected io.github.rosemoe.sora.text.LineSeparator getLineSeparatorUnsafe(int);
+    Code:
+       0: aload_0
+       1: getfield      #49                 // Field lines:Ljava/util/List;
+       4: iload_1
+       5: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      10: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      13: invokevirtual #227                // Method io/github/rosemoe/sora/text/ContentLine.getLineSeparator:()Lio/github/rosemoe/sora/text/LineSeparator;
+      16: areturn
+
+  public void runReadActionsOnLines(int, int, io.github.rosemoe.sora.text.Content$ContentLineConsumer);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: iload_1
+       6: istore        4
+       8: iload         4
+      10: iload_2
+      11: if_icmpgt     57
+      14: aload_0
+      15: getfield      #49                 // Field lines:Ljava/util/List;
+      18: iload         4
+      20: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      25: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      28: astore        5
+      30: aload_3
+      31: iload         4
+      33: aload         5
+      35: aload_0
+      36: getfield      #71                 // Field bidi:Lio/github/rosemoe/sora/text/bidi/ContentBidi;
+      39: aload         5
+      41: iload         4
+      43: invokevirtual #453                // Method io/github/rosemoe/sora/text/bidi/ContentBidi.getLineDirections:(Lio/github/rosemoe/sora/text/ContentLine;I)Lio/github/rosemoe/sora/text/bidi/Directions;
+      46: invokeinterface #593,  4          // InterfaceMethod io/github/rosemoe/sora/text/Content$ContentLineConsumer.accept:(ILio/github/rosemoe/sora/text/ContentLine;Lio/github/rosemoe/sora/text/bidi/Directions;)V
+      51: iinc          4, 1
+      54: goto          8
+      57: aload_0
+      58: iconst_0
+      59: invokevirtual #164                // Method unlock:(Z)V
+      62: goto          75
+      65: astore        6
+      67: aload_0
+      68: iconst_0
+      69: invokevirtual #164                // Method unlock:(Z)V
+      72: aload         6
+      74: athrow
+      75: return
+    Exception table:
+       from    to  target type
+           5    57    65   any
+          65    67    65   any
+
+  public void runReadActionsOnLines(int, int, io.github.rosemoe.sora.text.Content$ContentLineConsumer2);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #140                // Method lock:(Z)V
+       5: new           #599                // class io/github/rosemoe/sora/text/Content$ContentLineConsumer2$AbortFlag
+       8: dup
+       9: invokespecial #601                // Method io/github/rosemoe/sora/text/Content$ContentLineConsumer2$AbortFlag."<init>":()V
+      12: astore        4
+      14: iload_1
+      15: istore        5
+      17: iload         5
+      19: iload_2
+      20: if_icmpgt     61
+      23: aload         4
+      25: getfield      #602                // Field io/github/rosemoe/sora/text/Content$ContentLineConsumer2$AbortFlag.set:Z
+      28: ifne          61
+      31: aload_3
+      32: iload         5
+      34: aload_0
+      35: getfield      #49                 // Field lines:Ljava/util/List;
+      38: iload         5
+      40: invokeinterface #157,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+      45: checkcast     #53                 // class io/github/rosemoe/sora/text/ContentLine
+      48: aload         4
+      50: invokeinterface #605,  4          // InterfaceMethod io/github/rosemoe/sora/text/Content$ContentLineConsumer2.accept:(ILio/github/rosemoe/sora/text/ContentLine;Lio/github/rosemoe/sora/text/Content$ContentLineConsumer2$AbortFlag;)V
+      55: iinc          5, 1
+      58: goto          17
+      61: aload_0
+      62: iconst_0
+      63: invokevirtual #164                // Method unlock:(Z)V
+      66: goto          79
+      69: astore        6
+      71: aload_0
+      72: iconst_0
+      73: invokevirtual #164                // Method unlock:(Z)V
+      76: aload         6
+      78: athrow
+      79: return
+    Exception table:
+       from    to  target type
+           5    61    69   any
+          69    71    69   any
+
+  static {};
+    Code:
+       0: sipush        1000
+       3: invokestatic  #610                // Method setInitialLineCapacity:(I)V
+       6: return
+}

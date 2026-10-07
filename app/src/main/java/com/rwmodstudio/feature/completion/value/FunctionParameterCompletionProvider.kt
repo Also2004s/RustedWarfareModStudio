@@ -26,7 +26,9 @@ private fun loadParamKeys(context: Context): Set<String> {
     val keys = mutableSetOf<String>()
     for (file in paramDataFiles) {
         val data = ParamDataLoader.load(context, file)
-        for (fn in data.functions) keys.add(fn.key.lowercase())
+        // 参数表 key 归一化：去 self. 链式前缀后小写，与 resolveFunctionBaseKey 的解析结果对齐
+        // （如 self.hasActiveWaypoint → hasactivewaypoint，否则该函数参数补全永远匹配不上）
+        for (fn in data.functions) keys.add(fn.key.lowercase().removePrefix("self."))
     }
     return keys.also { cachedParamKeys = it }
 }
@@ -382,7 +384,8 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         for (file in paramFiles) {
             val data = ParamDataLoader.load(request.context, file)
             for (fn in data.functions) {
-                map[fn.key.lowercase()] = fn
+                // 与 resolveFunctionBaseKey 对齐：参数表 key 去 self. 前缀后小写作映射键
+                map[fn.key.lowercase().removePrefix("self.")] = fn
             }
         }
         return map.also { paramMapCache = it }

@@ -1,0 +1,97 @@
+diff --git a/app/src/main/java/com/rwmodstudio/editor/SmartWrapBreaks.kt b/app/src/main/java/com/rwmodstudio/editor/SmartWrapBreaks.kt
+index 6785d7b..b5d265d 100644
+--- a/app/src/main/java/com/rwmodstudio/editor/SmartWrapBreaks.kt
++++ b/app/src/main/java/com/rwmodstudio/editor/SmartWrapBreaks.kt
+@@ -10,10 +10,11 @@ import java.util.regex.Pattern
+  * - [parenGroups]：含 `and`/`or` 的 `( ... )` 组（`(xxx or xxx)` 整组独占一行起）；
+  * - [andOr]：` and `/` or ` 操作符；
+  * - [operators]：运算符号 `+`/`-`（其后是字母含汉字/下划线）、`*`（两侧非空白）；
+- * - [commas]：`,`；
++ * - [commas]：`,` 之后（逗号留在上一行末尾）；
+  * - 兜底（布局层 computeFallbackBreaks）：空格与其余标点。
+  *
+- * 断行风格：符号行首；中文标识符（如 `+盟友有此单位数量(`）由 Character.isLetter() 天然覆盖；
++ * 断行风格：符号行首；**逗号行尾**（断点取逗号后第一个非空白字符，见 [commaAfter]）；
++ * 中文标识符（如 `+盟友有此单位数量(`）由 Character.isLetter() 天然覆盖；
+  * 汉字不拆分由布局层兜底保证。
+  */
+ class PriorityBreaks(
+@@ -31,7 +32,7 @@ class PriorityBreaks(
+  * - R2：` and `/` or `（大小写不敏感、单词边界）之前断行，任意嵌套深度；
+  * - R3：含 ` and `/` or ` 的 `( ... )` 组之前断行；
+  * - R4：`+`/`-` 之前断行，仅当其后的操作数首字符是字母（含汉字）或下划线；
+- * - R5：`,` 之前断行（任意深度）；
++ * - R5：`,` 之后断行（逗号留在上一行末尾，新行从逗号后第一个非空白字符开始，任意深度）；
+  * - R6：`*` 之前断行（`*` 两侧非空白）。
+  */
+ object SmartWrapBreaks {
+@@ -90,9 +91,12 @@ object SmartWrapBreaks {
+             if (next.isLetter() || next == '_') operators.add(idx)
+         }
+ 
+-        // R5：, 之前（任意深度）
++        // R5：, 之后（逗号留在上一行末尾，任意深度）
+         for (idx in 1 until len) {
+-            if (line[idx] == ',') commas.add(idx)
++            if (line[idx] != ',') continue
++            val p = commaAfter(line, idx)
++            if (p <= 0 || p >= len) continue
++            commas.add(p)
+         }
+ 
+         // R6：* 与 / 之前（两侧非空白，任意深度）——乘法/除法/路径按符号行首
+@@ -138,18 +142,29 @@ object SmartWrapBreaks {
+      * 排除规则：
+      * - `=` 相邻位置（`范围内=200` 不应断成 `范围内` / `=200`）；
+      * - 两个汉字之间（汉字不拆分）。
++     *
++     * 逗号走「逗号之后」：断点取逗号后第一个非空白字符（逗号留在上一行末尾）；
++     * 逗号后若已无内容（越出 `end`）则该断点无效。
+      */
+     fun computeFallbackBreaks(line: CharSequence, start: Int, end: Int): IntArray {
+-        val out = ArrayList<Int>()
++        // 逗号断点取「逗号之后」的位置，可能落在后续遍历位置之后 → 必须用有序集保证升序输出
++        // （布局层依赖升序 + 早停：见 SmartWordwrapLayout.farthestFitting）。
++        val out = sortedSetOf<Int>()
+         for (p in (start + 1) until end) {
+             val c = line[p]
+             if (c == '=') continue
+             if (line[p - 1] == '=') continue
+             if (c !in FALLBACK_SYMBOLS) continue
+             if (p > 0 && isHan(line[p - 1]) && isHan(line[p])) continue
+-            out.add(p)
++            if (c == ',') {
++                val q = commaAfter(line, p)
++                if (q <= 0 || q >= end) continue
++                out.add(q)
++            } else {
++                out.add(p)
++            }
+         }
+-        return out.toIntArray()
++        return out.filter { it > 0 && it < end }.toIntArray()
+     }
+ 
+     /**
+@@ -167,9 +182,19 @@ object SmartWrapBreaks {
+         return out.toIntArray()
+     }
+ 
++    /** 逗号断点位置：逗号之后第一个非空白字符的下标（可能等于行尾，调用处需过滤）。 */
++    private fun commaAfter(line: CharSequence, comma: Int): Int {
++        var i = comma + 1
++        val len = line.length
++        while (i < len && (line[i] == ' ' || line[i] == '\t')) {
++            i++
++        }
++        return i
++    }
++
+     /** 是否为汉字（CJK 表意文字，含扩展 A 与兼容区）。 */
+     fun isHan(c: Char): Boolean {
+         val cp = c.code
+         return cp in 0x4E00..0x9FFF || cp in 0x3400..0x4DBF || cp in 0xF900..0xFAFF
+     }
+-}
+\ No newline at end of file
++}

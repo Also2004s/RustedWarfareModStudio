@@ -353,11 +353,12 @@ fun FileBrowserScreen(
             }
         }
     }, confirmButton = { TextButton(onClick = {
-        val error = validateFileName(newName)
+        // 未填文件名且选了 .template → 默认 all-units.template（RW 惯例的全局模板文件名）
+        val raw = newName.trim().ifEmpty { if (newFileExt == "template") "all-units" else "" }
+        val error = validateFileName(raw)
         if (error != null) {
             android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
         } else {
-            val raw = newName.trim()
             val name = if ('.' in raw) raw else (newFileExt?.let { "$raw.$it" } ?: raw)   // 以手输为准；未选格式则不补扩展名
             val target = File(currentPath, name)
             if (target.exists()) {
