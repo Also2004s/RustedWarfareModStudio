@@ -259,16 +259,22 @@ class CompletionProvider(
         }
     }
 
-    // 用户表覆盖原生表，且用户表优先显示
+    // 用户表覆盖原生表，且用户表优先显示。
+    // 屏蔽名单（弃用/非键/非法键名）在这里统一剔除：mergedCustom 是补全候选的唯一入口，
+    // 前缀匹配、节内空行补全、模板键索引都从它派生，故只需在此过滤一次。
     private val mergedCustom by lazy {
         val customLabels = customCompletions.map { it.label }.toSet()
-        customCompletions.map { it.copy(isUserCompletion = true) } +
-                nativeCompletions.filter { it.label !in customLabels }
+        (customCompletions.map { it.copy(isUserCompletion = true) } +
+                nativeCompletions.filter { it.label !in customLabels })
+            .filterNot { CompletionBlocklist.isBlocked(it.name, it.nameEn, it.label) }
     }
 
-    // 翻译库 key 合并去重，启动后字典不变，只算一次
+    // 翻译库 key 合并去重，启动后字典不变，只算一次。
+    // 同样剔除屏蔽名单：否则这些条目会被「翻译库兜底」重新补回候选列表。
     private val allDictKeys by lazy {
-        (translationDict.getAllEnglishKeys() + translationDict.getAllChineseKeys()).toSet()
+        (translationDict.getAllEnglishKeys() + translationDict.getAllChineseKeys())
+            .filterNot { CompletionBlocklist.isBlocked(it) }
+            .toSet()
     }
 
     /**
