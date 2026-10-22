@@ -6,6 +6,7 @@ import com.rwmodstudio.core.KeyTemplate
 import com.rwmodstudio.core.KeyTemplateIndex
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.SortCustomizationManager
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.CompletionShared
 import com.rwmodstudio.core.translation.SectionRequiredProperties
@@ -694,6 +695,8 @@ class CompletionProvider(
             }
             .sortedWith(
                 compareByDescending<Pair<CompletionItem, Int>> { it.second }
+                    // 同匹配级别内，按「排序自定义」表内序号优先，其次才字母序（无排序项的节结果不变）
+                    .thenBy { SortCustomizationManager.rankOf(mappedSection, it.first.name, it.first.nameEn, it.first.label) }
                     .thenBy { matchTarget(it.first) }
             )
             .map { it.first }
@@ -827,7 +830,8 @@ class CompletionProvider(
             results.add(shaped)
         }
 
-        return sortCompletions(results)
+        // 节内空行补全 = 排序的主要生效点：按「排序自定义」把本节高频键置顶，其余保持原顺序
+        return sortCompletions(results, mappedSection)
     }
 
     /** 手动提示用：补全项是否命中该节必备键集合（name/nameEn/label 任一归一化后命中）。 */
@@ -935,19 +939,23 @@ class CompletionProvider(
      * 1. 值补全（VALUE 类型）
      * 2. 自动补全非 values/特定值
      * 3. 自动补全 values/特定值
-     * 组内不再按字母排序，保持原有顺序。
+     * 组内按「排序自定义」表内序号排在前面（表外层保持原相对顺序，稳定排序）。
      */
-    private fun sortCompletions(items: List<CompletionItem>): List<CompletionItem> {
+    private fun sortCompletions(items: List<CompletionItem>, section: String? = null): List<CompletionItem> {
         fun isValueCategory(item: CompletionItem): Boolean {
             return item.category.any { it == "values" || it == "特定值" }
         }
-        return items.sortedWith(compareBy {
-            when {
-                it.type == CompletionType.VALUE -> 0
-                !isValueCategory(it) -> 1
-                else -> 2
-            }
-        })
+        fun groupOf(item: CompletionItem): Int = when {
+            item.type == CompletionType.VALUE -> 0
+            !isValueCategory(item) -> 1
+            else -> 2
+        }
+        return items.sortedWith(
+            compareBy(
+                { groupOf(it) },
+                { SortCustomizationManager.rankOf(section, it.name, it.nameEn, it.label) }
+            )
+        )
     }
 
     // --- @memory 补全辅助 ---

@@ -745,9 +745,9 @@
     "desc": "生成这个单位归属于敌对中立队伍而不是所属玩家。",
     "example": "spawnUnits:cat(aggressiveTeam=true)",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "aggressiveTeam",
     "valueEn": "",
@@ -763,9 +763,9 @@
     "desc": "单位在陆地上",
     "example": "",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "self.gound()",
     "valueEn": "",
@@ -781,9 +781,9 @@
     "desc": "卸载单位时",
     "example": "if self.isTransportUnloading()",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "self.isTransportUnloading()",
     "valueEn": "",
@@ -799,9 +799,9 @@
     "desc": "与sendMessageWithData连用，从严格意义上来讲，这个key并不属于内存(name:string, type:string{boolean,unit,float,string}, [default])",
     "example": "if parent.eventData('boostTarget', type='unit') == self",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "eventData()",
     "valueEn": "",
@@ -817,9 +817,9 @@
     "desc": "单位最大能达到的速度",
     "example": "if self.maxspeed() >= 10",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "self.maxspeed()",
     "valueEn": "",
@@ -835,9 +835,9 @@
     "desc": "括号里填写行动名称",
     "example": "if self.numberOfConnections(name=\"XXX\") >= 10",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "self.numberOfConnections",
     "valueEn": "",
@@ -853,9 +853,9 @@
     "desc": "显示这个逻辑在该单位上的值，并在调试模式中发送单位本身关于这个逻辑的调试消息，请打开调试模式选中单位后查看",
     "example": "if str(debugPassthrough(self.hp)) == \"2400\"",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "debugPassthrough(LogicBoolean)",
     "valueEn": "",
@@ -871,9 +871,9 @@
     "desc": "由alsoTriggerActionRepeat和alsoTriggerAction连用来改变该logic的值（通俗点来讲，就是在一轮代码执行中，这个行动被触发的次数）",
     "example": "if index/thisActionIndex == 1",
     "category": [
-      "行动"
+      "values"
     ],
-    "formatCategory": "空值属性",
+    "formatCategory": "values",
     "isOverridden": false,
     "nameEn": "thisActionIndex/index",
     "valueEn": "",

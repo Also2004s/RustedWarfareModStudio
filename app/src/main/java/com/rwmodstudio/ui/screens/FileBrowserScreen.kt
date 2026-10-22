@@ -86,6 +86,10 @@ fun FileBrowserScreen(
     startPath: String = "",
     rootPath: String = "",
     projectRoot: String = "",
+    mtLayout: Boolean = false,
+    firstStartPath: String = "",
+    secondStartPath: String = "",
+    activePane: Int = 0,
     onFileSelected: (String, String) -> Unit,
     onHome: () -> Unit,
     onShowRecent: (() -> Unit)? = null,
@@ -93,6 +97,8 @@ fun FileBrowserScreen(
     onJumpToLine: (String, String, Int) -> Unit = { _, _, _ -> },
     onOpenProjectManager: (() -> Unit)? = null,
     onStartPathChange: (String) -> Unit = {},
+    onPanePathChange: (Int, String) -> Unit = { _, _ -> },
+    onActivePaneChange: (Int, String) -> Unit = { _, _ -> },
     onCreateModInfo: (String, String) -> Unit = { _, _ -> }
 ) {
     val initPath = remember {
@@ -110,16 +116,49 @@ fun FileBrowserScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var currentPath by remember { mutableStateOf(initPath) }
-    LaunchedEffect(currentPath) {
-        onStartPathChange(currentPath)
+    LaunchedEffect(currentPath, mtLayout) {
+        if (!mtLayout) onStartPathChange(currentPath)
+    }
+    LaunchedEffect(startPath, mtLayout) {
+        if (!mtLayout && currentPath != startPath) currentPath = startPath
     }
 
-    // 异度空间：空间状态由 MainApp【顶部菜单栏】按钮管理，切换空间时会修改 startPath(browserStartPath)，
-    // 此处同步 currentPath 以切换第一/第二浏览器位置。
-    // ⚠️ 位置约定：本文件浏览器页面内部（尤其目录栏/面包屑区域）【不得】再放置异度空间切换按钮，
-    //    该入口唯一归属 MainApp 的全局 topBar 最右侧，本文件只负责响应 startPath 变化。
-    LaunchedEffect(startPath) {
-        if (currentPath != startPath) currentPath = startPath
+    // ===== 仿MT目录（双栏）：左栏=第一空间，右栏=第二空间 =====
+    // 两栏各自导航；点按哪栏哪栏成为激活栏（MainApp 的 browserSpace/browserStartPath 随之更新，
+    // 编辑器往返、空间持久化均复用既有链路）。
+    var leftPath by remember {
+        mutableStateOf(if (firstStartPath.isNotEmpty() && File(firstStartPath).exists()) firstStartPath else initPath)
+    }
+    var rightPath by remember {
+        mutableStateOf(if (secondStartPath.isNotEmpty() && File(secondStartPath).exists()) secondStartPath else initPath)
+    }
+    var pane by remember { mutableIntStateOf(activePane) }
+    LaunchedEffect(activePane) { if (pane != activePane) pane = activePane }
+    // MainApp 侧空间状态变化（进入浏览器恢复缓存/编辑器返回）时同步对应栏
+    LaunchedEffect(firstStartPath) {
+        if (firstStartPath.isNotEmpty() && leftPath != firstStartPath && File(firstStartPath).exists()) leftPath = firstStartPath
+    }
+    LaunchedEffect(secondStartPath) {
+        if (secondStartPath.isNotEmpty() && rightPath != secondStartPath && File(secondStartPath).exists()) rightPath = secondStartPath
+    }
+    val activePath = if (pane == 0) leftPath else rightPath
+    // 工具菜单/新建对话框/查找文件的作用目录：单栏=currentPath，双栏=激活栏
+    val workPath = if (mtLayout) activePath else currentPath
+
+    fun activatePane(p: Int) {
+        if (pane == p) return
+        pane = p
+        onActivePaneChange(p, if (p == 0) leftPath else rightPath)
+    }
+    fun navigatePane(p: Int, path: String) {
+        if (p == 0) leftPath = path else rightPath = path
+        if (pane != p) {
+            // 在非激活栏里点进了文件夹 → 该栏同时成为激活栏
+            pane = p
+            onActivePaneChange(p, path)
+        } else {
+            onPanePathChange(p, path)
+        }
     }
 
     var showToolMenu by remember { mutableStateOf(false) }
@@ -141,7 +180,13 @@ fun FileBrowserScreen(
             }
         }
 
-    Column(Modifier.fillMaxSize().background(RustedBackground).padding(horizontal = 12.dp)) {
+    // 仿MT目录：双栏空间紧张，页面左右内边距收窄
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(RustedBackground)
+            .padding(horizontal = if (mtLayout) 6.dp else 12.dp)
+    ) {
         // 目录栏"上锁"：项目模式下位于项目根目录时，锁定"项目目录"段（末尾段）的点击，
         // 防止点击它展开同级文件夹菜单/切换到其他项目；进入子目录后该段恢复可点（可跳回项目根）
         val projectCanonical = remember(projectRoot) {
@@ -149,19 +194,20 @@ fun FileBrowserScreen(
             else try { File(projectRoot).canonicalPath } catch (_: Exception) { null }
         }
         BackHandler {
-            val p = File(currentPath).parentFile
+            val cur = workPath
+            val p = File(cur).parentFile
             if (p != null && p.exists()) {
                 // 项目模式：上限为 projectRoot，在项目根目录再返回就回首页
                 if (projectRoot.isNotEmpty()) {
                     try {
                         val projectCanonical = File(projectRoot).canonicalPath
                         val parentCanonical = p.canonicalPath
-                        val currentCanonical = File(currentPath).canonicalPath
+                        val currentCanonical = File(cur).canonicalPath
                         // 当前在项目根目录 → 回首页；否则只要父目录在项目内就允许返回
                         if (currentCanonical == projectCanonical) {
                             onHome()
                         } else if (parentCanonical.startsWith(projectCanonical)) {
-                            currentPath = p.absolutePath
+                            if (mtLayout) navigatePane(pane, p.absolutePath) else currentPath = p.absolutePath
                         } else {
                             onHome()
                         }
@@ -173,13 +219,13 @@ fun FileBrowserScreen(
                     val withinRoot = try {
                         rootPath.isEmpty() || p.canonicalPath.startsWith(File(rootPath).canonicalPath)
                     } catch (_: Exception) { false }
-                    if (withinRoot) currentPath = p.absolutePath else onHome()
+                    if (withinRoot) {
+                        if (mtLayout) navigatePane(pane, p.absolutePath) else currentPath = p.absolutePath
+                    } else onHome()
                 }
             } else onHome()
         }
-        // Toolbar
-        var showSiblingMenu by remember { mutableStateOf(false) }
-        var siblingDirs by remember { mutableStateOf(listOf<File>()) }
+        // Toolbar（仿MT目录下每栏自带面包屑，此处只留右侧按钮）
         ElevatedCard(
             Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp),
             shape = RoundedCornerShape(16.dp),
@@ -187,86 +233,16 @@ fun FileBrowserScreen(
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(horizontal = 2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        // 只显示相对路径
-                        val relativePath = if (rootPath.isNotEmpty() && currentPath.startsWith(rootPath)) {
-                            currentPath.removePrefix(rootPath).removePrefix(File.separator)
-                        } else {
-                            // 如果没有 rootPath，显示最后几级目录
-                            val parts = currentPath.split(File.separator).filter { it.isNotEmpty() }
-                            if (parts.size > 3) parts.takeLast(3).joinToString(File.separator) else currentPath
-                        }
-                        val pathParts = relativePath.split(File.separator).filter { it.isNotEmpty() }
-
-                        pathParts.forEachIndexed { idx, part ->
-                            val isLast = idx == pathParts.size - 1
-                            // 该路径段的绝对路径（rootPath 下的相对前缀拼接）
-                            val segAbs = if (rootPath.isNotEmpty())
-                                rootPath + File.separator + pathParts.take(idx + 1).joinToString(File.separator)
-                            else ""
-                            // 当前是否正位于项目根目录（此时目录栏末尾段即"项目目录"段）
-                            val atProjectRoot = projectCanonical != null && try {
-                                File(currentPath).canonicalPath == projectCanonical
-                            } catch (_: Exception) { false }
-                            // 上锁：位于项目根目录时，末尾段（项目目录段）点击会展开同级菜单/切项目 → 锁定（点击不展开目录）
-                            val segLocked = isLast && atProjectRoot
-                            if (idx > 0) Text("›", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.25f))
-                            Box {
-                                Surface(
-                                    modifier = Modifier.clickable(enabled = !segLocked) {
-                                        if (isLast) {
-                                            // 展开同级文件夹
-                                            val parentDir = File(currentPath).parentFile
-                                            siblingDirs = parentDir?.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()
-                                            showSiblingMenu = true
-                                        } else if (rootPath.isNotEmpty()) {
-                                            currentPath = segAbs
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isLast) RustedPrimary.copy(alpha = 0.12f) else Color.Transparent
-                                ) {
-                                    Text(
-                                        if (part.length > 5) part.take(5) + "…" else part,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isLast && !atProjectRoot) FontWeight.Medium else FontWeight.Normal,
-                                        color = if (isLast && !atProjectRoot) RustedPrimary
-                                        else if (segLocked) RustedOnBackground.copy(alpha = 0.3f)
-                                        else RustedOnBackground.copy(alpha = 0.65f),
-                                        fontFamily = AppCodeFontFamily,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
-                                }
-                                if (isLast) {
-                                    DropdownMenu(expanded = showSiblingMenu, onDismissRequest = { showSiblingMenu = false }) {
-                                        if (siblingDirs.isEmpty()) {
-                                            Row(
-                                                Modifier
-                                                    .clickable { showSiblingMenu = false }
-                                                    .heightIn(min = 32.dp)
-                                                    .padding(horizontal = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text("无同级文件夹", fontSize = 12.sp)
-                                            }
-                                        } else {
-                                            siblingDirs.forEach { dir ->
-                                                Row(
-                                                    Modifier
-                                                        .clickable { currentPath = dir.absolutePath; showSiblingMenu = false }
-                                                        .heightIn(min = 36.dp)
-                                                        .padding(horizontal = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(dir.name, fontSize = 12.sp, fontFamily = AppCodeFontFamily)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if (mtLayout) {
+                    Spacer(Modifier.weight(1f))
+                } else {
+                    BreadcrumbBar(
+                        path = currentPath,
+                        rootPath = rootPath,
+                        projectCanonical = projectCanonical,
+                        onPathChange = { currentPath = it },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
                 IconButton(onClick = { onShowRecent?.invoke() }, Modifier.size(34.dp)) { Icon(Icons.Default.History, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.55f)) }
                 IconButton(onClick = { onOpenProjectManager?.invoke() }, Modifier.size(34.dp)) { Icon(Icons.Default.AccountTree, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.55f)) }
@@ -286,12 +262,12 @@ fun FileBrowserScreen(
                         // 仅「项目根目录」（不在子目录内、非项目模式不显示）且还没有 mod-info.txt 时可新建
                         // （模组元数据文件，新建后进入可视化编辑）
                         val atProjectRoot = projectRoot.isNotEmpty() && try {
-                            File(currentPath).canonicalPath == File(projectRoot).canonicalPath
+                            File(workPath).canonicalPath == File(projectRoot).canonicalPath
                         } catch (_: Exception) { false }
-                        if (atProjectRoot && !File(currentPath, "mod-info.txt").exists()) {
+                        if (atProjectRoot && !File(workPath, "mod-info.txt").exists()) {
                             PlainMenuItem(icon = Icons.Default.Description, title = "新建 mod-info.txt", onClick = {
                                 showToolMenu = false
-                                val target = File(currentPath, "mod-info.txt")
+                                val target = File(workPath, "mod-info.txt")
                                 scope.launch(Dispatchers.IO) {
                                     val ok = try {
                                         target.parentFile?.mkdirs()
@@ -311,27 +287,66 @@ fun FileBrowserScreen(
                             })
                         }
                         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                        PlainMenuItem(icon = Icons.Default.Search, title = "查找文件", onClick = { onShowFileSearch(currentPath); showToolMenu = false })
+                        PlainMenuItem(icon = Icons.Default.Search, title = "查找文件", onClick = { onShowFileSearch(workPath); showToolMenu = false })
                     }
                 }
             }
         }
 
-        // Single browser panel
-        BrowserPanel(
-            path = currentPath,
-            root = rootPath,
-            refreshTick = browserRefreshTick,
-            onRefreshNeeded = { browserRefreshTick++ },
-            onPathChange = { currentPath = it },
-            onFileSelected = onFileSelected,
-            onHome = onHome,
-            onImageClick = { viewingImage = it },
-            resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
-            modifier = Modifier.weight(1f),
-            sort = sort,
-            hidden = hidden
-        )
+        // 浏览器主体：仿MT目录=左(第一空间)右(第二空间)双栏；否则单栏
+        if (mtLayout) {
+            Row(Modifier.weight(1f)) {
+                BrowserPane(
+                    path = leftPath,
+                    isActive = pane == 0,
+                    root = rootPath,
+                    projectCanonical = projectCanonical,
+                    refreshTick = browserRefreshTick,
+                    sort = sort,
+                    hidden = hidden,
+                    onActivate = { activatePane(0) },
+                    onPathChange = { navigatePane(0, it) },
+                    onRefreshNeeded = { browserRefreshTick++ },
+                    onFileSelected = onFileSelected,
+                    onImageClick = { viewingImage = it },
+                    resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
+                    modifier = Modifier.weight(1f)
+                )
+                // 栏间分隔线
+                Box(Modifier.fillMaxHeight().width(1.dp).background(RustedOnBackground.copy(alpha = 0.08f)))
+                BrowserPane(
+                    path = rightPath,
+                    isActive = pane == 1,
+                    root = rootPath,
+                    projectCanonical = projectCanonical,
+                    refreshTick = browserRefreshTick,
+                    sort = sort,
+                    hidden = hidden,
+                    onActivate = { activatePane(1) },
+                    onPathChange = { navigatePane(1, it) },
+                    onRefreshNeeded = { browserRefreshTick++ },
+                    onFileSelected = onFileSelected,
+                    onImageClick = { viewingImage = it },
+                    resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        } else {
+            BrowserPanel(
+                path = currentPath,
+                root = rootPath,
+                refreshTick = browserRefreshTick,
+                onRefreshNeeded = { browserRefreshTick++ },
+                onPathChange = { currentPath = it },
+                onFileSelected = onFileSelected,
+                onHome = onHome,
+                onImageClick = { viewingImage = it },
+                resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
+                modifier = Modifier.weight(1f),
+                sort = sort,
+                hidden = hidden
+            )
+        }
     }
 
     if (showNewFile) AlertDialog(onDismissRequest = { showNewFile = false }, title = { Text("新建文件") }, text = {
@@ -360,7 +375,7 @@ fun FileBrowserScreen(
             android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
         } else {
             val name = if ('.' in raw) raw else (newFileExt?.let { "$raw.$it" } ?: raw)   // 以手输为准；未选格式则不补扩展名
-            val target = File(currentPath, name)
+            val target = File(workPath, name)
             if (target.exists()) {
                 android.widget.Toast.makeText(context, "已存在同名文件/文件夹", android.widget.Toast.LENGTH_SHORT).show()
             } else {
@@ -385,7 +400,7 @@ fun FileBrowserScreen(
         if (error != null) {
             android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
         } else {
-            val target = File(currentPath, newName.trim())
+            val target = File(workPath, newName.trim())
             if (target.exists()) {
                 android.widget.Toast.makeText(context, "已存在同名文件/文件夹", android.widget.Toast.LENGTH_SHORT).show()
             } else {
@@ -487,6 +502,174 @@ fun FileBrowserScreen(
     }
 }
 
+/**
+ * 仿MT目录的单栏容器：紧凑面包屑头 + 文件列表。
+ * 点按栏内任意位置（空白/条目/面包屑）都会触发 [onActivate] 使其成为激活栏。
+ */
+@Composable
+private fun BrowserPane(
+    path: String,
+    isActive: Boolean,
+    root: String,
+    projectCanonical: String?,
+    refreshTick: Int,
+    sort: Int,
+    hidden: Boolean,
+    onActivate: () -> Unit,
+    onPathChange: (String) -> Unit,
+    onRefreshNeeded: () -> Unit,
+    onFileSelected: (String, String) -> Unit,
+    onImageClick: (File) -> Unit,
+    resolveConflict: suspend (source: File?, target: File, operation: String) -> ConflictAction,
+    modifier: Modifier = Modifier
+) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Column(
+        modifier
+            .clickable(interactionSource = interaction, indication = null) { onActivate() }
+    ) {
+        // 激活栏面包屑底色高亮，用于区分当前作用栏
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = if (isActive) RustedPrimary.copy(alpha = 0.10f) else RustedSurface
+        ) {
+            BreadcrumbBar(
+                path = path,
+                rootPath = root,
+                projectCanonical = projectCanonical,
+                compact = true,
+                onPathChange = onPathChange,
+                onActivate = onActivate,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        BrowserPanel(
+            path = path,
+            root = root,
+            refreshTick = refreshTick,
+            onRefreshNeeded = onRefreshNeeded,
+            onPathChange = onPathChange,
+            onFileSelected = onFileSelected,
+            onHome = {},
+            onImageClick = onImageClick,
+            resolveConflict = resolveConflict,
+            modifier = Modifier.weight(1f),
+            sort = sort,
+            hidden = hidden,
+            isActive = isActive,
+            compact = true,
+            onActivate = onActivate
+        )
+    }
+}
+
+/**
+ * 面屑导航条（可复用）：单栏模式下在共享工具栏内，仿MT目录下每栏各一份。
+ * 末段点击展开同级文件夹菜单；项目根目录时末段上锁（见 FileBrowserScreen 注释）。
+ */
+@Composable
+private fun BreadcrumbBar(
+    path: String,
+    rootPath: String,
+    projectCanonical: String?,
+    compact: Boolean = false,
+    onPathChange: (String) -> Unit,
+    onActivate: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    var showSiblingMenu by remember { mutableStateOf(false) }
+    var siblingDirs by remember { mutableStateOf(listOf<File>()) }
+    Box(modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            // 只显示相对路径
+            val relativePath = if (rootPath.isNotEmpty() && path.startsWith(rootPath)) {
+                path.removePrefix(rootPath).removePrefix(File.separator)
+            } else {
+                // 如果没有 rootPath，显示最后几级目录
+                val parts = path.split(File.separator).filter { it.isNotEmpty() }
+                if (parts.size > 3) parts.takeLast(3).joinToString(File.separator) else path
+            }
+            val pathParts = relativePath.split(File.separator).filter { it.isNotEmpty() }
+            // 当前是否正位于项目根目录（此时目录栏末尾段即"项目目录"段）
+            val atProjectRoot = projectCanonical != null && try {
+                File(path).canonicalPath == projectCanonical
+            } catch (_: Exception) { false }
+            val segSp = if (compact) 11.sp else 12.sp
+
+            pathParts.forEachIndexed { idx, part ->
+                val isLast = idx == pathParts.size - 1
+                // 该路径段的绝对路径（rootPath 下的相对前缀拼接）
+                val segAbs = if (rootPath.isNotEmpty())
+                    rootPath + File.separator + pathParts.take(idx + 1).joinToString(File.separator)
+                else ""
+                // 上锁：位于项目根目录时，末尾段（项目目录段）点击会展开同级菜单/切项目 → 锁定（点击不展开目录）
+                val segLocked = isLast && atProjectRoot
+                if (idx > 0) Text("›", fontSize = segSp, color = RustedOnBackground.copy(alpha = 0.25f))
+                Box {
+                    Surface(
+                        modifier = Modifier.clickable(enabled = !segLocked) {
+                            onActivate()
+                            if (isLast) {
+                                // 展开同级文件夹
+                                val parentDir = File(path).parentFile
+                                siblingDirs = parentDir?.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()
+                                showSiblingMenu = true
+                            } else if (rootPath.isNotEmpty()) {
+                                onPathChange(segAbs)
+                            }
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isLast) RustedPrimary.copy(alpha = 0.12f) else Color.Transparent
+                    ) {
+                        Text(
+                            if (part.length > 5) part.take(5) + "…" else part,
+                            fontSize = segSp,
+                            fontWeight = if (isLast && !atProjectRoot) FontWeight.Medium else FontWeight.Normal,
+                            color = if (isLast && !atProjectRoot) RustedPrimary
+                            else if (segLocked) RustedOnBackground.copy(alpha = 0.3f)
+                            else RustedOnBackground.copy(alpha = 0.65f),
+                            fontFamily = AppCodeFontFamily,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                    }
+                    if (isLast) {
+                        DropdownMenu(expanded = showSiblingMenu, onDismissRequest = { showSiblingMenu = false }) {
+                            if (siblingDirs.isEmpty()) {
+                                Row(
+                                    Modifier
+                                        .clickable { showSiblingMenu = false }
+                                        .heightIn(min = 32.dp)
+                                        .padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("无同级文件夹", fontSize = 12.sp)
+                                }
+                            } else {
+                                siblingDirs.forEach { dir ->
+                                    Row(
+                                        Modifier
+                                            .clickable {
+                                                onActivate()
+                                                onPathChange(dir.absolutePath)
+                                                showSiblingMenu = false
+                                            }
+                                            .heightIn(min = 36.dp)
+                                            .padding(horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(dir.name, fontSize = 12.sp, fontFamily = AppCodeFontFamily)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BrowserPanel(
@@ -501,7 +684,10 @@ private fun BrowserPanel(
     resolveConflict: suspend (source: File?, target: File, operation: String) -> ConflictAction,
     modifier: Modifier,
     sort: Int = 0,
-    hidden: Boolean = false
+    hidden: Boolean = false,
+    isActive: Boolean = true,
+    compact: Boolean = false,
+    onActivate: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -527,17 +713,19 @@ private fun BrowserPanel(
 
     LaunchedEffect(path, sort, hidden, refreshTick) { files = loadFiles(path, hidden, sort) }
     LaunchedEffect(path) {
-        SettingsManager.lastPath = path
+        // 双栏时仅激活栏写 lastPath，避免非激活栏覆盖
+        if (isActive) SettingsManager.lastPath = path
         // 切换目录时退出多选，避免选中项残留到新目录
         exitMultiSelect()
     }
     // 路径或列表刷新时关闭悬浮菜单（文件位置已失效）
     LaunchedEffect(path, refreshTick) { ctxMenuFile = null; ctxMenuBounds = null }
-    // 多选模式下返回键优先退出多选，而不是返回上级目录
-    BackHandler(enabled = multiSelectMode) { exitMultiSelect() }
+    // 多选模式下返回键优先退出多选，而不是返回上级目录（双栏时仅激活栏接管返回键）
+    BackHandler(enabled = multiSelectMode && isActive) { exitMultiSelect() }
 
     Column(modifier.background(RustedBackground)) {
-        if (FileClipboardManager.files.isNotEmpty()) {
+        // 粘贴条只出现在激活栏（粘贴目标=激活栏目录）
+        if (isActive && FileClipboardManager.files.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().background(RustedSecondary.copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${FileClipboardManager.files.size} 项${if (FileClipboardManager.mode == "cut") "（剪切）" else "（复制）"}", fontSize = 10.sp, color = RustedSecondary, modifier = Modifier.weight(1f))
                 TextButton(onClick = {
@@ -630,18 +818,21 @@ private fun BrowserPanel(
             FileEntry(
                 file = f,
                 onClick = {
+                    onActivate()
                     if (multiSelectMode) toggleSelect(f.absolutePath)
                     else if (f.isDirectory) onPathChange(f.absolutePath)
                     else if (isImage) onImageClick(f)
                     else if (ext in INI_EXTENSIONS) onFileSelected(f.name, f.absolutePath)
                 },
                 onLongClick = { bounds ->
+                    onActivate()
                     // 无论是否多选，长按都弹出同样的操作悬浮窗；多选时操作作用于全部已选项
                     ctxMenuFile = f
                     ctxMenuBounds = bounds
                 },
                 isSelected = multiSelectMode && selectedFiles.contains(f.absolutePath),
-                multiSelectMode = multiSelectMode
+                multiSelectMode = multiSelectMode,
+                compact = compact
             )
         } }
     }
@@ -789,7 +980,8 @@ private fun FileEntry(
     onClick: () -> Unit,
     onLongClick: (Rect) -> Unit,
     isSelected: Boolean = false,
-    multiSelectMode: Boolean = false
+    multiSelectMode: Boolean = false,
+    compact: Boolean = false
 ) {
     val isDir = file.isDirectory
     val df = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
@@ -820,14 +1012,17 @@ private fun FileEntry(
     val typeInfo = remember(fileType) { FileTypeInfo.forType(fileType) }
 
     // 文件浏览器固定「小」档位：统一 MT 管理器风格（无边框扁平两行），紧凑
-    val padV = 4.dp
-    val multiSelIcon = 18.dp
-    val multiSelGap = 6.dp
-    val iconBox = 30.dp
-    val icon = 22.dp
-    val img = 22.dp
-    val nameSp = 14.sp
-    val subSp = 9.sp
+    // 仿MT目录双栏（compact）下进一步缩小：图标/文字/内边距全部收窄
+    val padV = if (compact) 2.dp else 4.dp
+    val padH = if (compact) 6.dp else 10.dp
+    val multiSelIcon = if (compact) 16.dp else 18.dp
+    val multiSelGap = if (compact) 4.dp else 6.dp
+    val iconBox = if (compact) 24.dp else 30.dp
+    val icon = if (compact) 18.dp else 22.dp
+    val img = if (compact) 18.dp else 22.dp
+    val nameSp = if (compact) 12.sp else 14.sp
+    val subSp = if (compact) 8.sp else 9.sp
+    val nameGap = if (compact) 4.dp else 8.dp
 
     // 记录当前条目在窗口中的位置，长按时回传给父级用于定位悬浮菜单
     var entryBounds by remember { mutableStateOf<Rect?>(null) }
@@ -855,7 +1050,7 @@ private fun FileEntry(
         )
     ) {
         // 统一 MT 管理器风格两行布局（大/中/小仅尺寸不同）
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
             if (multiSelectMode) {
                 Icon(
                     if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
@@ -873,7 +1068,7 @@ private fun FileEntry(
                     androidx.compose.foundation.Image(it, null, Modifier.size(img).clip(RoundedCornerShape(4.dp)))
                 } ?: Icon(typeInfo.icon, null, Modifier.size(icon), tint = typeInfo.color)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(nameGap))
             Column(Modifier.weight(1f)) {
                 Text(
                     file.name,

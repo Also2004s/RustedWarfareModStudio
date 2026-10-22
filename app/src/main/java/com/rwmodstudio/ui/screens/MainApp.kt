@@ -96,7 +96,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, RECYCLE_BIN }
+enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -523,6 +523,8 @@ fun MainApp() {
     var browserSpace by rememberSaveable { mutableIntStateOf(0) }        // 0=第一空间 1=第二空间
     var browserFirstPath by rememberSaveable { mutableStateOf("") }
     var browserSecondPath by rememberSaveable { mutableStateOf("") }
+    // 仿MT目录：双栏布局（左=第一空间，右=第二空间），此时顶栏空间切换按钮隐藏，激活栏=最后点按的栏
+    val mtBrowserLayout = SettingsManager.devMtBrowserLayout
 
     fun persistBrowserSpace() {
         if (currentScreen != Screen.BROWSER || projectRoot.isEmpty()) return
@@ -800,6 +802,7 @@ fun MainApp() {
                     Screen.TODO_LIST -> "待办"
                     Screen.MOD_INFO -> "模组信息"
                     Screen.HIGHLIGHT_RULES -> "规则"
+                    Screen.SORT_CUSTOM -> "排序自定义"
                     Screen.RECYCLE_BIN -> "回收站"
                 }
                 // 编辑器页的全局菜单栏改为浮层（渲染在 Screen.EDITOR 分支，随 topFold 上滑隐藏），
@@ -937,7 +940,8 @@ fun MainApp() {
                     // ⚠️ 位置约定：此按钮属于【全局顶部菜单栏】（Scaffold 的 topBar，即 MainApp 标题栏右侧图标区），
                     //    与 FileBrowserScreen 页面内部的【目录栏】（面包屑/工具栏）是两层不同的 UI。
                     //    异度空间入口【只能】放在本顶部菜单栏，禁止挪进 FileBrowserScreen 内部目录栏。
-                    if (currentScreen == Screen.BROWSER && projectRoot.isNotEmpty()) {
+                    // 仿MT目录下双栏同显，无需切换 → 隐藏本按钮。
+                    if (currentScreen == Screen.BROWSER && projectRoot.isNotEmpty() && !mtBrowserLayout) {
                         IconButton(
                             onClick = { toggleBrowserSpace() },
                             modifier = Modifier.size(36.dp)
@@ -979,6 +983,10 @@ fun MainApp() {
                             android.os.Environment.getExternalStorageDirectory().absolutePath
                         } else defaultPath,
                         projectRoot = projectRoot,
+                        mtLayout = mtBrowserLayout,
+                        firstStartPath = browserFirstPath,
+                        secondStartPath = browserSecondPath,
+                        activePane = browserSpace,
                         onFileSelected = { n, p ->
                             openFileForEdit(n, p)
                         },
@@ -1002,6 +1010,19 @@ fun MainApp() {
                             pushScreen(Screen.PROJECT_MANAGER)
                         },
                         onStartPathChange = { browserStartPath = it },
+                        // 仿MT目录：某栏导航 → 更新该栏空间位置；激活栏同时镜像到 browserStartPath
+                        onPanePathChange = { pane, path ->
+                            if (pane == 0) browserFirstPath = path else browserSecondPath = path
+                            if (browserSpace == pane) browserStartPath = path
+                            persistBrowserSpace()
+                        },
+                        // 仿MT目录：点按某栏 → 该栏成为激活空间（browserSpace 0/1），路径镜像到 browserStartPath
+                        onActivePaneChange = { pane, path ->
+                            if (pane == 0) browserFirstPath = path else browserSecondPath = path
+                            browserSpace = pane
+                            browserStartPath = path
+                            persistBrowserSpace()
+                        },
                         onCreateModInfo = { n, p -> openModInfoPage(n, p) }
                     )
                     Screen.RECYCLE_BIN -> RecycleBinScreen()
@@ -1342,9 +1363,13 @@ fun MainApp() {
                         },
                         onOpenHighlightRules = {
                             pushScreen(Screen.HIGHLIGHT_RULES)
+                        },
+                        onOpenSortCustomization = {
+                            pushScreen(Screen.SORT_CUSTOM)
                         }
                     )
                     Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
+                    Screen.SORT_CUSTOM -> SortCustomizationScreen()
                     Screen.COMPLETION_TYPES -> CompletionTypeScreen(
                         callableCategory = completionTypesCallableCat,
                         onCloseCallableCategory = { completionTypesCallableCat = null }

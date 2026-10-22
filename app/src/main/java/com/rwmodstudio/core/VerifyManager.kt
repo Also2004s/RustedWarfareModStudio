@@ -36,7 +36,7 @@ object VerifyManager {
     const val BLOCKLIST_CODE = "384758"
     const val SECTION_FILTERS_CODE = "813546"
     const val NATIVE_COMPLETIONS_CODE = "819413"
-    const val EXTRA_COMPLETIONS_CODE = "530719"
+    const val EXTRA_COMPLETIONS_CODE = "530720"
     const val CODE_REFERENCE_CODE = "720524"
     const val ONBOARDING_CODE = "481203"
     const val TRANSLATION_CACHE_CODE = "100001"

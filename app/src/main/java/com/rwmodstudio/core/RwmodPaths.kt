@@ -79,6 +79,8 @@ object RwmodPaths {
     val sectionFiltersFile: File get() = File(configDir, "section_filters.json")
     /** 自定义代码高亮规则（开发者模式→规则，按「类别：规则」组织） */
     val highlightRulesFile: File get() = File(configDir, "highlight_rules.json")
+    /** 补全排序自定义（开发者模式→排序自定义，节 → 有序键名列表） */
+    val sortCustomizationFile: File get() = File(configDir, "sort_custom.json")
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
     val saveHistoryFile: File get() = File(configDir, "save_history.json")

@@ -917,6 +917,10 @@ object SettingsManager {
     var devRecentFiles: Boolean
         get() = settings.getBoolean("dev_recent_files", true)
         set(value) = settings.edit().putBoolean("dev_recent_files", value).apply()
+    /** 仿MT目录：文件浏览器双栏布局（左=第一空间，右=第二空间），图标文字变小 */
+    var devMtBrowserLayout: Boolean
+        get() = settings.getBoolean("dev_mt_browser_layout", false)
+        set(value) = settings.edit().putBoolean("dev_mt_browser_layout", value).apply()
 
     // === AI 助手（仅用于版本对比生成更新报告） ===
     /** AI 服务地址（OpenAI 兼容，末尾不含 /chat/completions） */

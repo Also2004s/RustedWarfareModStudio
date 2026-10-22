@@ -31,7 +31,8 @@ import com.rwmodstudio.ui.theme.*
 fun DeveloperModeScreen(
     onOpenMockIni: () -> Unit = {},
     onOpenCompletionTypes: () -> Unit = {},
-    onOpenHighlightRules: () -> Unit = {}
+    onOpenHighlightRules: () -> Unit = {},
+    onOpenSortCustomization: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -142,8 +143,15 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.Rule,
                 title = "规则",
                 subtitle = "自定义高亮规则：按「类别：规则」给任意关键字/正则上色",
-                isLast = true,
                 onClick = onOpenHighlightRules
+            )
+            DevDivider()
+            DevActionRow(
+                icon = Icons.Default.Sort,
+                title = "排序自定义",
+                subtitle = "按真实使用频次把高频键置顶；可自行增删调序（只调顺序，不增删补全项）",
+                isLast = true,
+                onClick = onOpenSortCustomization
             )
         }
 
@@ -320,7 +328,15 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.History,
                 title = "最近文件",
                 checked = SettingsManager.devRecentFiles,
-                onCheckedChange = { SettingsManager.devRecentFiles = it },
+                onCheckedChange = { SettingsManager.devRecentFiles = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.Splitscreen,
+                title = "仿MT目录",
+                subtitle = "文件浏览器左右分栏：左=第一空间，右=第二空间，图标文字变小",
+                checked = SettingsManager.devMtBrowserLayout,
+                onCheckedChange = { SettingsManager.devMtBrowserLayout = it },
                 isLast = true
             )
         }

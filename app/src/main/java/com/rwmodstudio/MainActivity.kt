@@ -28,6 +28,7 @@ import com.rwmodstudio.core.LocalConfigManager
 import com.rwmodstudio.core.RecycleBin
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.SortCustomizationManager
 import com.rwmodstudio.core.TaskProgressManager
 import com.rwmodstudio.core.UpdateDownloader
 import com.rwmodstudio.core.translation.SearchTranslationCache
@@ -114,6 +115,12 @@ class MainActivity : ComponentActivity() {
                     RecycleBin.purgeIfOversize()
                 } catch (e: Exception) {
                     Log.e(TAG, "RecycleBin purge failed", e)
+                }
+                // 预热补全排序表（缺失时用默认频次表播种），避免首次补全在主线程读盘
+                try {
+                    SortCustomizationManager.load()
+                } catch (e: Exception) {
+                    Log.e(TAG, "预热排序表失败", e)
                 }
                 if (needsExtra) {
                     TaskProgressManager.start("加载附件表")
