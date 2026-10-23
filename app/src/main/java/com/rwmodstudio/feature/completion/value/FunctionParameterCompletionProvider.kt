@@ -64,7 +64,10 @@ private fun toEnglishForParam(chinese: String, translationDict: TranslationDict?
  * 解析该 '(' 前的函数名（去 self./父单位./内存. 等链式前缀，中文经翻译库反查为英文基名），
  * 从 assets/data/param/ 参数表取命名参数：
  * - 光标在 '(' 或 ',' 后：列出未使用的参数（label=insert=zh=，如 需标签=）；
- * - 光标在 'param=' 后：按参数类型给出值建议（tag→项目标签、type→类型枚举、relation→关系、resource→资源名、enum→枚举值）。
+ * - 光标在 'param=' 后：按参数类型给出值建议（tag→本区标签池、globalTag→全局标签池、
+ *   type→类型枚举、relation→关系、resource→资源名、enum→枚举值）。
+ *   标签池按参数类型严格分流，不做并集：全局语义的函数（self.globalTeamTags，参数表标 globalTag）
+ *   只出全局标签，单位标签语义的函数（self.tags / 需标签=）只出本区标签。
  * 纯位置参数函数（rnd/select/substring 等）不在参数表中，不补。
  */
 
@@ -233,7 +236,11 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         val rawAfterEq = paramValueAfterEq(request.textBeforeCursor) ?: return emptyList()
         val afterEq = rawAfterEq.trim()
         val values: List<String> = when (param.type) {
-            "tag" -> (request.tags + request.globalTags).toList()
+            // 标签池严格分流：全局标签参数（参数表 globalTag，如 有全局标签(有标签=)）只取全局标签池，
+            // 本区标签参数（tag，如 自身有标签(有标签=)/需标签=）只取本区标签池。
+            // 两者语义不同（addGlobalTeamTags 写进团队级池、tags 写进单位级池），混在一起会给出永远不成立的条件。
+            "tag" -> request.tags.toList()
+            "globalTag" -> request.globalTags.toList()
             // 消息标签（新消息(需标签=)）：只列项目里 sendMessageWithTags: 的取值，独立命名空间
             "messageTag" -> request.messageTags.toList()
             // enum/type/relation 优先用参数表 values（可维护），空则回退内置默认
@@ -404,6 +411,7 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
 
     private fun paramTypeDetail(type: String): String = when (type) {
         "tag" -> "标签 - 参数"
+        "globalTag" -> "全局标签 - 参数"
         "messageTag" -> "消息标签 - 参数"
         "actionTag" -> "动作 - 参数"
         "memoryName" -> "内存变量 - 参数"
@@ -605,7 +613,7 @@ internal fun isMutuallyExclusiveParam(key: String): Boolean =
  * 代码表写法：需标签='fish'、队列项目取消(withActionTag="actionFire")、读取单位内存('攻击目标', type='unit')。
  */
 internal val quotedValueParamTypes: Set<String> =
-    setOf("tag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName")
+    setOf("tag", "globalTag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName")
 
 /**
  * 构建 param= 后的值建议。
@@ -624,9 +632,9 @@ internal fun buildParamValueSuggestions(
 ): List<ParamValueSuggestion> {
     val quote = paramType in quoteTypes
     val matchPrefix = if (quote) typedAfterEq.trim('\'', '"') else typedAfterEq
-    // tag/messageTag/actionTag/resource/attachmentSlot/memoryName 按字母排序便于查找；
+    // tag/globalTag/messageTag/actionTag/resource/attachmentSlot/memoryName 按字母排序便于查找；
     // relation/enum/type 等保持参数表书写顺序（语义顺序）
-    val sortedTypes = setOf("tag", "messageTag", "actionTag", "resource", "attachmentSlot", "memoryName")
+    val sortedTypes = setOf("tag", "globalTag", "messageTag", "actionTag", "resource", "attachmentSlot", "memoryName")
     val ordered = if (paramType in sortedTypes) values.sortedBy { it.lowercase() } else values
     return ordered
         .map { it to completionMatchLevel(matchPrefix, it) }

@@ -3,6 +3,7 @@
 ## 老板硬规矩
 - 报告用「用户视角三层式」（为什么/改前/改后）+ 🔴🟡🟢；**主栏禁代码术语**，技术细节压文末。
 - **禁止擅自加兜底**（09-17）：回退/静默兼容/出错返原值必须**先提出并得到同意**；判据 = 有数据证明它必须存在吗？
+- **报告里列了 N 处方案 ≠ N 处都获授权**（10-23 被批）：他说「开始修复」时只修他点名的那个问题；顺带发现的其他缺陷/配套改动一律留在文档里等单独批准，不许打包执行。越界的要立刻回退。
 - 不要把能自己判定的事抛回去问；范围以显式证据为准，结论自己焊死。
 - 「安装」= 装 debug 包（`com.rwmodstudio.debug`）；没明说"正式版"绝不碰 `com.rwmodstudio`。
 - 用户报的问题一定真实存在：先信用户先自查（装的哪个包 → APK 时间 ≥ 源码时间）。"没生效"第一查点 = 他验证的哪个包。
@@ -42,6 +43,8 @@
 ## 翻译引擎 / 补全
 - 整值专用词只进 `valueTranslations`；括号内整值保持英文。引号闸只对 enum/type/relation 生效，`tag/actionTag` 等自定义名原样保留。
 - 反译「归一化」是设计不是 bug。模板键以英文实例化形态落盘。
+- **specialValues 分支必须按方向分流**（10-23 修）：`valueTranslations` 双向存储（true↔真 同一条），中→英方向若还去查会反查成中文 → 粘贴进中文视图的 `true` 保存后变「真」、「LAND」变「陆地」（9 个值全中招）。正确写法 `return if (enToZh) getValueTranslationBack(processed) else processed`。
+- **布尔 token 边界用「标点白名单」是已知缺陷，但 10-23 未获授权修**：`(?<=[=,\(])…(?=[,\)\}])` 会漏 `if 真`/`%{真}`/`[真]`/`真 and 假`。方案（独立词边界 + `replaceOutsideQuotes` + `trimInvisible`）写在 `docs/修复报告-布尔与枚举值被反译成中文-2026-10-23.md` 问题二，等老板单独批。
 - 「补全类型分类」页 = 真实补全判定（默认全 Provider 开）；改默认开关必 bump `MOCK_INI_CODE`。
 - 未修：属性整值补全 label 与匹配都用中文，英文前缀匹配不到。
 
@@ -50,3 +53,5 @@
 - 删文件可能被沙箱拦（SIGTERM、无回显）→ 走审批。**要删就直接删，不先备份**。
 - JDK `tools/jdk/jdk-17.0.19+10`；守护进程抢锁 → `jps -l`+`taskkill`+删 `~/.gradle/daemon/8.14.5/registry.bin`+`--no-daemon`。
 - `dexBuilderDebug` 报 `desugar_graph...graph.bin` 拒绝访问 → 删 `app/build/intermediates/desugar_graph` 重建，**不用 clean**。
+- **改完主源码后测试编译成片 `Unresolved reference`**（连确实存在的函数都找不到）= Kotlin 增量缓存损坏。删 `app/build/kotlin` + `app/build/tmp/kotlin-classes` 后全量重编即恢复，别怀疑源码。
+- 全量单测有两个**既有失败**（与本次改动无关，stash 对照已证）：`CompletionSymbolsTest.extractFileSymbolsParsesAllCategories`、`CustomCompletionsFormatTest.extraCompletionsAllUseEmptyValueFormat`。353 个测试里固定 2 个红，别当回归。

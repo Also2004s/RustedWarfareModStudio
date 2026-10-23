@@ -579,8 +579,11 @@ class TranslationEngine private constructor() {
         }
 
         // 处理特殊值（在 specialValues 中的英文值，如 LAND, WATER 等）
+        // 注意必须区分方向：valueTranslations 是双向登记的（true↔真 写在同一处），
+        // 中→英方向若仍去查「中文对应的英文」，会把本来就是英文目标值的 true/LAND 反查成「真」「陆地」，
+        // 导致中文视图里粘贴的英文内容在保存时被写坏（true→真、LAND→陆地）。
         if (processed in translationDict.getSpecialValues()) {
-            return translationDict.getValueTranslationBack(processed)
+            return if (enToZh) translationDict.getValueTranslationBack(processed) else processed
         }
 
         // 反向翻译时，检查 valueTranslations 中是否有对应的中文值（如 水面→WATER, 真→true）

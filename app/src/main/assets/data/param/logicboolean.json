@@ -758,7 +758,7 @@
         {
           "key": "includes",
           "zh": "有标签",
-          "type": "tag"
+          "type": "globalTag"
         }
       ]
     },
