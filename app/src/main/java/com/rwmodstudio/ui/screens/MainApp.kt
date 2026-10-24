@@ -525,6 +525,8 @@ fun MainApp() {
     var browserSecondPath by rememberSaveable { mutableStateOf("") }
     // 仿MT目录：双栏布局（左=第一空间，右=第二空间），此时顶栏空间切换按钮隐藏，激活栏=最后点按的栏
     val mtBrowserLayout = SettingsManager.devMtBrowserLayout
+    // 仿MT目录：「更多」菜单入口移到全局菜单栏，用 tick 信号触发 FileBrowserScreen 内的菜单
+    var browserToolMenuTick by remember { mutableIntStateOf(0) }
 
     fun persistBrowserSpace() {
         if (currentScreen != Screen.BROWSER || projectRoot.isEmpty()) return
@@ -954,6 +956,18 @@ fun MainApp() {
                             )
                         }
                     }
+                    // 仿MT目录：浏览器页内「近期/项目管理/更多」上移到全局菜单栏（页面工具栏只留每栏面包屑）
+                    if (currentScreen == Screen.BROWSER && mtBrowserLayout) {
+                        IconButton(onClick = { showRecentSheet = true; recentSourceScreen = currentScreen }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.History, "近期", Modifier.size(20.dp), tint = contentColor.copy(alpha = 0.7f))
+                        }
+                        IconButton(onClick = { pushScreen(Screen.PROJECT_MANAGER) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.AccountTree, "项目管理", Modifier.size(20.dp), tint = contentColor.copy(alpha = 0.7f))
+                        }
+                        IconButton(onClick = { browserToolMenuTick++ }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.MoreVert, "更多", Modifier.size(20.dp), tint = contentColor.copy(alpha = 0.7f))
+                        }
+                    }
                 }
                 }
             }
@@ -987,6 +1001,7 @@ fun MainApp() {
                         firstStartPath = browserFirstPath,
                         secondStartPath = browserSecondPath,
                         activePane = browserSpace,
+                        toolMenuTick = browserToolMenuTick,
                         onFileSelected = { n, p ->
                             openFileForEdit(n, p)
                         },
