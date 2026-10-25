@@ -19,6 +19,9 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
@@ -242,11 +245,15 @@ fun HomeScreen(
                 }
             }
         } else {
-            LazyColumn(
+            // 横屏宽屏（平板模式）下按可用宽度自动分列：手机竖屏 390dp → 1 列（与原来的单列列表等价），
+            // 平板横屏 1280dp → 2 列，超宽屏 → 3 列。避免卡片被拉成横贯全屏的一条。
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 480.dp),
                 modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(mods, key = { it.absolutePath }) { file ->
+                gridItems(mods, key = { it.absolutePath }) { file ->
                     val isPinned = file.absolutePath in pinned
                     ModListCard(
                         file = file,

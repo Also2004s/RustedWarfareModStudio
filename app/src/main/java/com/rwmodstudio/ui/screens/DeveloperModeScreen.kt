@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -32,7 +33,8 @@ fun DeveloperModeScreen(
     onOpenMockIni: () -> Unit = {},
     onOpenCompletionTypes: () -> Unit = {},
     onOpenHighlightRules: () -> Unit = {},
-    onOpenSortCustomization: () -> Unit = {}
+    onOpenSortCustomization: () -> Unit = {},
+    onOpenSimAnim: () -> Unit = {}
 ) {
     Column(
         Modifier
@@ -268,6 +270,20 @@ fun DeveloperModeScreen(
                 onCheckedChange = { SettingsManager.devTopBarsFold = it }
             )
             DevDivider()
+            // 平板模式：整个 App 强制横屏 + 编辑器左右双工作区。
+            // 方向在 MainActivity.onCreate 按设置决定，所以切换后必须重建 Activity 才生效。
+            val devContext = LocalContext.current
+            DevSwitchCompact(
+                icon = Icons.Default.ScreenRotation,
+                title = "平板模式",
+                subtitle = "强制横屏；编辑器左右两个工作区同时编辑，中间分割线可拖动",
+                checked = SettingsManager.devTabletMode,
+                onCheckedChange = { on ->
+                    SettingsManager.devTabletMode = on
+                    (devContext as? android.app.Activity)?.recreate()
+                }
+            )
+            DevDivider()
             DevSwitchCompact(
                 icon = Icons.Default.GridOn,
                 title = "坐标可视化",
@@ -294,6 +310,18 @@ fun DeveloperModeScreen(
                 title = "软换行提示符",
                 checked = SettingsManager.wrapIndicatorEnabled,
                 onCheckedChange = { SettingsManager.wrapIndicatorEnabled = it }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SectionHeader(Icons.Default.Animation, "仿真")
+        SettingsCard {
+            DevActionRow(
+                icon = Icons.Default.Animation,
+                title = "仿真动画",
+                subtitle = "把公式画成区域：如「间距(self,当前动作目标)+间距(当前动作目标,活动路径点目标) <= 间距(self,活动路径点目标)」，可播放时间轴",
+                onClick = onOpenSimAnim
             )
         }
 
@@ -328,15 +356,7 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.History,
                 title = "最近文件",
                 checked = SettingsManager.devRecentFiles,
-                onCheckedChange = { SettingsManager.devRecentFiles = it }
-            )
-            DevDivider()
-            DevSwitchCompact(
-                icon = Icons.Default.Splitscreen,
-                title = "仿MT目录",
-                subtitle = "文件浏览器左右分栏：左=第一空间，右=第二空间，图标文字变小",
-                checked = SettingsManager.devMtBrowserLayout,
-                onCheckedChange = { SettingsManager.devMtBrowserLayout = it },
+                onCheckedChange = { SettingsManager.devRecentFiles = it },
                 isLast = true
             )
         }

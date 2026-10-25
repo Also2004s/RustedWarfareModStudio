@@ -33,6 +33,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +93,7 @@ fun FileBrowserScreen(
     rootPath: String = "",
     projectRoot: String = "",
     mtLayout: Boolean = false,
+    onToggleLayout: () -> Unit = {},
     firstStartPath: String = "",
     secondStartPath: String = "",
     activePane: Int = 0,
@@ -270,6 +274,7 @@ fun FileBrowserScreen(
                         showModInfoItem = atProjectRoot && !File(workPath, "mod-info.txt").exists(),
                         onSort = { sort = (sort + 1) % 3; showToolMenu = false },
                         onToggleHidden = { hidden = !hidden; showToolMenu = false },
+                        onToggleLayout = { onToggleLayout(); showToolMenu = false },
                         onNewFile = { newName = ""; newFileExt = null; showNewFile = true; showToolMenu = false },
                         onNewFolder = { newName = ""; showNewFolder = true; showToolMenu = false },
                         onNewModInfo = createModInfoHere,
@@ -304,6 +309,7 @@ fun FileBrowserScreen(
                             showModInfoItem = atProjectRoot && !File(workPath, "mod-info.txt").exists(),
                             onSort = { sort = (sort + 1) % 3; showToolMenu = false },
                             onToggleHidden = { hidden = !hidden; showToolMenu = false },
+                            onToggleLayout = { onToggleLayout(); showToolMenu = false },
                             onNewFile = { newName = ""; newFileExt = null; showNewFile = true; showToolMenu = false },
                             onNewFolder = { newName = ""; showNewFolder = true; showToolMenu = false },
                             onNewModInfo = createModInfoHere,
@@ -337,8 +343,8 @@ fun FileBrowserScreen(
                     otherPanePath = rightPath,
                     inactiveEdge = if (pane == 0) -1 else 1
                 )
-                // 栏间分隔线：浅色下是暗线、深色下是亮线（RustedOnBackground 自动跟随主题）
-                Box(Modifier.fillMaxHeight().width(1.dp).background(RustedOnBackground.copy(alpha = 0.14f)))
+                // 栏间分隔线：统一用黑色（不跟主题翻转，与同侧阴影同色系）
+                Box(Modifier.fillMaxHeight().width(1.dp).background(Color.Black.copy(alpha = 0.18f)))
                 BrowserPane(
                     path = rightPath,
                     isActive = pane == 1,
@@ -555,25 +561,20 @@ private fun BrowserPane(
     inactiveEdge: Int = -1
 ) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    // 未激活栏的层级表达：整栏压暗 + 靠分隔线一侧的渐隐阴影。
-    // 深色主题下黑色阴影几乎不可见（底色已很暗），所以统一加一层压暗，靠亮度差表达"退后"。
-    val shadowColor = Color.Black.copy(alpha = if (ThemeState.isDark) 0.45f else 0.12f)
-    val dimColor = Color.Black.copy(alpha = if (ThemeState.isDark) 0.20f else 0.03f)
     Column(
         modifier
-            .drawWithContent {
-                drawContent()
-                if (inactiveEdge >= 0) {
-                    drawRect(dimColor)
-                    val w = 10.dp.toPx()
-                    val left = if (inactiveEdge == 0) 0f else size.width - w
-                    val brush = if (inactiveEdge == 0)
-                        Brush.horizontalGradient(listOf(shadowColor, Color.Transparent), startX = 0f, endX = w)
-                    else
-                        Brush.horizontalGradient(listOf(Color.Transparent, shadowColor), startX = size.width - w, endX = size.width)
-                    drawRect(brush = brush, topLeft = Offset(left, 0f), size = Size(w, size.height))
-                }
-            }
+            // 该栏发生任何触摸（点击/长按/滚动/拖拽）都视为聚焦：在 Initial 阶段旁听，不消费事件，
+            // 不影响列表自身的手势处理。只在双栏下挂载（单栏没有"切换聚焦栏"的概念）。
+            .then(
+                if (paneIndex >= 0) Modifier.pointerInput(paneIndex) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent(PointerEventPass.Initial)
+                            if (e.type == PointerEventType.Press || e.type == PointerEventType.Move) onActivate()
+                        }
+                    }
+                } else Modifier
+            )
             .clickable(interactionSource = interaction, indication = null) { onActivate() }
     ) {
         // 激活栏面包屑底色高亮，用于区分当前作用栏
@@ -609,7 +610,8 @@ private fun BrowserPane(
             compact = true,
             onActivate = onActivate,
             paneIndex = paneIndex,
-            otherPanePath = otherPanePath
+            otherPanePath = otherPanePath,
+            inactiveEdge = inactiveEdge
         )
     }
 }
@@ -734,6 +736,7 @@ private fun BrowserToolMenu(
     showModInfoItem: Boolean,
     onSort: () -> Unit,
     onToggleHidden: () -> Unit,
+    onToggleLayout: () -> Unit,
     onNewFile: () -> Unit,
     onNewFolder: () -> Unit,
     onNewModInfo: () -> Unit,
@@ -747,6 +750,12 @@ private fun BrowserToolMenu(
         val sorts = listOf("名称", "大小", "日期")
         PlainMenuItem(icon = Icons.Default.Sort, title = "${sorts[sort]}", onClick = onSort)
         PlainMenuItem(icon = if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, title = if (hidden) "显示" else "筛选", onClick = onToggleHidden)
+        // 双栏 / 单栏切换（取代原开发者模式里的「仿MT目录」开关）
+        PlainMenuItem(
+            icon = Icons.Default.Splitscreen,
+            title = "切换布局",
+            onClick = onToggleLayout
+        )
         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
         PlainMenuItem(icon = Icons.Default.NoteAdd, title = "新建文件", onClick = onNewFile)
         PlainMenuItem(icon = Icons.Default.CreateNewFolder, title = "新建文件夹", onClick = onNewFolder)
@@ -781,7 +790,9 @@ private fun BrowserPanel(
     /** 仿MT双栏：-1=单栏，0=左栏，1=右栏（决定箭头方向与"另一栏"目标） */
     paneIndex: Int = -1,
     /** 仿MT双栏：另一栏当前目录（移动/复制的目标） */
-    otherPanePath: String = ""
+    otherPanePath: String = "",
+    /** 仿MT双栏：未激活栏阴影方向（0=左缘向右渐隐，1=右缘向左渐隐，-1=不画） */
+    inactiveEdge: Int = -1
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -789,9 +800,11 @@ private fun BrowserPanel(
     var rename by remember { mutableStateOf<File?>(null) }
     var del by remember { mutableStateOf<File?>(null) }
     var newName by remember { mutableStateOf("") }
-    // 原地「粘贴」：先弹命名框，确认后才复制（不经过剪贴板）
+    // 原地址「粘贴」：先弹命名框，确认后才复制（不经过剪贴板）
     var pasteSource by remember { mutableStateOf<File?>(null) }
     var pasteName by remember { mutableStateOf("") }
+    // 移动/复制到另一栏：先弹确认框，把目标目录摆给用户看清
+    var transferConfirm by remember { mutableStateOf<TransferConfirm?>(null) }
     var ctxMenuFile by remember { mutableStateOf<File?>(null) }
     var ctxMenuBounds by remember { mutableStateOf<Rect?>(null) }
     // 多选：入口是长按文件条目后悬浮菜单里的「多选」（左滑已不再触发，避免误触）
@@ -836,7 +849,24 @@ private fun BrowserPanel(
     // 多选模式下返回键优先退出多选，而不是返回上级目录（双栏时仅激活栏接管返回键）
     BackHandler(enabled = multiSelectMode && isActive) { exitMultiSelect() }
 
-    Column(modifier.background(RustedBackground)) {
+    val shadowColor = Color.Black.copy(alpha = if (ThemeState.isDark) 0.45f else 0.12f)
+    Column(
+        modifier
+            .background(RustedBackground)
+            // 未激活栏的层级阴影只压文件列表区域，不盖到顶部目录栏（面包屑）上
+            .drawWithContent {
+                drawContent()
+                if (inactiveEdge >= 0) {
+                    val w = 4.dp.toPx()
+                    val left = if (inactiveEdge == 0) 0f else size.width - w
+                    val brush = if (inactiveEdge == 0)
+                        Brush.horizontalGradient(listOf(shadowColor, Color.Transparent), startX = 0f, endX = w)
+                    else
+                        Brush.horizontalGradient(listOf(Color.Transparent, shadowColor), startX = size.width - w, endX = size.width)
+                    drawRect(brush = brush, topLeft = Offset(left, 0f), size = Size(w, size.height))
+                }
+            }
+    ) {
         // 粘贴条只出现在激活栏（粘贴目标=激活栏目录）
         if (isActive && FileClipboardManager.files.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().background(RustedSecondary.copy(alpha = 0.15f)).padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -918,14 +948,9 @@ private fun BrowserPanel(
                                 if (paneIndex == 0) "移动 →" else "← 移动",
                                 enabled = !sameDir,
                                 onClick = {
-                                    val src = targets
-                                    val dest = otherPanePath
                                     ctxMenuFile = null; ctxMenuBounds = null
                                     exitMultiSelect()
-                                    scope.launch {
-                                        val r = performTransfer(src, move = true, targetDir = dest, resolveConflict = resolveConflict)
-                                        withContext(Dispatchers.Main) { onRefreshNeeded(); reportTransfer(r, "移动", dest) }
-                                    }
+                                    transferConfirm = TransferConfirm(targets, move = true, targetDir = otherPanePath)
                                 }
                             )
                             FloatingMenuItem(
@@ -933,19 +958,14 @@ private fun BrowserPanel(
                                 if (paneIndex == 0) "复制 →" else "← 复制",
                                 enabled = !sameDir,
                                 onClick = {
-                                    val src = targets
-                                    val dest = otherPanePath
                                     ctxMenuFile = null; ctxMenuBounds = null
                                     exitMultiSelect()
-                                    scope.launch {
-                                        val r = performTransfer(src, move = false, targetDir = dest, resolveConflict = resolveConflict)
-                                        withContext(Dispatchers.Main) { onRefreshNeeded(); reportTransfer(r, "复制", dest) }
-                                    }
+                                    transferConfirm = TransferConfirm(targets, move = false, targetDir = otherPanePath)
                                 }
                             )
-                            // 原地粘贴：给副本命名后再复制（不读剪贴板）；多选时批量改名没有合理交互，故不出现
+                            // 原地址粘贴：给副本命名后再复制（不读剪贴板）；多选时批量改名没有合理交互，故不出现
                             if (singleTarget) {
-                                FloatingMenuItem(Icons.Outlined.ContentPaste, "粘贴", onClick = {
+                                FloatingMenuItem(Icons.Outlined.ContentPaste, "原地址粘贴", onClick = {
                                     ctxMenuFile = null; ctxMenuBounds = null
                                     exitMultiSelect()
                                     pasteSource = file
@@ -1029,11 +1049,54 @@ private fun BrowserPanel(
             }
         }
     }) { Text("确定") } }, dismissButton = { TextButton(onClick = { rename = null }) { Text("取消") } }) }
-    // 原地「粘贴」命名框（仿MT双栏）：先命名，确认后才生成副本
+    // 移动/复制确认框：把目标目录摆清楚（移动是不可逆动作，源会消失）
+    transferConfirm?.let { req ->
+        val relTarget = if (root.isNotEmpty() && req.targetDir.startsWith(root)) {
+            req.targetDir.removePrefix(root).removePrefix(File.separator)
+        } else req.targetDir
+        val shownTarget = relTarget.ifEmpty { File(req.targetDir).name.ifEmpty { req.targetDir } }
+        val what = if (req.srcFiles.size == 1) File(req.srcFiles.first()).name
+        else "${File(req.srcFiles.first()).name} 等 ${req.srcFiles.size} 项"
+        AlertDialog(
+            onDismissRequest = { transferConfirm = null },
+            title = { Text(if (req.move) "确认移动" else "确认复制") },
+            text = {
+                Column {
+                    Text("将 $what ${if (req.move) "移动" else "复制"}到：", fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        shownTarget,
+                        fontFamily = AppCodeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = RustedPrimary
+                    )
+                    if (req.move) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("移动后原位置不再保留", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val src = req.srcFiles
+                    val dest = req.targetDir
+                    val move = req.move
+                    transferConfirm = null
+                    scope.launch {
+                        val r = performTransfer(src, move, dest, resolveConflict = resolveConflict)
+                        withContext(Dispatchers.Main) { onRefreshNeeded(); reportTransfer(r, if (move) "移动" else "复制", dest) }
+                    }
+                }) { Text(if (req.move) "移动" else "复制") }
+            },
+            dismissButton = { TextButton(onClick = { transferConfirm = null }) { Text("取消") } }
+        )
+    }
+    // 原地址「粘贴」命名框（仿MT双栏）：先命名，确认后才生成副本
     pasteSource?.let { src ->
         AlertDialog(
             onDismissRequest = { pasteSource = null },
-            title = { Text("原地粘贴") },
+            title = { Text("原地址粘贴") },
             text = {
                 Column {
                     Text("给副本起个名字，原文件保持不变", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.65f))
@@ -1370,13 +1433,20 @@ private data class TransferOutcome(
     val error: String? = null
 )
 
+/** 待确认的移动/复制请求（菜单点下去先确认，再执行） */
+private data class TransferConfirm(
+    val srcFiles: List<String>,
+    val move: Boolean,
+    val targetDir: String
+)
+
 /**
- * 移动 / 复制 / 原地粘贴的统一实现（单栏粘贴条、双栏「移动 →」「复制 →」「粘贴」共用）。
+ * 移动 / 复制 / 原地址粘贴的统一实现（单栏粘贴条、双栏「移动 →」「复制 →」「粘贴」共用）。
  *
  * @param srcFiles 源文件绝对路径
  * @param move true=移动（先拷贝成功再删源，跨分区也安全），false=复制
  * @param targetDir 目标目录
- * @param renameTo 目标文件名（仅原地粘贴用；非空时不走同名冲突弹窗，遇到占用直接跳过）
+ * @param renameTo 目标文件名（仅原地址粘贴用；非空时不走同名冲突弹窗，遇到占用直接跳过）
  */
 private suspend fun performTransfer(
     srcFiles: List<String>,

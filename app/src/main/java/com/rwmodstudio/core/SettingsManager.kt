@@ -880,6 +880,13 @@ object SettingsManager {
     var devTopBarsFold: Boolean
         get() = settings.getBoolean("dev_top_bars_fold", false)
         set(value) = settings.edit().putBoolean("dev_top_bars_fold", value).apply()
+    /**
+     * 平板模式：整个 App 强制横屏 + 编辑器左右两个工作区同时编辑（中间分割线可拖）。
+     * 仅开发者模式可开；开启后 MainActivity 按此请求横屏，编辑器按双栏渲染。
+     */
+    var devTabletMode: Boolean
+        get() = settings.getBoolean("dev_tablet_mode", false)
+        set(value) = settings.edit().putBoolean("dev_tablet_mode", value).apply()
     /** 小菜单栏显示复制文件名/路径 */
     var devShowCopyPath: Boolean
         get() = settings.getBoolean("dev_show_copy_path", false)
@@ -917,9 +924,9 @@ object SettingsManager {
     var devRecentFiles: Boolean
         get() = settings.getBoolean("dev_recent_files", true)
         set(value) = settings.edit().putBoolean("dev_recent_files", value).apply()
-    /** 仿MT目录：文件浏览器双栏布局（左=第一空间，右=第二空间），图标文字变小 */
+    /** 文件浏览器布局：true=双栏（默认），false=单栏。开关入口在文件浏览器「更多」菜单，不在开发者模式。 */
     var devMtBrowserLayout: Boolean
-        get() = settings.getBoolean("dev_mt_browser_layout", false)
+        get() = settings.getBoolean("dev_mt_browser_layout", true)
         set(value) = settings.edit().putBoolean("dev_mt_browser_layout", value).apply()
 
     // === AI 助手（仅用于版本对比生成更新报告） ===

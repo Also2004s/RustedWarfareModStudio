@@ -1,6 +1,7 @@
 package com.rwmodstudio.ui.screens
 
 import android.app.Activity
+import android.content.res.Configuration
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -39,7 +40,10 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -96,7 +100,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN }
+enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -211,6 +215,14 @@ fun MainApp() {
     // 由离场 LaunchedEffect 在实例全部销毁（onDispose 上报完成）后清空工作区与实例列表。
     var workspaceWipePending by remember { mutableStateOf(false) }
 
+    // ==== 平板模式（开发者模式开关）====
+    // 开启后编辑器只保留左右两个存活工作区：左侧 openPaths[0]、右侧 openPaths[1]。
+    // tabletSplit = 左列宽度占比（拖动中间分割线时更新，仅本次会话有效，退出编辑器回中线）。
+    val tabletMode = SettingsManager.devTabletMode
+    var tabletSplit by remember { mutableStateOf(0.5f) }
+    // 平板模式下"上一次聚焦"的文件：打开第三个文件时用它定位要被替换的那一格
+    var tabletPrevFocus by remember { mutableStateOf("") }
+
     // 把条目写入工作区（单活跃实例架构下由旧文件 onDispose 上报缓存，容量由 MRU 效果统一管理）。
     // 显式关闭/放弃的文件跳过本次缓存；discardPaths 的消费统一由 onDisposeFlush 处理，
     // 避免「onWorkspaceCache 先消费、onDisposeFlush 后看不到放弃标记」导致「不保存」的文件被误落盘。
@@ -281,7 +293,9 @@ fun MainApp() {
 
     // 任意保存后收尾：把非前台实例写盘并移除，只保留前台一个实例。
     // 移除非前台实例会触发其 onDispose，onDispose 内部会缓存缓冲并（若未保存修改）直接落盘，故这里只需移除实例。
+    // ⚠️ 平板模式下必须跳过：左右两格都是用户正在对照的工作区，保存一次就销毁另一格等于把屏幕另一侧炸掉。
     fun flushInactiveInstances() {
+        if (SettingsManager.devTabletMode) return
         val current = selectedFile?.second ?: return
         if ((openPaths - current).isEmpty()) return
         openPaths = listOf(current)
@@ -300,7 +314,10 @@ fun MainApp() {
     // 存活实例的实时未保存状态（按路径）：每个 EditorScreen 的 isModified 变化都会上报到这里，
     // 供 tab 栏星号与保存按钮统一判断「哪个文件未保存」。editorModified 由此派生（当前前台文件是否未保存）。
     var liveModifiedPaths by remember { mutableStateOf(setOf<String>()) }
-    val editorModified = (selectedFile?.second ?: "") in liveModifiedPaths
+    // 平板双栏：顶栏保存按钮对两格都生效，所以只要任一侧有未保存修改就点亮；
+    // 单栏模式维持原判据（只看当前文件）。
+    val editorModified = if (SettingsManager.devTabletMode) liveModifiedPaths.isNotEmpty()
+    else (selectedFile?.second ?: "") in liveModifiedPaths
     // 模组信息页（mod-info.txt 可视化表单）：编辑状态 + 顶栏保存按钮触发
     var modInfoModified by remember { mutableStateOf(false) }
     var modInfoSaveTrigger by remember { mutableIntStateOf(0) }
@@ -523,8 +540,8 @@ fun MainApp() {
     var browserSpace by rememberSaveable { mutableIntStateOf(0) }        // 0=第一空间 1=第二空间
     var browserFirstPath by rememberSaveable { mutableStateOf("") }
     var browserSecondPath by rememberSaveable { mutableStateOf("") }
-    // 仿MT目录：双栏布局（左=第一空间，右=第二空间），此时顶栏空间切换按钮隐藏，激活栏=最后点按的栏
-    val mtBrowserLayout = SettingsManager.devMtBrowserLayout
+    // 文件浏览器布局：双栏（左=第一空间，右=第二空间）/ 单栏。入口在浏览器「更多」菜单，切换后立即生效并落盘。
+    var mtBrowserLayout by remember { mutableStateOf(SettingsManager.devMtBrowserLayout) }
     // 仿MT目录：「更多」菜单入口移到全局菜单栏，用 tick 信号触发 FileBrowserScreen 内的菜单
     var browserToolMenuTick by remember { mutableIntStateOf(0) }
 
@@ -562,6 +579,16 @@ fun MainApp() {
             browserSpace = 0
             browserStartPath = browserFirstPath
         }
+        persistBrowserSpace()
+    }
+
+    // 仿MT目录：顶部 ⇆ 用【当前操作栏】的路径去替换【另一栏】的路径（让另一栏跟到当前目录，激活栏不动）
+    fun mirrorActivePaneToOther() {
+        if (currentScreen != Screen.BROWSER) return
+        val activePath = if (browserSpace == 0) browserFirstPath else browserSecondPath
+        if (activePath.isEmpty()) return
+        if (browserSpace == 0) browserSecondPath = activePath else browserFirstPath = activePath
+        browserStartPath = activePath
         persistBrowserSpace()
     }
 
@@ -799,6 +826,7 @@ fun MainApp() {
                     Screen.DEVELOPER -> "开发者模式"
                     Screen.COMPLETION_TYPES -> "补全类型分类"
                     Screen.COORD_VISUAL -> "坐标可视化"
+                    Screen.SIM_ANIM -> "仿真动画"
                     Screen.VERSION_COMPARE -> "版本对比"
                     Screen.PROJECT_MANAGER -> "项目管理"
                     Screen.TODO_LIST -> "待办"
@@ -958,6 +986,24 @@ fun MainApp() {
                     }
                     // 仿MT目录：浏览器页内「近期/项目管理/更多」上移到全局菜单栏（页面工具栏只留每栏面包屑）
                     if (currentScreen == Screen.BROWSER && mtBrowserLayout) {
+                        // ⇆ 路径对齐：用当前操作栏的路径替换另一栏（让另一栏跟过来）；上箭头=左栏、下箭头=右栏，激活栏那侧亮
+                        IconButton(onClick = { mirrorActivePaneToOther() }, modifier = Modifier.size(36.dp)) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                // 高亮跟着「路径推往哪边」：左栏是激活栏 → 路径向右推 → 右箭头亮
+                                Icon(
+                                    Icons.Default.KeyboardArrowLeft,
+                                    "向左对齐",
+                                    Modifier.size(13.dp),
+                                    tint = if (browserSpace == 1) contentColor else contentColor.copy(alpha = 0.28f)
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowRight,
+                                    "向右对齐",
+                                    Modifier.size(13.dp),
+                                    tint = if (browserSpace == 0) contentColor else contentColor.copy(alpha = 0.28f)
+                                )
+                            }
+                        }
                         IconButton(onClick = { showRecentSheet = true; recentSourceScreen = currentScreen }, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Default.History, "近期", Modifier.size(20.dp), tint = contentColor.copy(alpha = 0.7f))
                         }
@@ -972,7 +1018,18 @@ fun MainApp() {
                 }
             }
         ) { padding ->
-            Box(Modifier.padding(padding)) {
+            // 横屏（平板模式）宽度适配：设置/开发者/翻译库/代码表这类单栏列表与表单一页，
+            // 横屏下会被拉成横贯全屏的一行，这里统一限制最大宽度并居中。
+            // 自身需要全宽的页面（首页按宽度自适应分列、文件浏览器双栏、编辑器分栏、版本对比、坐标可视化）不参与。
+            val landscapeWide = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val fullWidthScreen = currentScreen == Screen.HOME || currentScreen == Screen.BROWSER ||
+                currentScreen == Screen.EDITOR || currentScreen == Screen.COORD_VISUAL ||
+                currentScreen == Screen.SIM_ANIM || currentScreen == Screen.VERSION_COMPARE
+            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                Box(
+                    if (landscapeWide && !fullWidthScreen) Modifier.widthIn(max = 900.dp).fillMaxHeight()
+                    else Modifier.fillMaxSize()
+                ) {
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         defaultPath = defaultPath,
@@ -998,6 +1055,10 @@ fun MainApp() {
                         } else defaultPath,
                         projectRoot = projectRoot,
                         mtLayout = mtBrowserLayout,
+                        onToggleLayout = {
+                            mtBrowserLayout = !mtBrowserLayout
+                            SettingsManager.devMtBrowserLayout = mtBrowserLayout
+                        },
                         firstStartPath = browserFirstPath,
                         secondStartPath = browserSecondPath,
                         activePane = browserSpace,
@@ -1086,7 +1147,27 @@ fun MainApp() {
                         // 非前台实例 alpha=0 且 active=false（不渲染高亮、不响应交互），但状态（光标/滚动/文本）保留；
                         // 切回即重新激活并渲染高亮。超出 5 个时逐出最旧实例，其 onDispose 会缓存缓冲并（若未保存修改）直接落盘。
                         LaunchedEffect(activePath) {
-                            if (activePath.isNotEmpty()) {
+                            if (activePath.isEmpty()) return@LaunchedEffect
+                            if (SettingsManager.devTabletMode) {
+                                // 平板双栏：固定两个工作区，顺序恒定（先开在左、后开在右），
+                                // 绝不做 MRU 重排——否则点一下左边，两格立刻互换位置。
+                                if (activePath !in openPaths) {
+                                    if (openPaths.size < 2) {
+                                        openPaths = openPaths + activePath
+                                    } else {
+                                        // 已满两格：替换「上一个聚焦格」的文件。
+                                        // 另一格是你正在对照的参考文件，绝不能动。
+                                        val target = tabletPrevFocus
+                                            .takeIf { it in openPaths && it != activePath }
+                                            ?: openPaths.last()
+                                        // 与单栏切 tab 同口径：自动保存关着时只进工作区缓存、不落盘，
+                                        // 下次重新打开该文件仍能恢复未保存修改。
+                                        if (!SettingsManager.autoSave) holdPaths = holdPaths + target
+                                        openPaths = openPaths.map { if (it == target) activePath else it }
+                                    }
+                                }
+                                tabletPrevFocus = activePath
+                            } else {
                                 openPaths = (openPaths - activePath) + activePath
                                 if (openPaths.size > 5) {
                                     // 移除最旧实例：其 onDispose 会缓存缓冲并直接落盘（无需 delay 等待）
@@ -1099,15 +1180,19 @@ fun MainApp() {
                         } else {
                             val modifiedAll = workspace.values.filter { it.isModified }.map { it.path }.toSet()
                             Box(Modifier.fillMaxSize()) {
-                                openPaths.forEach { path ->
+                                // 单个工作区的渲染体：单栏（叠放）与平板双栏共用同一份调用，避免两处参数漂移。
+                                // active = 可见（双栏两侧都要渲染语法高亮）；focused = 当前操作目标（只有一侧收键盘/顶栏指令）。
+                                @Composable
+                                fun Pane(path: String, paneModifier: Modifier) {
                                     key(path) {
                                         EditorScreen(
                                             fileName = File(path).name, filePath = path,
-                                            active = path == activePath,
+                                            active = path == activePath || tabletMode,
+                                            focused = path == activePath,
                                             openPaths = openPaths,
                                             autoWrap = autoWrap, smartWrap = smartWrap,
                                             workspaceEntry = workspace[path],
-                                            modifier = Modifier.fillMaxSize().alpha(if (path == activePath) 1f else 0f),
+                                            modifier = paneModifier,
                                             externalInsertText = if (path == activePath) editorInsertText else "",
                                             externalInsertTick = if (path == activePath) editorInsertTick else 0,
                                             externalReplaceText = if (path == activePath) coordVisualResult ?: "" else "",
@@ -1179,13 +1264,14 @@ fun MainApp() {
                                             projectRoot = projectRoot,
                                             saveAndExit = saveAndExit,
                                             onSaveAndExitDone = { ok ->
-                                        // 无论成败都重置，防止保存失败后 saveAndExit 卡死无法再次触发
-                                        saveAndExit = false
                                         pendingSaveExitCount++
                                         if (!ok) pendingSaveExitFail = true
                                         // 等所有实例都保存完成再统一退出：单个实例先完成不动实例列表，
-                                        // 其余实例的保存协程不会被销毁取消（各自正常落盘而非靠兜底）
+                                        // 其余实例的保存协程不会被销毁取消（各自正常落盘而非靠兜底）。
+                                        // 单栏模式下存活实例只有 1 个，此处立即重置；平板双栏有 2 个，必须等两个都回报，
+                                        // 否则第一个回调就把 saveAndExit 置 false，会取消另一格正在跑的保存协程。
                                         if (pendingSaveExitCount >= openPaths.size) {
+                                            saveAndExit = false
                                             val allOk = !pendingSaveExitFail
                                             pendingSaveExitCount = 0
                                             pendingSaveExitFail = false
@@ -1207,8 +1293,11 @@ fun MainApp() {
                                         pushScreen(Screen.COORD_VISUAL)
                                             },
                                             onTextChange = { editorTextHolder.text = it },
-                                            saveTrigger = if (path == activePath) editorSaveTrigger else 0,
-                                            onSaveTriggerConsumed = { editorSaveTrigger = 0 },
+                                            // 平板双栏：保存指令要发给两格（否则只存聚焦那一格，另一格的修改关掉 App 就丢）；
+                                            // 单栏保持原样——只发前台实例，由它带动整个工作区落盘。
+                                            saveTrigger = if (tabletMode || path == activePath) editorSaveTrigger else 0,
+                                            // 平板模式不能清零（另一格还没读到同一个触发值）；单栏维持原语义：消费即清零。
+                                            onSaveTriggerConsumed = { if (!tabletMode) editorSaveTrigger = 0 },
                                             onSaved = { ok ->
                                         val pending = saveAndOpenPending
                                         if (pending != null) {
@@ -1247,6 +1336,78 @@ fun MainApp() {
                                                         onRedoTriggerConsumed = { editorRedoTrigger = 0 },
                                                         onCanRedoChange = { if (path == activePath) editorCanRedo = it }
                                         )
+                                    }
+                                }
+                                // 触摸旁听：Initial pass 只读不消费 → 不抢 sora 的滚动/点击；
+                                // 按下即把该格切成聚焦格（键盘由编辑器自己 requestFocus 弹起）。
+                                // 只认顶部菜单栏以下（40dp）的按压：那 20dp 的 tab 栏/名字标签带由它们自己处理，
+                                // 否则会出现「UI 说这格聚焦、输入法其实还连在另一格」的错位。
+                                val paneFocusTap: (String) -> Modifier = { path ->
+                                    Modifier.pointerInput(path) {
+                                        val minY = 40.dp.toPx()
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                                if (e.type == PointerEventType.Press &&
+                                                    (e.changes.firstOrNull()?.position?.y ?: 0f) > minY &&
+                                                    path != selectedFile?.second
+                                                ) {
+                                                    selectedFile = File(path).name to path
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (tabletMode && openPaths.size > 1) {
+                                    // 平板双栏：左右各一格，中间一条可拖的分割线（每侧最少 240dp）
+                                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                                        val totalPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                                        val minRatio = (with(LocalDensity.current) { 240.dp.toPx() } / totalPx).coerceIn(0.15f, 0.45f)
+                                        Row(Modifier.fillMaxSize()) {
+                                            Box(
+                                                Modifier
+                                                    .weight(tabletSplit)
+                                                    .fillMaxHeight()
+                                                    .then(paneFocusTap(openPaths[0]))
+                                            ) {
+                                                Pane(openPaths[0], Modifier.fillMaxSize())
+                                                // 非聚焦格没有 tab 栏，那 20dp 空带里叠个文件名标签，否则分不清两边是哪个文件
+                                                if (openPaths[0] != activePath) {
+                                                    PaneTopBand(
+                                                        path = openPaths[0],
+                                                        modified = openPaths[0] in liveModifiedPaths || openPaths[0] in modifiedAll,
+                                                        topFold = topFold
+                                                    )
+                                                }
+                                            }
+                                            TabletSplitter(onDrag = { dx ->
+                                                tabletSplit = (tabletSplit + dx / totalPx).coerceIn(minRatio, 1f - minRatio)
+                                            })
+                                            Box(
+                                                Modifier
+                                                    .weight(1f - tabletSplit)
+                                                    .fillMaxHeight()
+                                                    .then(paneFocusTap(openPaths[1]))
+                                            ) {
+                                                Pane(openPaths[1], Modifier.fillMaxSize())
+                                                // 非聚焦格没有 tab 栏，那 20dp 空带里叠个文件名标签，否则分不清两边是哪个文件
+                                                if (openPaths[1] != activePath) {
+                                                    PaneTopBand(
+                                                        path = openPaths[1],
+                                                        modified = openPaths[1] in liveModifiedPaths || openPaths[1] in modifiedAll,
+                                                        topFold = topFold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if (tabletMode) {
+                                    Box(Modifier.fillMaxSize().then(paneFocusTap(openPaths[0]))) {
+                                        Pane(openPaths[0], Modifier.fillMaxSize())
+                                    }
+                                } else {
+                                    openPaths.forEach { path ->
+                                        Pane(path, Modifier.fillMaxSize().alpha(if (path == activePath) 1f else 0f))
                                     }
                                 }
                             // 编辑器页全局菜单栏浮层：叠加在编辑器上方，随 topFold 上滑隐藏（40dp），
@@ -1381,6 +1542,9 @@ fun MainApp() {
                         },
                         onOpenSortCustomization = {
                             pushScreen(Screen.SORT_CUSTOM)
+                        },
+                        onOpenSimAnim = {
+                            pushScreen(Screen.SIM_ANIM)
                         }
                     )
                     Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
@@ -1397,6 +1561,7 @@ fun MainApp() {
                             coordVisualResultTick++
                         }
                     )
+                    Screen.SIM_ANIM -> SimAnimScreen()
                     Screen.VERSION_COMPARE -> VersionCompareScreen(
                         defaultPath = defaultPath,
                         onBack = { currentScreen = Screen.HOME }
@@ -1405,6 +1570,7 @@ fun MainApp() {
                         projectPath = projectRoot.ifEmpty { defaultPath },
                         triggerAdd = todoAddTrigger
                     )
+                }
                 }
                 // Debug 任务进度浮窗（右上角，玻璃态多任务堆叠）
                 if (SettingsManager.devDebugTaskProgress && TaskProgressManager.displayActive) {
@@ -2510,4 +2676,67 @@ fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onClick: () 
 }
 
 internal fun parseHex(hex: String) = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { DarkBg }
+
+/**
+ * 平板模式：两个工作区之间的分割线。
+ * 视觉上只有一条 1dp 的细线；外围 8dp 是用来拖动的命中区，填成编辑器背景色，
+ * 所以两格之间不会有可见的"色带/缝隙"，只有那一条线。
+ * 用真实占位元素（不是叠在编辑器上方的浮层）：浮层会跟 sora 的滚动/点击抢触摸。
+ * onDrag 收到的是水平拖动像素增量，由调用方换算成权重并做边界钳制。
+ */
+@Composable
+private fun TabletSplitter(onDrag: (Float) -> Unit) {
+    // 两格共用同一编辑器背景色，命中区填同色即视觉无缝
+    val hitBg = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
+    // 细线颜色跟随深浅主题：深色底用淡白、浅色底用淡黑，避免看起来像一道路障
+    val lineColor = if (ThemeState.isDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.14f)
+    Box(
+        Modifier
+            .width(8.dp)
+            .fillMaxHeight()
+            .background(hitBg)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(lineColor)
+        )
+    }
+}
+
+/**
+ * 平板模式：非聚焦工作区顶部那 20dp 的条带。
+ * 聚焦格的这条位置是 tab 栏；非聚焦格没有 tab 栏，如果留空会在顶部形成"半条深色条"的断层，
+ * 所以这里补一条同色（DarkSurface）等高的条带，横向看过去顶部是连续的一条，顺便在里面放文件名。
+ * 条带位置正好落在顶栏留白的 40~60dp 区间，不遮正文、不占布局高度。
+ */
+@Composable
+private fun PaneTopBand(path: String, modified: Boolean, topFold: Float) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(20.dp)
+            .offset { IntOffset(0, (40.dp - 60.dp * topFold).roundToPx()) }
+            .alpha(1f - topFold)
+            .background(DarkSurface)
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = if (modified) "*${File(path).name}" else File(path).name,
+            fontSize = 11.sp,
+            color = Color(0xFFBFBFBF),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
 

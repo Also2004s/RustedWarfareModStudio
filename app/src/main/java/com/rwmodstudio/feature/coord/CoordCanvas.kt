@@ -27,6 +27,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private const val DEG_TO_RAD = kotlin.math.PI / 180.0
@@ -53,6 +54,10 @@ fun CoordCanvas(
     selectedMarkerIndex: Int,
     draggedTargetIndex: Int,
     isDark: Boolean,
+    // 仿真区域层（可选）：公式成立的区域掩码 + 已烘好的位图，绘在网格之上、单位之下
+    regionMask: RegionMask? = null,
+    regionImage: androidx.compose.ui.graphics.ImageBitmap? = null,
+    regionAlpha: Float = 0.24f,
     onScalePanChange: (Float, Float, Float) -> Unit,
     onSelfChange: (CoordSelf) -> Unit,
     onTargetChange: (Int, CoordTarget) -> Unit,
@@ -241,8 +246,26 @@ fun CoordCanvas(
         val labelStyle = TextStyle(color = if (isDark) Color.White else Color.Black, fontSize = 10.sp)
         val hintStyle = TextStyle(color = if (isDark) Color(0xFFAAAAAA) else Color(0xFF555555), fontSize = 10.sp)
 
-        drawGrid(centerX, centerY, scale, isDark)
+        drawGrid(centerX, centerY, scale, isDark, textMeasurer)
         drawAxes(centerX, centerY, isDark)
+
+        // 公式区域层：贴在采样网格对应的世界矩形上，双线性缩放让边界柔和不发毛
+        if (regionMask != null && regionImage != null) {
+            val rx = centerX + (regionMask.minX * scale).toFloat()
+            val ry = centerY + (regionMask.minY * scale).toFloat()
+            val rw = (regionMask.cols * regionMask.stepX * scale).toFloat()
+            val rh = (regionMask.rows * regionMask.stepY * scale).toFloat()
+            drawImage(
+                image = regionImage,
+                dstOffset = androidx.compose.ui.unit.IntOffset(rx.roundToInt(), ry.roundToInt()),
+                dstSize = androidx.compose.ui.unit.IntSize(
+                    rw.roundToInt().coerceAtLeast(1),
+                    rh.roundToInt().coerceAtLeast(1)
+                ),
+                alpha = regionAlpha,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium
+            )
+        }
 
         // Self 本地坐标轴
         drawLocalAxes(selfScreen = Offset(centerX + self.x.toFloat() * scale, centerY + self.y.toFloat() * scale), self.dir, scale, isDark)
@@ -374,7 +397,13 @@ private fun DrawScope.drawLabel(
     )
 }
 
-private fun DrawScope.drawGrid(centerX: Float, centerY: Float, scale: Float, isDark: Boolean) {
+private fun DrawScope.drawGrid(
+    centerX: Float,
+    centerY: Float,
+    scale: Float,
+    isDark: Boolean,
+    textMeasurer: TextMeasurer
+) {
     val gridColor = if (isDark) Color(0x33FFFFFF) else Color(0x33000000)
     val stepWorld = 100.0
     val width = size.width
@@ -391,6 +420,34 @@ private fun DrawScope.drawGrid(centerX: Float, centerY: Float, scale: Float, isD
     for (i in startY..endY) {
         val y = centerY + (i * stepWorld * scale).toFloat()
         drawLine(gridColor, start = Offset(0f, y), end = Offset(width, y), strokeWidth = 1f)
+    }
+
+    // 网格刻度数字：原来画布只有网格线没有数值，想看某点坐标只能数格子。
+    // x 值贴屏幕底部、y 值贴屏幕左侧，平移到哪都能读到；格子太密时自动跳标（每 2/5/10 格标一次）。
+    val pxPerStep = stepWorld * scale
+    val labelEvery = when {
+        pxPerStep >= 110 -> 1
+        pxPerStep >= 55 -> 2
+        pxPerStep >= 28 -> 5
+        else -> 10
+    }
+    val tickStyle = TextStyle(
+        color = if (isDark) Color(0x99FFFFFF) else Color(0x99000000),
+        fontSize = 9.sp
+    )
+    for (i in startX..endX) {
+        if (i % labelEvery != 0) continue
+        val x = centerX + (i * stepWorld * scale).toFloat()
+        if (x < 20f || x > width - 20f) continue
+        val measured = textMeasurer.measure((i * stepWorld).toInt().toString(), tickStyle)
+        drawText(measured, topLeft = Offset(x + 2f, height - measured.size.height - 2f))
+    }
+    for (j in startY..endY) {
+        if (j % labelEvery != 0) continue
+        val y = centerY + (j * stepWorld * scale).toFloat()
+        if (y < 12f || y > height - 12f) continue
+        val measured = textMeasurer.measure((j * stepWorld).toInt().toString(), tickStyle)
+        drawText(measured, topLeft = Offset(3f, y + 1f))
     }
 }
 

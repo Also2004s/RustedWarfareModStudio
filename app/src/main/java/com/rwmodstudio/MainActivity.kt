@@ -2,6 +2,7 @@ package com.rwmodstudio
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -75,6 +76,14 @@ class MainActivity : ComponentActivity() {
         // TranslationEngine.load 内部（loadMutex 内）也会调 loadBlocklist，
         // 若挪到后台协程会与之并发竞态（屏蔽词加载依赖翻译字典先就绪），导致首次启动初始化异常。
         SettingsManager.init(applicationContext)
+        // 平板模式 → 强制横屏（左右翻转都支持）；否则保持原有的竖屏锁定。
+        // 必须在 setContent 之前请求，否则会先按清单默认方向建一次再转向，冷启动闪一下。
+        // 清单里 screenOrientation 已改为 unspecified，方向完全由这里决定。
+        requestedOrientation = if (SettingsManager.devTabletMode) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         TranslationEngine.getInstance().loadBlocklist(applicationContext)
         ArrayReader.init(applicationContext)
         // 启动时清理遗留的更新安装包（升级后新版本冷启动时执行，实现"安装完自动清理"）

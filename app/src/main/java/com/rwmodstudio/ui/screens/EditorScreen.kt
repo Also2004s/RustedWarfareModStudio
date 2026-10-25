@@ -163,8 +163,12 @@ fun EditorScreen(
     externalSaveRequest: Int = 0,
     onExternalSaveDone: ((Boolean) -> Unit)? = null,
     onBack: (discard: Boolean, saveAll: Boolean) -> Unit, onSwitchFile: ((String) -> Unit)? = null, projectRoot: String = "",
-    // 多实例叠放：本实例是否为当前前台激活文件（隐藏实例不参与交互，仅占位保持存活）
+    // 多实例叠放：本实例是否可见（决定语法高亮/语言是否启用、是否参与渲染）。
+    // 单栏模式下只有前台实例为 true；平板模式双栏下两侧都为 true。
     active: Boolean = true,
+    // 是否拥有输入焦点（决定键盘、顶栏按钮、返回键、符号栏、文本上报归属）。
+    // 与 active 分离的原因：平板双栏下两侧都必须可见并渲染高亮，但只有一侧是当前操作目标。
+    focused: Boolean = true,
     // 工作区内全部存活实例的文件路径集合（每个文件一个存活 EditorScreen），顶部 tab 栏据此展示，
     // 替代旧的「最近打开」全局列表——真正的缓存工作区 tab 只显示仍在内存中的文件。
     openPaths: List<String> = emptyList(),
@@ -384,9 +388,11 @@ fun EditorScreen(
     // 这些弹窗内带 HEX 输入/输入框，输入法展开时必须保持容器不被卸载；
     // 否则 effectiveIme 变 true → fabShown 变 false → if (fabShown) 容器整体卸载 → 弹窗连同输入法一起关闭（与调色盘一致）
     val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker || showDarkTokens
-    val effectiveIme = imeVisible && !pickerOpen
-    val editingBarShown = !showSearch && effectiveIme
-    val fabShown = !showSearch && !effectiveIme
+    // imeVisible 是按「窗口可视高度被压缩多少」算的，属全窗口级：平板双栏下两侧读到同一个值。
+    // 因此必须再与 focused 相与，否则一边打字两侧同时冒符号栏、同时收起 + 按钮。
+    val effectiveIme = imeVisible && !pickerOpen && focused
+    val editingBarShown = focused && !showSearch && effectiveIme
+    val fabShown = focused && !showSearch && !effectiveIme
     // 输入法重新打开时收起 FAB 折叠菜单及子层，避免浮层悬空。
     // 注意：调色盘等对话框（fabShowColorPicker / symbolBarColorPicker / showSectionHighlightPicker）
     // 必须排除在此收起逻辑之外——它们的 HEX 输入框本身就要用输入法，若随键盘收起会连同对话框一起被关掉。
@@ -972,8 +978,8 @@ fun EditorScreen(
         loading = false
     }
 
-    // 多实例叠放下，仅前台实例响应系统返回键，避免非前台实例抢返回手势
-    BackHandler(enabled = active) {
+    // 多实例叠放 / 平板双栏下，仅聚焦实例响应系统返回键，避免非聚焦实例抢返回手势
+    BackHandler(enabled = focused) {
         if (fabShowThemes) {
             fabShowThemes = false
             return@BackHandler
@@ -1042,10 +1048,18 @@ fun EditorScreen(
     // 生命周期监听：应用进入后台时自动保存
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // 外部触发保存（如抽屉导航离开编辑器时的自动保存）
+    // 外部触发保存（如抽屉导航离开编辑器时的自动保存）。
+    // 平板双栏下宿主把同一个触发值同时发给两格且不清零，因此这里记住"已处理过的值"：
+    // 单栏模式宿主仍会消费清零，序列 0→1→0→1 也能逐次正确触发；新创建的实例以当前值为基准，
+    // 不会因为"切文件后残留的触发值"误保存刚打开的文件。
+    var lastSaveTrigger by remember { mutableIntStateOf(saveTrigger) }
     LaunchedEffect(saveTrigger) {
-        if (saveTrigger > 0) {
-            // 先消费触发值，避免切文件后残留的 saveTrigger 误触发新文件保存
+        if (saveTrigger <= 0) {
+            lastSaveTrigger = 0
+            return@LaunchedEffect
+        }
+        if (saveTrigger > lastSaveTrigger) {
+            lastSaveTrigger = saveTrigger
             onSaveTriggerConsumed()
             lifecycleOwner.lifecycleScope.launch { saveSync("DrawerAutoSave") }
         }
@@ -1060,9 +1074,9 @@ fun EditorScreen(
     }
 
     // 编辑器加载完成后把初始文本同步给外部 holder，确保抽屉导航离开时缓存正确。
-    // 多实例叠放下仅前台实例上报，避免非前台实例覆盖 holder 的文本。
+    // 多实例叠放 / 平板双栏下仅聚焦实例上报，避免另一侧覆盖 holder 的文本。
     LaunchedEffect(contentLoaded, text) {
-        if (active && contentLoaded && text.isNotEmpty()) {
+        if (focused && contentLoaded && text.isNotEmpty()) {
             onTextChange?.invoke(text)
         }
     }
@@ -1110,10 +1124,10 @@ fun EditorScreen(
     // 非 edge-to-edge + adjustResize：系统在键盘弹出时顶高窗口即缩小编辑器，不加 imePadding（避免双重削减），
     // sora 感知编辑器尺寸变化自动校正光标，此为本仓库验证过的流畅方案。
     Box(Modifier.fillMaxSize().background(Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark)))) {
-        // Tab bar（仅前台实例显示）：浮层叠加在编辑器上方，位于全局菜单栏（40dp）之下，
+        // Tab bar（仅聚焦实例显示）：浮层叠加在编辑器上方，位于全局菜单栏（40dp）之下，
         // 随 topFold 上滑隐藏；不占布局空间，编辑器始终全屏、滚动完全不受折叠影响。
         // ⚠️ 这里的 40dp（菜单栏）与 60dp（=40 菜单栏 + 20 tab 栏）跟 MainApp 的菜单栏浮层高度联动，改一处必须改另一处。
-        if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
+        if (focused && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) {
             Box(
                 Modifier
                     .zIndex(1f)
@@ -1299,11 +1313,18 @@ fun EditorScreen(
         val searchBarBottomPad = if (showSearch) with(density) { searchBarHeightPx.toDp() } else 0.dp
         // Editor - 顶部内边距随折叠动画联动（66→0）：顶栏显示时内容从顶栏下方开始（文档开头不被遮挡），
         // 顶栏隐藏时内边距归零、内容填满全屏，隐藏才有意义；滚动偏移始终不变，视图仅高度变化、宽度不变不会重排换行。
+        // 平板模式下两侧统一按 60dp 留白（即使非聚焦格没有 tab 栏），保证双栏内容顶部对齐——
+        // 非聚焦格那 20dp 的空带由宿主（MainApp）用来画文件名小标签。
+        val topChromeDp = when {
+            focused && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty() -> 60.dp
+            SettingsManager.devTabletMode -> 60.dp
+            else -> 40.dp
+        }
         Box(
             Modifier
                 .fillMaxSize()
                 .padding(
-                    top = (if (active && SettingsManager.devTabBar && onSwitchFile != null && recent.isNotEmpty()) 60.dp else 40.dp) * (1 - topFold),
+                    top = topChromeDp * (1 - topFold),
                     bottom = searchBarBottomPad
                 )
         ) {
@@ -1317,7 +1338,8 @@ fun EditorScreen(
                             // 未保存标记：默认置位；仅当长度与「已保存基线」相同时（才可能是"改回了原样"）
                             // 才做一次内容比对 —— 长度不同直接早退，打字热路径无额外 O(n) 开销
                             isModified = if (it.length == savedSnapshot.length) it != savedSnapshot else true
-                            onTextChange?.invoke(it)
+                            // 仅聚焦实例上报给宿主 holder：平板双栏下两侧都能打字，避免另一侧覆盖
+                            if (focused) onTextChange?.invoke(it)
                         },
                         // 撤销/重做落定后重新判定：内容与「上次保存 / 加载时的基线」完全一致即视为无更改
                         // （反向亦然：重做回到修改态会重新点亮）—— 这就是"全撤完 = 没改动"的判定

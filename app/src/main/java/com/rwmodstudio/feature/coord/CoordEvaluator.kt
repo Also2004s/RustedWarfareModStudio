@@ -21,7 +21,13 @@ data class EvalContext(
     val targets: Map<String, CoordUnit>,
     val simTime: Double,
     val resources: Map<String, Double> = emptyMap(),
-    val rndSeed: Long? = null
+    val rndSeed: Long? = null,
+    // === 区域采样用：把某个目标当作"自由变量" ===
+    // probeName 对应的目标坐标由采样点决定（覆盖 targets 里的同名单位）。
+    // 这样逐格采样时只需要 copy 一个上下文，不必每格复制整张 targets 表。
+    val probeName: String? = null,
+    val probeX: Double = 0.0,
+    val probeY: Double = 0.0
 )
 
 fun evaluateCoordExpression(node: AstNode, ctx: EvalContext): Double {
@@ -45,6 +51,10 @@ private fun evalNode(node: AstNode, ctx: EvalContext): EvalValue {
             "self" -> EvalValue.Unit(ctx.self)
             "存活时间", "时间" -> EvalValue.Number(ctx.simTime)
             else -> {
+                // 区域采样：被选为自由变量的目标，位置由采样点决定
+                if (node.name == ctx.probeName) {
+                    return EvalValue.Unit(CoordUnit(ctx.probeX, ctx.probeY, 0.0))
+                }
                 val target = ctx.targets[node.name]
                     ?: ctx.targets["敌人"] // 非 self 单位统一视为敌人
                 if (target != null) return EvalValue.Unit(target)
