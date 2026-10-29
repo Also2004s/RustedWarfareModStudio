@@ -137,8 +137,13 @@ object SearchTranslationCache {
     /**
      * 同步写入翻译缓存（不切换协程，不读文件）。
      * 用于 InheritanceResolver 等同步上下文中，文件内容已修改但缓存过期时补充缓存。
+     *
+     * [srcMtime] / [srcSize] 必须是「读取原文那一刻」的快照，不能在这里现取：
+     * 翻译耗时可观，期间文件可能被保存改写，用翻译结束后的时间戳盖戳会把上一版本的译文
+     * 记成最新版本 → 之后每次判定都「新鲜」→ 重开文件显示旧内容（修改看起来凭空消失）。
+     * 快照在读取原文之前取，即使中间被改写也只是「戳旧内容新」→ 下次判定过期重译，安全方向。
      */
-    fun putCacheSync(file: File, chineseContent: String) {
+    fun putCacheSync(file: File, chineseContent: String, srcMtime: Long, srcSize: Long) {
         // 防御：引擎未就绪时绝不写翻译缓存，避免把英文当中文持久化
         if (!TranslationEngine.getInstance().isLoaded) {
             Log.w(TAG, "putCacheSync skipped (engine not loaded) for ${file.name}")
@@ -155,8 +160,8 @@ object SearchTranslationCache {
             // 预热每个文件写不同缓存路径，不会同路径并发写，直接写安全。
             cacheFile.writeText(chineseContent)
             index[absPath] = CacheRecord(
-                srcMtime = file.lastModified(),
-                srcSize = file.length(),
+                srcMtime = srcMtime,
+                srcSize = srcSize,
                 cachePath = cachePath,
                 libVersion = currentLibVersion
             )
@@ -167,9 +172,22 @@ object SearchTranslationCache {
         }
     }
 
+    /**
+     * 作废某文件的中文缓存（索引 + 内存），使下次读取必然重译。
+     * 用于「内容已变（保存落盘）但手上没有可靠的中文版本」的场景：
+     * 留着旧记录会让下次打开直接复用上一版本的译文，表现为「保存后重开是旧内容」。
+     * 只移除索引不删缓存文件：重译时按同一路径覆盖写，无需额外 IO。
+     */
+    fun invalidate(file: File) {
+        ensureIndexLoaded()
+        val absPath = file.absolutePath
+        index.remove(absPath)
+        synchronized(memoryLock) { memoryCache.remove(absPath) }
+        indexDirty = true
+    }
+
     /** 计算缓存文件相对路径：MD5 前两位作子目录 + 全 hash 作文件名 */
-    private fun computeCachePath(absPath: String): String {
-        val md5 = MessageDigest.getInstance("MD5").digest(absPath.toByteArray())
+    private fun computeCachePath(absPath: String): String {        val md5 = MessageDigest.getInstance("MD5").digest(absPath.toByteArray())
         val hex = md5.joinToString("") { "%02x".format(it) }
         return "${hex.substring(0, 2)}/${hex}.txt"
     }
@@ -248,6 +266,11 @@ object SearchTranslationCache {
         // 未命中：翻译并写入
         return withContext(Dispatchers.IO) {
             try {
+                // 时间/大小快照必须在读原文「之前」取（见 putCacheSync 注释）：
+                // 翻译期间文件被保存改写时，用「先读内容、后盖戳」会把上一版本的译文记成最新版本，
+                // 之后每次判定都新鲜 → 重开文件显示旧内容。此处顺序保证宁可多译一次，不可记错版本。
+                val srcMtime = file.lastModified()
+                val srcSize = file.length()
                 val english = file.readText()
                 val engine = TranslationEngine.getInstance()
                 // 必须等翻译引擎加载完毕后才能翻译并写缓存；未就绪就专职重试加载，
@@ -270,8 +293,8 @@ object SearchTranslationCache {
                 cacheFile.writeText(chinese)
                 // 更新索引
                 index[absPath] = CacheRecord(
-                    srcMtime = file.lastModified(),
-                    srcSize = file.length(),
+                    srcMtime = srcMtime,
+                    srcSize = srcSize,
                     cachePath = cachePath,
                     libVersion = currentLibVersion
                 )

@@ -23,6 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
@@ -166,14 +169,40 @@ fun SettingsScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(RustedBackground)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
+    // ===== 平板横屏：左右分栏（左目录 / 右内容）=====
+    // 目录里的每一项是一个分区锚点，点击滚到对应位置；右侧仍是原来那一整列设置项，行为不变。
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val sectionTops = remember { mutableStateListOf<Float>() }
+
+    @Composable
+    fun SectionAnchor(index: Int) {
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(0.dp)
+                .onGloballyPositioned { coords ->
+                    val y = coords.positionInParent().y
+                    while (sectionTops.size <= index) sectionTops.add(0f)
+                    // 只在真正变化时写：否则每次布局都改状态会触发无限重组
+                    if (sectionTops[index] != y) sectionTops[index] = y
+                }
+        )
+    }
+
+    @Composable
+    fun SettingsContent() {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(RustedBackground)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
         // ===== 编辑器 =====
+        SectionAnchor(0)
         SectionHeader(Icons.Default.Edit, "编辑器")
         SettingsCard {
             var translationEngine by remember { mutableStateOf(SettingsManager.devTranslationEngine) }
@@ -249,6 +278,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 外观 =====
+        SectionAnchor(1)
         SectionHeader(Icons.Default.ColorLens, "外观")
         SettingsCard {
             val canEditHl = hl == "custom"
@@ -331,6 +361,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 翻译 =====
+        SectionAnchor(2)
         SectionHeader(Icons.Default.Translate, "翻译")
         SettingsCard {
             var autoRefresh by remember { mutableStateOf(SettingsManager.autoRefreshCompletionsOnTranslationSave) }
@@ -369,6 +400,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 本地配置 =====
+        SectionAnchor(3)
         SectionHeader(Icons.Default.Storage, "本地配置")
         SettingsCard {
             val scope = rememberCoroutineScope()
@@ -417,6 +449,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 文件 =====
+        SectionAnchor(4)
         SectionHeader(Icons.Default.FolderOpen, "文件")
         SettingsCard {
             var recentLimit by remember { mutableIntStateOf(SettingsManager.recentHistoryLimit) }
@@ -474,6 +507,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 导入 =====
+        SectionAnchor(5)
         SectionHeader(Icons.Default.Download, "导入")
         var importExpanded by remember { mutableStateOf(false) }
         SettingsCard {
@@ -567,6 +601,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 关于 =====
+        SectionAnchor(6)
         SectionHeader(Icons.Default.Info, "关于")
         SettingsCard {
             Info("版本", com.rwmodstudio.BuildConfig.VERSION_NAME)
@@ -604,6 +639,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         // ===== 开发者模式 =====
+        SectionAnchor(7)
         SectionHeader(Icons.Default.Code, "开发者模式")
         SettingsCard {
             var devMode by remember { mutableStateOf(SettingsManager.devMode) }
@@ -625,6 +661,24 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+    }
+
+    // 横屏：左边分区目录 + 右边设置内容；竖屏：保持原来的单列
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            SettingsSectionRail(
+                sections = SETTINGS_SECTIONS,
+                selectedIndex = sectionTops.indexOfLast { it <= scrollState.value + 12f }.coerceAtLeast(0),
+                onSelect = { index ->
+                    val target = sectionTops.getOrElse(index) { 0f }.toInt()
+                    scope.launch { scrollState.animateScrollTo(target) }
+                }
+            )
+            Box(Modifier.weight(1f)) { SettingsContent() }
+        }
+    } else {
+        SettingsContent()
     }
 
     if (showColorPicker) {
@@ -1034,6 +1088,62 @@ fun SettingsScreen(
                 TextButton(onClick = { showRestartDialog = false }) { Text("确定") }
             }
         )
+    }
+}
+
+/** 设置页的分区目录（顺序与 SettingsContent 里的 SectionAnchor 编号一致） */
+private val SETTINGS_SECTIONS: List<Pair<ImageVector, String>> = listOf(
+    Icons.Default.Edit to "编辑器",
+    Icons.Default.ColorLens to "外观",
+    Icons.Default.Translate to "翻译",
+    Icons.Default.Storage to "本地配置",
+    Icons.Default.FolderOpen to "文件",
+    Icons.Default.Download to "导入",
+    Icons.Default.Info to "关于",
+    Icons.Default.Code to "开发者模式"
+)
+
+/** 平板横屏时左侧的分区目录：点击滚到对应分区，当前分区高亮 */
+@Composable
+private fun SettingsSectionRail(
+    sections: List<Pair<ImageVector, String>>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Column(
+        Modifier
+            .width(176.dp)
+            .fillMaxHeight()
+            .background(RustedSurface)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp)
+    ) {
+        sections.forEachIndexed { index, (sectionIcon, title) ->
+            val selected = index == selectedIndex
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) RustedPrimary.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    sectionIcon, null, Modifier.size(16.dp),
+                    tint = if (selected) RustedPrimary else RustedOnBackground.copy(alpha = 0.55f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    title,
+                    fontSize = 13.sp,
+                    color = if (selected) RustedPrimary else RustedOnBackground,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 

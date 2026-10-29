@@ -13,9 +13,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import com.rwmodstudio.ui.theme.RustedSurface
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import android.widget.Toast
 import com.rwmodstudio.core.CustomHighlightType
 import com.rwmodstudio.core.DarkThemeColors
@@ -66,11 +72,34 @@ fun HighlightRulesScreen() {
     }
     val hiddenTotal = items.sumOf { it.hiddenTopLevel }
 
+    // ===== 平板横屏：左侧类别目录 + 右侧规则内容 =====
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val sectionTops = remember { mutableStateListOf<Float>() }
+
+    @Composable
+    fun SectionAnchor(index: Int) {
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(0.dp)
+                .onGloballyPositioned { coords ->
+                    val y = coords.positionInParent().y
+                    while (sectionTops.size <= index) sectionTops.add(0f)
+                    if (sectionTops[index] != y) sectionTops[index] = y
+                }
+        )
+    }
+
+    @Composable
+    fun Body() {
     Column(
         Modifier
             .fillMaxSize()
             .background(RustedBackground)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         SectionHeader(Icons.Default.Rule, "规则")
@@ -286,7 +315,8 @@ fun HighlightRulesScreen() {
         Spacer(Modifier.height(16.dp))
 
         SectionHeader(Icons.Default.Category, "类别：规则")
-        items.forEach { category ->
+        items.forEachIndexed { catIndex, category ->
+            SectionAnchor(catIndex)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -524,6 +554,23 @@ fun HighlightRulesScreen() {
                 editing = null
             }
         )
+    }
+    }
+
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            HighlightCategoryRail(
+                labels = items.map { it.label },
+                selectedIndex = sectionTops.indexOfLast { it <= scrollState.value + 12f }.coerceAtLeast(0),
+                onSelect = { index ->
+                    val target = sectionTops.getOrElse(index) { 0f }.toInt()
+                    scope.launch { scrollState.animateScrollTo(target) }
+                }
+            )
+            Box(Modifier.weight(1f)) { Body() }
+        }
+    } else {
+        Body()
     }
 
     if (showResetConfirm) {
@@ -798,4 +845,49 @@ private fun HighlightRuleEditDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+/** 平板模式下左侧的类别目录：点一个类别滚到它的规则位置 */
+@Composable
+private fun HighlightCategoryRail(
+    labels: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Column(
+        Modifier
+            .width(168.dp)
+            .fillMaxHeight()
+            .background(RustedSurface)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp)
+    ) {
+        Text(
+            "类别",
+            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            fontSize = 10.sp,
+            color = RustedPrimary.copy(alpha = 0.7f)
+        )
+        labels.forEachIndexed { index, label ->
+            val selected = index == selectedIndex
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) RustedPrimary.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    label,
+                    fontSize = 12.sp,
+                    color = if (selected) RustedPrimary else RustedOnBackground,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }

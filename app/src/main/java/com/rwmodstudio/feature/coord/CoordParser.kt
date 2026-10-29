@@ -30,7 +30,32 @@ private class Parser(text: String) {
     private var index = 0
 
     fun parseExpression(): AstNode {
-        return parseComparison()
+        return parseOr()
+    }
+
+    // 逻辑运算优先级最低：a and b or c  →  (a and b) or c
+    private fun parseOr(): AstNode {
+        var node = parseAnd()
+        while (true) {
+            val t = peek()
+            if (t is Token.Ident && (t.name == "or" || t.name == "或者")) {
+                advance()
+                node = BinaryOp("or", node, parseAnd())
+            } else break
+        }
+        return node
+    }
+
+    private fun parseAnd(): AstNode {
+        var node = parseComparison()
+        while (true) {
+            val t = peek()
+            if (t is Token.Ident && (t.name == "and" || t.name == "并且")) {
+                advance()
+                node = BinaryOp("and", node, parseComparison())
+            } else break
+        }
+        return node
     }
 
     fun expectEof() {

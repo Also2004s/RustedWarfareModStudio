@@ -271,12 +271,16 @@ object InheritanceResolver {
         if (cached != null) return cached
 
         // 缓存未命中（文件被修改过）：读取原文并翻译为中文，同时回写翻译缓存
+        // 时间/大小快照先取、再读原文：翻译期间文件可能被保存改写，先读后取会把旧译文记成新版本，
+        // 导致重开文件显示旧内容（详见 SearchTranslationCache.putCacheSync 注释）。
+        val srcMtime = file.lastModified()
+        val srcSize = file.length()
         val raw = try { file.readText() } catch (_: Exception) { return "" }
         val engine = com.rwmodstudio.core.translation.TranslationEngine.getInstance()
         if (!engine.isLoaded) return raw
 
         val translated = engine.translateToChinese(raw)
-        com.rwmodstudio.core.translation.SearchTranslationCache.putCacheSync(file, translated)
+        com.rwmodstudio.core.translation.SearchTranslationCache.putCacheSync(file, translated, srcMtime, srcSize)
         return translated
     }
 

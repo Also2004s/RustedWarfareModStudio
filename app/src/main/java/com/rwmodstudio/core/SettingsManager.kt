@@ -377,6 +377,14 @@ object SettingsManager {
         get() = settings.getString("last_path", "") ?: ""
         set(value) = settings.edit().putString("last_path", value).apply()
 
+    /**
+     * 双栏文件浏览：长按菜单「原地址粘贴」行右端的勾选框。
+     * 勾上后该项改为单栏「复制」的行为（写入内部剪贴板，可粘到任意目录/另一栏），并支持多选。
+     */
+    var dualPanePasteAsCopy: Boolean
+        get() = settings.getBoolean("dual_pane_paste_as_copy", false)
+        set(value) = settings.edit().putBoolean("dual_pane_paste_as_copy", value).apply()
+
     var lastSearchQuery: String
         get() = settings.getString("last_search_query", "") ?: ""
         set(value) = settings.edit().putString("last_search_query", value).apply()
@@ -876,10 +884,14 @@ object SettingsManager {
     var devTabBar: Boolean
         get() = settings.getBoolean("dev_tab_bar", true)
         set(value) = settings.edit().putBoolean("dev_tab_bar", value).apply()
-    /** 顶部浮层：滚动隐藏/展开全局菜单栏+Tab栏（默认关，仅编辑器页生效） */
-    var devTopBarsFold: Boolean
-        get() = settings.getBoolean("dev_top_bars_fold", false)
-        set(value) = settings.edit().putBoolean("dev_top_bars_fold", value).apply()
+    /**
+     * 顶部浮层隐藏（原「滚动折叠」与「按钮折叠」合并后的单一开关，默认开，仅编辑器页生效）：
+     * 打开 = 菜单栏汉堡右侧灰色「〉」手动收起、右上角「〈」展开。
+     * 滚动**不**驱动折叠（老板明确要求），收起/展开只由这两个按钮决定。
+     */
+    var devTopFold: Boolean
+        get() = settings.getBoolean("dev_top_fold", true)
+        set(value) = settings.edit().putBoolean("dev_top_fold", value).apply()
     /**
      * 平板模式：整个 App 强制横屏 + 编辑器左右两个工作区同时编辑（中间分割线可拖）。
      * 仅开发者模式可开；开启后 MainActivity 按此请求横屏，编辑器按双栏渲染。

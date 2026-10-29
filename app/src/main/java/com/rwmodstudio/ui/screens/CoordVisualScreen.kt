@@ -34,7 +34,7 @@ import com.rwmodstudio.ui.theme.RustedSurface
 
 private val DEFAULT_CODE = "创建标记(x=self.x, y=self.y).获取相对偏移(y=100)"
 
-private val EXAMPLE_1 = "创建标记(x=敌人.x, y=敌人.y, dir=之间方向(self, 敌人)-存活时间).获取相对偏移(y=-120)"
+private val EXAMPLE_1 = "创建标记(x=当前动作目标.x, y=当前动作目标.y, dir=之间方向(self, 当前动作目标)-存活时间).获取相对偏移(y=-120)"
 private val EXAMPLE_2 = "创建标记(x=self.x+cos(存活时间*180),y=self.y+sin(存活时间*180)).获取相对偏移(y=(存活时间*11-550)*(3+cos(存活时间*50)*1.3),角度偏移=-(存活时间*250+sin(存活时间*100)*20))"
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -126,9 +126,14 @@ fun CoordVisualScreen(
         }
         codeInput = TextFieldValue(newCode, TextRange(newCode.length))
         text = newCode
-        // 保留用户手动调整过的目标位置，不因应用代码而重置
-        if (targets.isEmpty()) {
-            targets = buildDefaultTargets(newCode)
+        // 只有完整命中「单位标记」的名字才成为点：输入到一半（"当前""当前动作"）不会长出点；
+        // 名字被改掉后，旧的多余点也会跟着消失，不会越输入越多。
+        val discovered = collectUnitNamesFromText(newCode)
+        targets = if (targets.isEmpty()) {
+            if (discovered.isEmpty()) buildDefaultTargets(newCode)
+            else mergeDiscoveredTargets(emptyList(), discovered)
+        } else {
+            syncDiscoveredTargets(targets, discovered)
         }
         val list = parsed.toMutableList()
         selectedMarkerIndex = if (list.isEmpty()) -1 else 0
@@ -351,8 +356,8 @@ fun CoordVisualScreen(
                     label = { Text("自身", fontSize = 11.sp) }
                 )
                 AssistChip(
-                    onClick = { insertBlock("敌人") },
-                    label = { Text("敌人", fontSize = 11.sp) }
+                    onClick = { insertBlock("当前动作目标") },
+                    label = { Text("当前动作目标", fontSize = 11.sp) }
                 )
                 AssistChip(
                     onClick = { insertBlock("sin(存活时间*180)") },

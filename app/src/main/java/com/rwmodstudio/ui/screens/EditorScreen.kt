@@ -181,14 +181,20 @@ fun EditorScreen(
     // 实例销毁时若有未保存修改则直接落盘（宿主传 saveWorkspaceEntry），不依赖外部 delay 等待，
     // 确保「逐出/返回目录」等销毁场景的数据安全。
     onDisposeFlush: ((EditorWorkspaceEntry) -> Unit)? = null,
-    // 保存当前文件后，把工作区内其它有修改的文件一并保存
-    onSaveAllWorkspace: (suspend () -> Unit)? = null,
+    // 保存当前文件后，把工作区内其它有修改的文件一并保存；参数 flush=true 时附带
+    // 「销毁非前台实例」的瘦身（历史行为）。右上角保存传 false 以保留全部存活实例，
+    // 避免 openPaths 缩短导致当前实例被连坐销毁重建（保存后光标回第一行的根因）。
+    onSaveAllWorkspace: (suspend (flush: Boolean) -> Unit)? = null,
     saveAndExit: Boolean = false, onSaveAndExitDone: (Boolean) -> Unit = {},
     onNavigate: (Screen) -> Unit = {},
     onOpenCoordVisual: ((String) -> Unit)? = null,
     onTextChange: ((String) -> Unit)? = null,
     saveTrigger: Int = 0,
     onSaveTriggerConsumed: () -> Unit = {},
+    // 编辑器右上角保存按钮专用触发器：只作用于「点右上角保存」这一条路径，
+    // 发给所有存活实例（含非聚焦格），各自落盘但不瘦身（flushAfter=false），
+    // 因此 openPaths 不缩短、当前实例不会被连坐销毁重建（光标/撤销栈保留）。
+    topBarSaveTrigger: Int = 0,
     onShowRecent: (() -> Unit)? = null,
     // 顶部两栏（全局菜单栏 + Tab 栏）是否显示：由编辑区滚动方向驱动，宿主持有状态
     topBarsShown: Boolean = true,
@@ -659,8 +665,9 @@ fun EditorScreen(
     }
     // 保存串行锁：所有 saveSync 触发点（点保存/ON_PAUSE/切走/退出确认）共用同一把锁，
     // 避免并发保存读旧快照、isModified 误清。
+    // flushAfter：保存成功收尾是否附带「销毁非前台实例」瘦身；右上角保存传 false。
     val saveMutex = remember { Mutex() }
-    suspend fun saveSync(caller: String = "unknown", silent: Boolean = false): Boolean = saveMutex.withLock {
+    suspend fun saveSync(caller: String = "unknown", silent: Boolean = false, flushAfter: Boolean = true): Boolean = saveMutex.withLock {
         // 在保存锁内、切 IO 线程前一次性快照目标路径与内容标志（主线程侧一致快照）：
         // 避免跨线程读取 Compose 状态时读到「内容与 isEnglish/showChinese 不同代」的混合状态，
         // 导致本应反向翻译的内容被跳过翻译原样写盘（中文落盘）。
@@ -710,6 +717,24 @@ fun EditorScreen(
                 } else ""
                 targetFile.atomicWriteText(contentToSave, Charsets.UTF_8)
                 SaveHistoryManager.record(ctx, targetPath, beforeContent, contentToSave)
+                // 保存成功后立刻把该文件的中文翻译缓存对齐到本次落盘版本（同一代）。
+                // 不做的后果有两层：
+                // 1) 下次打开必然重译（缓存记录是旧 mtime/size，判为过期）；
+                // 2) 那次重译正是「读原文 → 翻译 → 盖戳」的竞态窗口：窗口内再保存一次，
+                //    就会把上一版译文记成最新版本，之后每次打开都显示旧内容（修改看起来凭空消失）。
+                // 中文视图保存时编辑器显示内容就是要展示的中文版本，直接作为缓存；
+                // 英文视图保存时手上没有可靠中文版本，作废缓存（下次重译），绝不留旧记录。
+                try {
+                    val savedMtime = targetFile.lastModified()
+                    val savedSize = targetFile.length()
+                    if (needReverseTranslate) {
+                        SearchTranslationCache.putCacheSync(targetFile, currentText, savedMtime, savedSize)
+                    } else {
+                        SearchTranslationCache.invalidate(targetFile)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "[$caller] translation cache sync failed for $targetPath", e)
+                }
                 Log.d(TAG, "[$caller] Saved successfully: $targetPath")
                 // 主线程同步工作区：captureViewState 读编辑器光标/滚动（View 状态）必须主线程，
                 // updateWorkspace 写 Compose state 也应在主线程。
@@ -732,7 +757,8 @@ fun EditorScreen(
                     // 再把工作区内其它有修改的文件一并保存（内部自行切线程）。
                     // 必须在本 Main 块内调用：onSaveAllWorkspace → flushInactiveInstances 会写 openPaths state，
                     // 在 IO 线程调用会跨线程写 Compose state（确定性 bug）。
-                    onSaveAllWorkspace?.invoke()
+                    // flushAfter=false（右上角保存）时宿主只落盘不销毁实例。
+                    onSaveAllWorkspace?.invoke(flushAfter)
                 }
                 true
             } catch (e: Exception) {
@@ -1065,6 +1091,21 @@ fun EditorScreen(
         }
     }
 
+    // 右上角保存按钮：触发器发给所有存活实例（含非聚焦格），各自落盘；
+    // 非聚焦格静默（不弹 toast）。flushAfter=false → 不销毁其它实例、openPaths 不缩短，
+    // 当前实例不会被连坐销毁重建（修复「保存后光标回第一行」）。
+    // 触发器不清零（多实例共用同一值，清零会让后到的实例错过），靠 lastTopBarSaveTrigger 去重；
+    // 新建实例以当前值为初值，不会误保存刚打开的文件。
+    var lastTopBarSaveTrigger by remember { mutableIntStateOf(topBarSaveTrigger) }
+    LaunchedEffect(topBarSaveTrigger) {
+        if (topBarSaveTrigger > lastTopBarSaveTrigger) {
+            lastTopBarSaveTrigger = topBarSaveTrigger
+            lifecycleOwner.lifecycleScope.launch {
+                saveSync("TopBarSave", silent = !focused, flushAfter = false)
+            }
+        }
+    }
+
     // 搜索替换前的保存请求：把未保存缓冲落盘并回报结果，供搜索替换等待后读盘替换
     LaunchedEffect(externalSaveRequest) {
         if (externalSaveRequest > 0) {
@@ -1098,8 +1139,8 @@ fun EditorScreen(
                                         saveSync("LifecycleOnPause")
                                     } else {
                                         // 当前文件无改动，但工作区其它文件可能还有未落盘的修改，
-                                        // 直接统一保存，避免「当前文件干净时其它文件改动裸奔」。
-                                        onSaveAllWorkspace?.invoke()
+                                        // 直接统一保存（附带瘦身销毁，保持历史行为），避免「当前文件干净时其它文件改动裸奔」。
+                                        onSaveAllWorkspace?.invoke(true)
                                     }
                                 }
                             } catch (e: Exception) {
@@ -1649,7 +1690,7 @@ fun EditorScreen(
                         Box(
                             Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(bottom = 10.dp, end = 14.dp)
+                                .padding(bottom = 10.dp * FAB_SCALE, end = 14.dp * FAB_SCALE)
                                 // 「+」展开时拦截容器区域内点击：菜单项/按钮自身仍优先响应（子级先消费事件），
                                 // 仅吞掉条目间隙、空白处等落到底部编辑器区域的点击，避免穿透触发输入法弹出
                                 .pointerInput(fabExpanded) {
@@ -1815,7 +1856,7 @@ fun EditorScreen(
                                 // 竖向菜单：展开时从 + 号向上逐条弹出（倒序渲染，最靠近 + 的「保存」最先弹出）
                                 Column(
                                     modifier = Modifier
-                                        .heightIn(max = 640.dp)
+                                        .heightIn(max = 640.dp * FAB_SCALE)
                                         .verticalScroll(rememberScrollState()),
                                     horizontalAlignment = Alignment.End
                                 ) {
@@ -1837,7 +1878,7 @@ fun EditorScreen(
                                                 onIcon = { ThemeState.toggle() }
                                             )
                                         }
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(8.dp * FAB_SCALE))
                                         // 内置主题 + 用户预设（动态）；从下到上连续递增接在「节行高亮」之后
                                         themeList.forEachIndexed { i, (id, label) ->
                                             val icon = when (id) {
@@ -1856,9 +1897,9 @@ fun EditorScreen(
                                                     onIcon = { ThemeState.applyHighlightTheme(id) }
                                                 )
                                             }
-                                            Spacer(Modifier.height(8.dp))
+                                            Spacer(Modifier.height(8.dp * FAB_SCALE))
                                         }
-                                        Spacer(Modifier.height(4.dp))
+                                        Spacer(Modifier.height(4.dp * FAB_SCALE))
                                         // 节名行高亮：点击标签切换开关，点击图标打开调色盘自定义底色
                                         FabItemStagger(expanded = fabExpanded, index = 2) {
                                             EditorFabMenuRow(
@@ -1885,7 +1926,7 @@ fun EditorScreen(
                                                 onIcon = { showSectionHighlightPicker = true }
                                             )
                                         }
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(8.dp * FAB_SCALE))
                                         FabItemStagger(expanded = fabExpanded, index = 1) {
                                             EditorFabMenuRow(
                                                 title = "自定义高亮色", icon = Icons.Default.Colorize,
@@ -1894,7 +1935,7 @@ fun EditorScreen(
                                                 onIcon = { showDarkTokens = true }
                                             )
                                         }
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(8.dp * FAB_SCALE))
                                         FabItemStagger(expanded = fabExpanded, index = 0) {
                                             EditorFabMenuRow(
                                                 title = "括号颜色", icon = Icons.Default.Code,
@@ -1903,7 +1944,7 @@ fun EditorScreen(
                                                 onIcon = { showRainbowBracketDialog = true }
                                             )
                                         }
-                                        Spacer(Modifier.height(4.dp))
+                                        Spacer(Modifier.height(4.dp * FAB_SCALE))
                                     }
                                     // 展开「高亮主题」子菜单时隐藏其它竖栏项（互斥展示）
                                     if (!fabShowThemes) {
@@ -1977,12 +2018,12 @@ fun EditorScreen(
                                     val shownItems = mainItems.filter { it.first }
                                     shownItems.forEachIndexed { pos, (_, content) ->
                                         FabItemStagger(expanded = fabExpanded, index = shownItems.lastIndex - pos) { content() }
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(8.dp * FAB_SCALE))
                                     }
                                     } // if (!fabShowThemes)
                                 }
                                 // 展开后菜单与底部横栏之间的间距
-                                if (fabExpanded) Spacer(Modifier.height(14.dp))
+                                if (fabExpanded) Spacer(Modifier.height(14.dp * FAB_SCALE))
                                 // 底部横栏：小圆按钮在 + 号左侧、与 + 垂直居中；全部跟随 +号 展开态显示
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     // 逐条从右向左浮现：最靠近 + 号的「背景色」先弹，最左的「设置」最后弹
@@ -1994,7 +2035,7 @@ fun EditorScreen(
                                                 onClick = { fabExpanded = false; navigateAway(Screen.SETTINGS) }
                                             )
                                         }
-                                        Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(12.dp * FAB_SCALE))
                                         // 启动游戏（与背景色对调位置后位于第二位）
                                         FabRowItemStagger(expanded = fabExpanded, index = 2) {
                                             RoundIconButton(
@@ -2003,7 +2044,7 @@ fun EditorScreen(
                                                 onClick = launchGame
                                             )
                                         }
-                                        Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(12.dp * FAB_SCALE))
                                         FabRowItemStagger(expanded = fabExpanded, index = 1) {
                                             RoundIconButton(
                                                 icon = Icons.Default.Brush,
@@ -2013,7 +2054,7 @@ fun EditorScreen(
                                                 onClick = { fabShowThemes = !fabShowThemes }
                                             )
                                         }
-                                        Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(12.dp * FAB_SCALE))
                                         // 背景色（调色盘）：跟随 +号 展开显示
                                         FabRowItemStagger(expanded = fabExpanded, index = 0) {
                                             RoundIconButton(
@@ -2022,7 +2063,7 @@ fun EditorScreen(
                                                 onClick = { fabShowColorPicker = true }
                                             )
                                         }
-                                        Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(12.dp * FAB_SCALE))
                                     }
                                     // 「方块+」按钮本体：圆角方块，展开时「+」旋转 45°
                                     EditorFabButton(
@@ -2049,6 +2090,18 @@ fun EditorScreen(
                                         )
                                     }.getOrDefault(color)
                                     ThemeState.applyBgColor(opaque)
+                                    // 顶部浮层已收起时，状态栏用的就是编辑区背景色 —— 改背景色要当场同步过去，
+                                    // 否则要切一次页面才刷新（SideEffect 在组合阶段改窗口属性不会立即重绘，
+                                    // 已实测过）。这里在点击回调里做，属于事件分发阶段，能真正 dispatch。
+                                    if (!topBarsShown) {
+                                        runCatching {
+                                            val win = (imeView.context as android.app.Activity).window
+                                            win.statusBarColor = android.graphics.Color.parseColor(opaque)
+                                            androidx.core.view.WindowCompat
+                                                .getInsetsController(win, imeView)
+                                                .isAppearanceLightStatusBars = !ThemeState.isDark
+                                        }
+                                    }
                                     fabShowColorPicker = false
                                 },
                                 showInsertButton = true,

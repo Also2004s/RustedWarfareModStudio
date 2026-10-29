@@ -135,6 +135,12 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
         }
     }
 
+    // ===== 平板横屏：左列表 + 右详情（详情不再弹窗）=====
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+
+    @Composable
+    fun ListBody() {
     Column(Modifier.fillMaxSize().background(RustedBackground)) {
         CodeRefSearchBar(
             query = searchQuery,
@@ -194,77 +200,107 @@ fun CodeReferenceScreen(inlineMode: Boolean = false, userCompletions: List<Custo
             }
         }
     }
+    }
 
-    // 条目详情弹窗：单色 surface 背景 + 同色系细边框（避免外框颜色分层）
-    detailItem?.let { item ->
-        val ctx = LocalContext.current
-        val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val tc = when (item.detail) { "bool" -> RustedPrimary; "float", "int" -> RustedSecondary; "string" -> RustedAccent; else -> RustedOnBackground.copy(alpha = 0.3f) }
-        Dialog(onDismissRequest = { detailItem = null }) {
-            Surface(
-                Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 560.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = RustedSurface,
-                border = BorderStroke(1.dp, RustedOnBackground.copy(alpha = 0.10f))
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(item.displayPrimary(), fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = AppCodeFontFamily, color = RustedOnBackground)
-                            val secondary = item.displaySecondary()
-                            if (secondary.isNotEmpty()) Text(secondary, fontSize = 12.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground.copy(alpha = 0.5f))
-                            if (item.detail.isNotEmpty()) Text(item.detail, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                        }
-                        IconButton(onClick = { detailItem = null }, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            Box(Modifier.weight(1f)) { ListBody() }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                val item = detailItem
+                if (item == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("点左侧条目查看详情", fontSize = 13.sp, color = RustedOnBackground.copy(alpha = 0.4f))
                     }
-                    Spacer(Modifier.height(10.dp))
-                    HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                    Spacer(Modifier.height(10.dp))
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        if (item.detail.isNotEmpty() || item.category.isNotEmpty()) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (item.detail.isNotEmpty()) {
-                                    DetailChip {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(tc))
-                                            Text(item.detail, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                                        }
-                                    }
+                } else {
+                    CodeRefDetailPanel(item = item, onClose = { detailItem = null }, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+    } else {
+        ListBody()
+    }
+
+    // 条目详情弹窗（仅竖屏）：横屏时详情显示在右栏
+    if (!isSplit) detailItem?.let { item ->
+        Dialog(onDismissRequest = { detailItem = null }) {
+            CodeRefDetailPanel(
+                item = item,
+                onClose = { detailItem = null },
+                modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 560.dp)
+            )
+        }
+    }
+
+
+}
+
+@Composable
+private fun CodeRefDetailPanel(item: CustomCompletion, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val tc = when (item.detail) { "bool" -> RustedPrimary; "float", "int" -> RustedSecondary; "string" -> RustedAccent; else -> RustedOnBackground.copy(alpha = 0.3f) }
+    Surface(
+        modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = RustedSurface,
+        border = BorderStroke(1.dp, RustedOnBackground.copy(alpha = 0.10f))
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(tc))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.displayPrimary(), fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = AppCodeFontFamily, color = RustedOnBackground)
+                    val secondary = item.displaySecondary()
+                    if (secondary.isNotEmpty()) Text(secondary, fontSize = 12.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground.copy(alpha = 0.5f))
+                    if (item.detail.isNotEmpty()) Text(item.detail, fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                }
+                IconButton(onClick = onClose, Modifier.size(32.dp)) { Icon(Icons.Default.Close, null, Modifier.size(20.dp), tint = RustedOnBackground.copy(alpha = 0.5f)) }
+            }
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+            Spacer(Modifier.height(10.dp))
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                if (item.detail.isNotEmpty() || item.category.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (item.detail.isNotEmpty()) {
+                            DetailChip {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(tc))
+                                    Text(item.detail, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f))
                                 }
-                                item.category.take(2).forEach { c ->
-                                    DetailChip { Text(c, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f)) }
-                                }
                             }
                         }
-                        if (item.desc.isNotEmpty()) {
-                            Spacer(Modifier.height(10.dp))
-                            Text("说明", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary)
-                            Spacer(Modifier.height(4.dp))
-                            SelectionContainer { Text(item.desc, fontSize = 14.sp, color = RustedOnBackground, lineHeight = 20.sp) }
+                        item.category.take(2).forEach { c ->
+                            DetailChip { Text(c, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.6f)) }
                         }
-                        if (item.example.isNotEmpty()) {
-                            Spacer(Modifier.height(12.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("示例", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary, modifier = Modifier.weight(1f))
-                                TextButton(
-                                    onClick = { clipboard.setPrimaryClip(ClipData.newPlainText(item.name, completionFormatInsert(item))) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedSecondary); Spacer(Modifier.width(4.dp)); Text("复制代码", fontSize = 11.sp, color = RustedSecondary) }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            SelectionContainer {
-                                Text(
-                                    text = item.example,
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(RustedBackground).padding(10.dp),
-                                    fontSize = 12.sp,
-                                    fontFamily = AppCodeFontFamily,
-                                    color = RustedSecondary.copy(alpha = 0.9f),
-                                    lineHeight = 18.sp
-                                )
-                            }
-                        }
+                    }
+                }
+                if (item.desc.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("说明", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary)
+                    Spacer(Modifier.height(4.dp))
+                    SelectionContainer { Text(item.desc, fontSize = 14.sp, color = RustedOnBackground, lineHeight = 20.sp) }
+                }
+                if (item.example.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("示例", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RustedPrimary, modifier = Modifier.weight(1f))
+                        TextButton(
+                            onClick = { clipboard.setPrimaryClip(ClipData.newPlainText(item.name, completionFormatInsert(item))) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) { Icon(Icons.Default.ContentCopy, null, Modifier.size(14.dp), tint = RustedSecondary); Spacer(Modifier.width(4.dp)); Text("复制代码", fontSize = 11.sp, color = RustedSecondary) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    SelectionContainer {
+                        Text(
+                            text = item.example,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(RustedBackground).padding(10.dp),
+                            fontSize = 12.sp,
+                            fontFamily = AppCodeFontFamily,
+                            color = RustedSecondary.copy(alpha = 0.9f),
+                            lineHeight = 18.sp
+                        )
                     }
                 }
             }

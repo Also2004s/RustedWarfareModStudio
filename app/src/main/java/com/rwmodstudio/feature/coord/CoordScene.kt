@@ -116,30 +116,15 @@ fun parseCoordMarkers(text: String): List<CoordMarker> {
 }
 
 /**
- * 自动发现表达式中使用的目标名（如 `攻击中.x`、`self.攻击中.x` 中的 `攻击中`）。
- */
-fun discoverTargetNames(text: String): Set<String> {
-    val names = mutableSetOf<String>()
-    val regex = Regex("""(?<!\.)\b([\u4e00-\u9fa5_a-zA-Z][\u4e00-\u9fa5_a-zA-Z0-9]*)\s*\.\s*(x|y|dir)\b""")
-    regex.findAll(text).forEach { match ->
-        val name = match.groupValues[1].trim()
-        if (name != "self") names.add(name)
-    }
-    // 接近单位的 tag/relation 字符串里也可能出现名称，但这里只把显式属性访问的作为目标
-    return names
-}
-
-/**
  * 根据文本生成默认目标列表。
+ *
+ * 代码里出现的每个单位都当成一个独立的点（各自有位置、可拖动），
+ * 而不是只认 self/敌人——否则公式里写别的单位名时会被兜底成同一个点，位置串台。
  */
 fun buildDefaultTargets(text: String): List<CoordTarget> {
-    val names = discoverTargetNames(text)
-    return if (names.isEmpty()) {
-        listOf(CoordTarget(name = "敌人", x = 200.0, y = 0.0, dir = 0.0))
-    } else {
-        // 所有非 self 单位统一视为同一个敌人目标
-        listOf(CoordTarget(name = "敌人", x = 200.0, y = 0.0, dir = 0.0))
-    }
+    val names = collectUnitNamesFromText(text)
+    if (names.isEmpty()) return listOf(CoordTarget(name = "当前动作目标", x = 200.0, y = 0.0, dir = 0.0))
+    return mergeDiscoveredTargets(emptyList(), names)
 }
 
 /**

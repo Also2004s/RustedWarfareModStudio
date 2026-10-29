@@ -64,9 +64,92 @@ fun DarkTokenColorDialog(
         pickerSeed = colorForCategory(colors, selectedCategory)
     }
 
+    // 平板模式：弹窗放宽做左右分栏（左分类、右取色），竖屏还是原来的横排 chips
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+
+    fun pick(category: String) {
+        // 点击分类=明确离开 HEX 输入框：清除焦点、收起输入法（色值随后由 pickerSeed 刷新）
+        focusManager.clearFocus()
+        val isUi = category == "ui"
+        if (isUi) {
+            if (colors.highlightDelimiters && selectedCategory == "ui") {
+                colors = colors.copy(highlightDelimiters = false)
+                selectCategory("")
+            } else {
+                colors = colors.copy(highlightDelimiters = true)
+                selectCategory("ui")
+            }
+        } else {
+            selectCategory(category)
+        }
+    }
+
+    @Composable
+    fun CategoryChip(category: String, fullWidth: Boolean) {
+        val color = colorForCategory(colors, category)
+        val label = DarkThemeColors.labelOf(category, colors)
+        val isUi = category == "ui"
+        val selected = selectedCategory == category
+        // 仅「UI 高亮」显示勾（激活标记）；其余类别选中沿用高亮边框样式、不显示勾
+        val active = if (isUi) colors.highlightDelimiters else selected
+        val base = if (fullWidth) Modifier.fillMaxWidth().padding(vertical = 2.dp) else Modifier
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = if (active) RustedPrimary.copy(alpha = 0.15f) else RustedSurface,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (active) RustedPrimary else RustedOnBackground.copy(alpha = 0.15f)
+            ),
+            modifier = base.clickable { pick(category) }
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(parseHexColor(color))
+                        .border(1.dp, RustedOnBackground.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(label, fontSize = 12.sp, color = RustedOnBackground)
+                if (isUi && colors.highlightDelimiters) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = RustedPrimary)
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun PickerArea(size: androidx.compose.ui.unit.Dp) {
+        if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
+            ColorWheelHSV(
+                initialColor = pickerSeed,
+                onColorChanged = { newColor ->
+                    colors = updateColor(colors, selectedCategory, newColor)
+                },
+                wheelSize = size,
+                showHexInput = true
+            )
+        } else {
+            ColorWheelPicker(
+                initialColor = pickerSeed,
+                onColorChanged = { newColor ->
+                    colors = updateColor(colors, selectedCategory, newColor)
+                },
+                wheelSize = size,
+                showHexInput = true
+            )
+        }
+    }
+
     AppDialog(
         onDismissRequest = onDismiss,
         title = "自定义高亮",
+        wide = isSplit,
         actions = {
             DialogActionButton("保存预设") { showSavePresetDialog = true }
             DialogActionButton("使用预设") { showPresetDialog = true }
@@ -74,98 +157,48 @@ fun DarkTokenColorDialog(
             DialogActionButton("应用") { onConfirm(colors) }
         }
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(110.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+        val categories = DarkThemeColors.colorableCategoriesOf(colors)
+        if (isSplit) {
+            Row(Modifier.fillMaxWidth().height(340.dp)) {
+                Column(
+                    Modifier
+                        .width(210.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(end = 8.dp)
                 ) {
-                    // 可调色类型 = 内置（DarkThemeColors.colorableCategories）+ 用户新增类型（customTypes）
-                    val categories = DarkThemeColors.colorableCategoriesOf(colors)
-                    categories.forEach { category ->
-                        val color = colorForCategory(colors, category)
-                        val label = DarkThemeColors.labelOf(category, colors)
-                        val isUi = category == "ui"
-                        val selected = selectedCategory == category
-                        // 仅「UI 高亮」显示勾（激活标记）；其余类别选中沿用高亮边框样式、不显示勾
-                        val active = if (isUi) colors.highlightDelimiters else selected
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (active) RustedPrimary.copy(alpha = 0.15f) else RustedSurface,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (active) RustedPrimary else RustedOnBackground.copy(alpha = 0.15f)
-                            ),
-                            modifier = Modifier.clickable {
-                                // 点击分类=明确离开 HEX 输入框：清除焦点、收起输入法（色值随后由 pickerSeed 刷新）
-                                focusManager.clearFocus()
-                                if (isUi) {
-                                    if (colors.highlightDelimiters && selectedCategory == "ui") {
-                                        // 已激活：取消勾选并取消选中
-                                        colors = colors.copy(highlightDelimiters = false)
-                                        selectCategory("")
-                                    } else {
-                                        colors = colors.copy(highlightDelimiters = true)
-                                        selectCategory("ui")
-                                    }
-                                } else {
-                                    selectCategory(category)
-                                }
-                            }
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(14.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(parseHexColor(color))
-                                        .border(1.dp, RustedOnBackground.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(label, fontSize = 12.sp, color = RustedOnBackground)
-                                if (isUi && colors.highlightDelimiters) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = RustedPrimary)
-                                }
-                            }
-                        }
-                    }
+                    categories.forEach { cat -> CategoryChip(cat, fullWidth = true) }
+                }
+                Column(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    PickerArea(240.dp)
                 }
             }
-
-            Spacer(Modifier.height(8.dp))
-
-            if (com.rwmodstudio.core.SettingsManager.devHsvPicker) {
-                ColorWheelHSV(
-                    initialColor = pickerSeed,
-                    onColorChanged = { newColor ->
-                        colors = updateColor(colors, selectedCategory, newColor)
-                    },
-                    wheelSize = 180.dp,
-                    showHexInput = true
-                )
-            } else {
-                ColorWheelPicker(
-                    initialColor = pickerSeed,
-                    onColorChanged = { newColor ->
-                        colors = updateColor(colors, selectedCategory, newColor)
-                    },
-                    wheelSize = 180.dp,
-                    showHexInput = true
-                )
+        } else {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        categories.forEach { cat -> CategoryChip(cat, fullWidth = false) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                PickerArea(180.dp)
             }
         }
     }

@@ -18,7 +18,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -36,13 +40,38 @@ fun DeveloperModeScreen(
     onOpenSortCustomization: () -> Unit = {},
     onOpenSimAnim: () -> Unit = {}
 ) {
+    // ===== 平板横屏：左目录 + 右内容（与设置页同一套做法）=====
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val sectionTops = remember { mutableStateListOf<Float>() }
+
+    @Composable
+    fun SectionAnchor(index: Int) {
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(0.dp)
+                .onGloballyPositioned { coords ->
+                    val y = coords.positionInParent().y
+                    while (sectionTops.size <= index) sectionTops.add(0f)
+                    // 只在真正变化时写：否则每次布局都改状态会触发无限重组
+                    if (sectionTops[index] != y) sectionTops[index] = y
+                }
+        )
+    }
+
+    @Composable
+    fun DevContent() {
     Column(
         Modifier
             .fillMaxSize()
             .background(RustedBackground)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+        SectionAnchor(0)
         SectionHeader(Icons.Default.Code, "代码补全")
         SettingsCard {
             var completionProvider by remember { mutableStateOf(SettingsManager.devCompletionProvider) }
@@ -159,6 +188,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(1)
         SectionHeader(Icons.Default.Language, "解析与翻译")
         SettingsCard {
             DevSwitchCompact(
@@ -225,6 +255,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(2)
         SectionHeader(Icons.Default.Visibility, "界面显示")
         SettingsCard {
             DevSwitchCompact(
@@ -264,10 +295,11 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
-                icon = Icons.Default.VerticalAlignTop,
-                title = "顶部浮层滚动",
-                checked = SettingsManager.devTopBarsFold,
-                onCheckedChange = { SettingsManager.devTopBarsFold = it }
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                title = "顶部浮层隐藏",
+                subtitle = "汉堡右侧灰色「〉」收起浮层、右上角「〈」展开；滚动不会自动收展",
+                checked = SettingsManager.devTopFold,
+                onCheckedChange = { SettingsManager.devTopFold = it }
             )
             DevDivider()
             // 平板模式：整个 App 强制横屏 + 编辑器左右双工作区。
@@ -315,6 +347,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(3)
         SectionHeader(Icons.Default.Animation, "仿真")
         SettingsCard {
             DevActionRow(
@@ -327,6 +360,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(4)
         SectionHeader(Icons.Default.Save, "保存功能")
         SettingsCard {
             DevSwitchCompact(
@@ -342,6 +376,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(5)
         SectionHeader(Icons.Default.Folder, "文件操作")
         SettingsCard {
             DevSwitchCompact(
@@ -363,6 +398,7 @@ fun DeveloperModeScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        SectionAnchor(6)
         SectionHeader(Icons.Default.SmartToy, "AI 助手")
         SettingsCard {
             var aiBaseUrl by remember { mutableStateOf(SettingsManager.aiBaseUrl) }
@@ -456,6 +492,79 @@ fun DeveloperModeScreen(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+    }
+
+    // 横屏：左分区目录 + 右内容；竖屏：原来的单列
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            DevSectionRail(
+                sections = DEV_SECTIONS,
+                selectedIndex = sectionTops.indexOfLast { it <= scrollState.value + 12f }.coerceAtLeast(0),
+                onSelect = { index ->
+                    val target = sectionTops.getOrElse(index) { 0f }.toInt()
+                    scope.launch { scrollState.animateScrollTo(target) }
+                }
+            )
+            Box(Modifier.weight(1f)) { DevContent() }
+        }
+    } else {
+        DevContent()
+    }
+}
+
+/** 开发者模式的分区目录（顺序与 DevContent 里的 SectionAnchor 编号一致） */
+private val DEV_SECTIONS: List<Pair<ImageVector, String>> = listOf(
+    Icons.Default.Code to "代码补全",
+    Icons.Default.Language to "解析与翻译",
+    Icons.Default.Visibility to "界面显示",
+    Icons.Default.Animation to "仿真",
+    Icons.Default.Save to "保存功能",
+    Icons.Default.Folder to "文件操作",
+    Icons.Default.SmartToy to "AI 助手"
+)
+
+/** 平板横屏时左侧的分区目录：点击滚到对应分区，当前分区高亮 */
+@Composable
+private fun DevSectionRail(
+    sections: List<Pair<ImageVector, String>>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Column(
+        Modifier
+            .width(176.dp)
+            .fillMaxHeight()
+            .background(RustedSurface)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp)
+    ) {
+        sections.forEachIndexed { index, (sectionIcon, title) ->
+            val selected = index == selectedIndex
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) RustedPrimary.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    sectionIcon, null, Modifier.size(16.dp),
+                    tint = if (selected) RustedPrimary else RustedOnBackground.copy(alpha = 0.55f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    title,
+                    fontSize = 13.sp,
+                    color = if (selected) RustedPrimary else RustedOnBackground,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 

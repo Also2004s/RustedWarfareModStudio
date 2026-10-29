@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
@@ -187,6 +189,12 @@ fun CompletionTypeScreen(
         return
     }
 
+    // ===== 平板横屏：左侧竖排分类、右侧内容（分类 chips 在横屏时隐藏，改用左栏）=====
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+
+    @Composable
+    fun Body() {
     Column(Modifier.fillMaxSize().background(RustedBackground)) {
         // 顶部说明 + 操作（另存 / 重置）
         Row(
@@ -268,8 +276,8 @@ fun CompletionTypeScreen(
             return@Column
         }
 
-        // 分类筛选 + 资源名补全筛选
-        LazyRow(
+        // 分类筛选 + 资源名补全筛选（横屏时改用左侧竖栏，这里隐藏）
+        if (!isSplit) LazyRow(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(end = 16.dp)
@@ -448,6 +456,21 @@ fun CompletionTypeScreen(
                 }
             }
         }
+    }
+    }
+
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            CompletionCategoryRail(
+                selected = selectedCat,
+                onlyRn = onlyRn,
+                onSelect = { selectedCat = it },
+                onOnlyRnChange = { onlyRn = it }
+            )
+            Box(Modifier.weight(1f)) { Body() }
+        }
+    } else {
+        Body()
     }
 
     // 编辑对话框：选择属性分类（13 类；值语法类非属性归类，不在覆盖范围）
@@ -937,5 +960,56 @@ suspend fun buildMockIniClassifier(context: Context): PropertyClassifier? {
         PropertyClassifier { name, nameEn, sectionName ->
             agg.realCompletionClassify(context, name, nameEn, sectionName)
         }
+    }
+}
+
+/** 平板横屏时左侧的分类竖栏：点一项即筛选，再点一次回到「全部」 */
+@Composable
+private fun CompletionCategoryRail(
+    selected: String?,
+    onlyRn: Boolean,
+    onSelect: (String?) -> Unit,
+    onOnlyRnChange: (Boolean) -> Unit
+) {
+    Column(
+        Modifier
+            .width(168.dp)
+            .fillMaxHeight()
+            .background(RustedSurface)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp)
+    ) {
+        CompletionRailItem("全部", selected == null) { onSelect(null) }
+        CompletionTypeRepository.CATEGORY_ORDER.forEach { cat ->
+            CompletionRailItem(cat, selected == cat) {
+                onSelect(if (selected == cat) null else cat)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
+        Spacer(Modifier.height(10.dp))
+        CompletionRailItem("仅资源名补全", onlyRn) { onOnlyRnChange(!onlyRn) }
+    }
+}
+
+@Composable
+private fun CompletionRailItem(text: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) RustedPrimary.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            fontSize = 13.sp,
+            color = if (selected) RustedPrimary else RustedOnBackground,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

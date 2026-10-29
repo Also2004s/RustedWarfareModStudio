@@ -27,7 +27,9 @@ data class EvalContext(
     // 这样逐格采样时只需要 copy 一个上下文，不必每格复制整张 targets 表。
     val probeName: String? = null,
     val probeX: Double = 0.0,
-    val probeY: Double = 0.0
+    val probeY: Double = 0.0,
+    // 公式前置定义算出来的变量（如 `D:min(...)` 里的 D），供条件部分通过 `$(D)` 引用
+    val vars: Map<String, Double> = emptyMap()
 )
 
 fun evaluateCoordExpression(node: AstNode, ctx: EvalContext): Double {
@@ -50,13 +52,21 @@ private fun evalNode(node: AstNode, ctx: EvalContext): EvalValue {
         is Identifier -> when (node.name) {
             "self" -> EvalValue.Unit(ctx.self)
             "存活时间", "时间" -> EvalValue.Number(ctx.simTime)
+            // 脚本里常写成「自身角度」，等价于 self.dir
+            "自身角度" -> EvalValue.Number(ctx.self.dir)
+            "自身x" -> EvalValue.Number(ctx.self.x)
+            "自身y" -> EvalValue.Number(ctx.self.y)
             else -> {
                 // 区域采样：被选为自由变量的目标，位置由采样点决定
                 if (node.name == ctx.probeName) {
                     return EvalValue.Unit(CoordUnit(ctx.probeX, ctx.probeY, 0.0))
                 }
+                // 公式前置定义（`D:...`）优先于资源表
+                ctx.vars[node.name]?.let { return EvalValue.Number(it) }
+                // 单位表里没有的名字不再兜底成「敌人」：
+                // 兜底会让"公式里写了别的单位"悄悄复用敌人的坐标，两个点重合、位置串台。
+                // 现在的约定是——公式里出现的单位由 UI 侧自动登记成独立的点；这里查不到就当原点（不影响数值表达式）。
                 val target = ctx.targets[node.name]
-                    ?: ctx.targets["敌人"] // 非 self 单位统一视为敌人
                 if (target != null) return EvalValue.Unit(target)
                 val resource = ctx.resources[node.name]
                 if (resource != null) return EvalValue.Number(resource)
@@ -121,6 +131,9 @@ private fun evalBinaryOp(node: BinaryOp, ctx: EvalContext): EvalValue {
         "<=" -> if (left <= right) 1.0 else 0.0
         "==" -> if (left == right) 1.0 else 0.0
         "!=" -> if (left != right) 1.0 else 0.0
+        // 逻辑运算：非 0 为真。脚本里常见 `条件1 and 条件2`
+        "and" -> if (left != 0.0 && right != 0.0) 1.0 else 0.0
+        "or" -> if (left != 0.0 || right != 0.0) 1.0 else 0.0
         else -> 0.0
     }
     return EvalValue.Number(result)

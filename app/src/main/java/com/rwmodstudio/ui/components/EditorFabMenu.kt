@@ -44,6 +44,15 @@ import kotlinx.coroutines.delay
 // 底部横栏 3 个小圆按钮位于 + 号左侧且与 + 垂直居中。
 // ---------------------------------------------------------------------------
 
+/**
+ * 「方块+」本体与展开后圆按钮的整体缩放系数（1f = 原始设计尺寸 50dp / 42dp）。
+ *
+ * 所有尺寸（方块 50、圆按钮 42、图标 26/21、圆角 14）统一乘这个系数：
+ * 等比缩放，两者之间约 1.19 : 1 的大小关系原样保留，不会缩成一样大。
+ * 要整体调大/调小，只改这一个数。
+ */
+internal const val FAB_SCALE = 0.8f
+
 /** 「方块+」切换按钮：圆角方块，展开时「+」旋转 45° 变为「×」，不换图标。 */
 @Composable
 fun EditorFabButton(
@@ -64,18 +73,18 @@ fun EditorFabButton(
     Surface(
         onClick = onClick,
         modifier = modifier
-            .size(50.dp)
+            .size(50.dp * FAB_SCALE)
             .rotate(rotation),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(14.dp * FAB_SCALE),
         color = RustedBackground,
         contentColor = RustedOnBackground,
-        shadowElevation = 2.dp
+        shadowElevation = 2.dp * FAB_SCALE
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = Icons.Default.Add,
                 contentDescription = if (expanded) "收起" else "更多",
-                modifier = Modifier.size(26.dp),
+                modifier = Modifier.size(26.dp * FAB_SCALE),
                 // 「+」用反色（on-background），浅色主题下为深色、深色主题下为浅色
                 tint = RustedOnBackground
             )
@@ -122,40 +131,44 @@ fun EditorFabMenuRow(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.height(44.dp),
+        modifier = modifier.height(44.dp * FAB_SCALE),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
         Surface(
             onClick = onLabel,
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(6.dp * FAB_SCALE),
             color = RustedBackground,
-            shadowElevation = 2.dp
+            shadowElevation = 2.dp * FAB_SCALE
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 10.dp),
+                modifier = Modifier.padding(horizontal = 10.dp * FAB_SCALE),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    title, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    title, fontSize = 15.sp * FAB_SCALE, lineHeight = 16.5.sp * FAB_SCALE,
+                    fontWeight = FontWeight.Medium,
                     color = RustedOnBackground, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle.isNotEmpty()) {
-                    Text(subtitle, fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.6f), maxLines = 1)
+                    Text(
+                        subtitle, fontSize = 11.sp * FAB_SCALE, lineHeight = 12.sp * FAB_SCALE,
+                        color = RustedOnBackground.copy(alpha = 0.6f), maxLines = 1
+                    )
                 }
             }
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12.dp * FAB_SCALE))
         // 独立圆形图标按钮（纯色实底）
         Surface(
             onClick = onIcon,
             shape = CircleShape,
             color = RustedBackground,
             contentColor = iconTint,
-            shadowElevation = 2.dp
+            shadowElevation = 2.dp * FAB_SCALE
         ) {
-            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(21.dp), tint = iconTint)
+            Box(Modifier.size(42.dp * FAB_SCALE), contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(21.dp * FAB_SCALE), tint = iconTint)
             }
         }
     }
@@ -173,50 +186,51 @@ fun EditorFabCheckRow(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.height(44.dp),
+        modifier = modifier.height(44.dp * FAB_SCALE),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
         // 方块复选框（空心，可选显示）：勾选时填充主色 + 白色对勾
         if (showCheck) {
             Surface(
-                shape = RoundedCornerShape(4.dp),
+                shape = RoundedCornerShape(4.dp * FAB_SCALE),
                 color = if (checked) RustedPrimary else Color.Transparent,
                 border = BorderStroke(
-                    1.5.dp,
+                    1.5.dp * FAB_SCALE,
                     if (checked) RustedPrimary else RustedOnBackground.copy(alpha = 0.45f)
                 )
             ) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(20.dp * FAB_SCALE), contentAlignment = Alignment.Center) {
                     if (checked) {
-                        Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = Color.White)
+                        Icon(Icons.Default.Check, null, Modifier.size(16.dp * FAB_SCALE), tint = Color.White)
                     }
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(12.dp * FAB_SCALE))
         }
         // 圆角矩形文字标签（点击切换，跟随主题的表面反色）
         Surface(
             onClick = onToggle,
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(6.dp * FAB_SCALE),
             color = RustedBackground,
-            shadowElevation = 2.dp
+            shadowElevation = 2.dp * FAB_SCALE
         ) {
             Text(
-                title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = RustedOnBackground,
-                modifier = Modifier.padding(horizontal = 10.dp)
+                title, fontSize = 15.sp * FAB_SCALE, lineHeight = 16.5.sp * FAB_SCALE,
+                fontWeight = FontWeight.Medium, color = RustedOnBackground,
+                modifier = Modifier.padding(horizontal = 10.dp * FAB_SCALE)
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12.dp * FAB_SCALE))
         // 独立圆形图标按钮（点击同样切换，纯色实底）
         Surface(
             onClick = onToggle,
             shape = CircleShape,
             color = RustedBackground,
-            shadowElevation = 2.dp
+            shadowElevation = 2.dp * FAB_SCALE
         ) {
-            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(21.dp), tint = iconTint)
+            Box(Modifier.size(42.dp * FAB_SCALE), contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(21.dp * FAB_SCALE), tint = iconTint)
             }
         }
     }
@@ -231,30 +245,31 @@ fun EditorFabSliderRow(
     onValueChange: (Float) -> Unit
 ) {
     Row(
-        modifier = Modifier.height(44.dp),
+        modifier = Modifier.height(44.dp * FAB_SCALE),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
         // 左侧文字标签：仅显示实际数值，不显示汉字说明
         Surface(
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(6.dp * FAB_SCALE),
             color = RustedBackground,
-            shadowElevation = 2.dp
+            shadowElevation = 2.dp * FAB_SCALE
         ) {
             Text(
-                valueLabel, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = RustedOnBackground,
-                modifier = Modifier.padding(horizontal = 10.dp)
+                valueLabel, fontSize = 15.sp * FAB_SCALE, lineHeight = 16.5.sp * FAB_SCALE,
+                fontWeight = FontWeight.Medium, color = RustedOnBackground,
+                modifier = Modifier.padding(horizontal = 10.dp * FAB_SCALE)
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(12.dp * FAB_SCALE))
         // 紧凑悬浮滑块：药丸内「内部实心填充」样式（从左侧到当前滑块值用主题反色填充，随拖动实时变化）
         // 不使用 Material Slider（自带圆球无法彻底隐藏），改为自定义拖动控件：整个药丸区域可点按/拖动调节
         Box(
             Modifier
-                .width(120.dp)
-                .height(26.dp)
-                .shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
-                .clip(RoundedCornerShape(13.dp))
+                .width(120.dp * FAB_SCALE)
+                .height(26.dp * FAB_SCALE)
+                .shadow(3.dp * FAB_SCALE, RoundedCornerShape(13.dp * FAB_SCALE), clip = false)
+                .clip(RoundedCornerShape(13.dp * FAB_SCALE))
                 .background(RustedBackground)
                 .pointerInput(valueRange) {
                     detectDragGestures(
@@ -319,14 +334,14 @@ fun RoundIconButton(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.size(42.dp),
+        modifier = modifier.size(42.dp * FAB_SCALE),
         shape = CircleShape,
         color = if (isActive) RustedSecondary else RustedBackground,
         contentColor = if (isActive) RustedSecondary else RustedOnBackground,
-        shadowElevation = 2.dp
+        shadowElevation = 2.dp * FAB_SCALE
     ) {
-        Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription, Modifier.size(21.dp))
+        Box(Modifier.size(42.dp * FAB_SCALE), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription, Modifier.size(21.dp * FAB_SCALE))
         }
     }
 }

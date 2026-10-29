@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.asImageBitmap
@@ -170,8 +171,15 @@ fun FileBrowserScreen(
     }
 
     var showToolMenu by remember { mutableStateOf(false) }
-    // 仿MT目录：「更多」入口在全局菜单栏，用 tick 信号远程触发本页菜单
-    LaunchedEffect(toolMenuTick) { if (toolMenuTick > 0) showToolMenu = true }
+    // 「更多」入口在全局菜单栏，用 tick 信号远程触发本页菜单。
+    // 只响应 tick 的「增量」：本页首次组合时把当前 tick 记为已消费，否则第二次进入浏览器会一进来就自动展开菜单。
+    var lastToolMenuTick by remember { mutableIntStateOf(toolMenuTick) }
+    LaunchedEffect(toolMenuTick) {
+        if (toolMenuTick != lastToolMenuTick) {
+            lastToolMenuTick = toolMenuTick
+            showToolMenu = true
+        }
+    }
     var sort by remember { mutableIntStateOf(0) }
     var hidden by remember { mutableStateOf(false) }
     var showNewFile by remember { mutableStateOf(false) }
@@ -811,6 +819,8 @@ private fun BrowserPanel(
     var multiSelectMode by remember { mutableStateOf(false) }
     var selectedFiles by remember { mutableStateOf(setOf<String>()) }
     var delMulti by remember { mutableStateOf<List<String>>(emptyList()) }
+    // 双栏「原地址粘贴」行右端勾选框：勾上后该项改为「复制」（内部剪贴板，支持多选），状态持久化
+    var dualPasteAsCopy by remember { mutableStateOf(SettingsManager.dualPanePasteAsCopy) }
 
     fun exitMultiSelect() {
         multiSelectMode = false
@@ -935,7 +945,8 @@ private fun BrowserPanel(
                     elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                     border = BorderStroke(0.5.dp, RustedOnBackground.copy(alpha = 0.10f))
                 ) {
-                    Column(Modifier.width(132.dp).padding(vertical = 4.dp)) {
+                    // 双栏时菜单尾部多一个勾选框，宽度按需放宽（单栏保持原宽）
+                    Column(Modifier.width(if (paneIndex >= 0) 148.dp else 132.dp).padding(vertical = 4.dp)) {
                         if (paneIndex >= 0) {
                             // 仿MT双栏：一步到位的方向化操作，目标=另一栏当前目录，全程不经过剪贴板。
                             // 箭头跟着操作栏变：长按左栏 → 指向右；长按右栏 ← 指向左。
@@ -963,14 +974,29 @@ private fun BrowserPanel(
                                     transferConfirm = TransferConfirm(targets, move = false, targetDir = otherPanePath)
                                 }
                             )
-                            // 原地址粘贴：给副本命名后再复制（不读剪贴板）；多选时批量改名没有合理交互，故不出现
-                            if (singleTarget) {
-                                FloatingMenuItem(Icons.Outlined.ContentPaste, "原地址粘贴", onClick = {
-                                    ctxMenuFile = null; ctxMenuBounds = null
-                                    exitMultiSelect()
-                                    pasteSource = file
-                                    pasteName = file.parentFile?.let { uniqueFile(it, file).name } ?: file.name
-                                })
+                            // 原地址粘贴：给副本命名后再复制（不读剪贴板）；右端勾选框勾上后改为单栏「复制」
+                            // （写内部剪贴板 → 激活栏出现粘贴条，可粘到任意目录/另一栏），此时支持多选
+                            if (dualPasteAsCopy || singleTarget) {
+                                FloatingCheckMenuItem(
+                                    icon = if (dualPasteAsCopy) Icons.Outlined.ContentCopy else Icons.Outlined.ContentPaste,
+                                    label = if (dualPasteAsCopy) "复制" else "原地址粘贴",
+                                    checked = dualPasteAsCopy,
+                                    onCheckedChange = { on ->
+                                        dualPasteAsCopy = on
+                                        SettingsManager.dualPanePasteAsCopy = on
+                                    },
+                                    onClick = {
+                                        ctxMenuFile = null; ctxMenuBounds = null
+                                        exitMultiSelect()
+                                        if (dualPasteAsCopy) {
+                                            // 与单栏「复制」同款：不复制文件，只把选中项放进内部剪贴板
+                                            FileClipboardManager.set(context, "copy", targets)
+                                        } else {
+                                            pasteSource = file
+                                            pasteName = file.parentFile?.let { uniqueFile(it, file).name } ?: file.name
+                                        }
+                                    }
+                                )
                             }
                         } else {
                             FloatingMenuItem(Icons.Outlined.ContentCopy, "复制", onClick = {
@@ -1358,6 +1384,57 @@ internal fun FloatingMenuItem(
         Icon(icon, null, Modifier.size(18.dp), tint = effectiveTint)
         Spacer(Modifier.width(10.dp))
         Text(label, fontSize = 13.sp, color = effectiveTint)
+    }
+}
+
+/**
+ * 悬浮菜单项 + 右端细边框复选框（双栏「原地址粘贴」行的复制模式开关）。
+ * 主区域点击执行 [onClick]；复选框区域点击只切换状态、不执行动作（菜单保持打开）。
+ * 描边刻意做成 0.8dp——比 Material Checkbox 的 2dp 细得多。
+ */
+@Composable
+internal fun FloatingCheckMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    checked: Boolean,
+    tint: Color = RustedOnBackground,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+    onClick: () -> Unit
+) {
+    val effectiveTint = if (enabled) tint else tint.copy(alpha = 0.35f)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, Modifier.size(18.dp), tint = effectiveTint)
+            Spacer(Modifier.width(10.dp))
+            Text(label, fontSize = 13.sp, color = effectiveTint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Box(
+            modifier = Modifier.size(26.dp).clickable(enabled = enabled) { onCheckedChange(!checked) },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .border(
+                        width = 0.8.dp,
+                        color = if (checked) RustedPrimary else RustedOnBackground.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(2.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checked) {
+                    Icon(Icons.Default.Check, null, Modifier.size(10.dp), tint = RustedPrimary)
+                }
+            }
+        }
+        Spacer(Modifier.width(10.dp))
     }
 }
 

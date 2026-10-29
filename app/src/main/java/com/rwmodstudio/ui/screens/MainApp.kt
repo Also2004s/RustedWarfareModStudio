@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -261,6 +263,19 @@ fun MainApp() {
             } else ""
             targetFile.atomicWriteText(contentToSave, Charsets.UTF_8)
             SaveHistoryManager.record(context, entry.path, beforeContent, contentToSave)
+            // 同 EditorScreen.saveSync：落盘后立刻把中文翻译缓存对齐到本版本，
+            // 否则下次打开会重译，而「读原文→翻译→盖戳」期间再保存会把上一版译文记成最新 → 重开显示旧内容。
+            try {
+                val savedMtime = targetFile.lastModified()
+                val savedSize = targetFile.length()
+                if (entry.isEnglish && entry.showChinese) {
+                    SearchTranslationCache.putCacheSync(targetFile, entry.displayText, savedMtime, savedSize)
+                } else {
+                    SearchTranslationCache.invalidate(targetFile)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "translation cache sync failed path=${entry.path}", e)
+            }
             // 写盘成功后清工作区 dirty 标记：onDispose 会先 onWorkspaceCache 缓存 isModified=true 的条目，
             // 再走本函数异步落盘，若不清会导致 saveAllWorkspaceFiles 重复写盘、重开文件时误报「未保存」。
             withContext(Dispatchers.Main) {
@@ -304,6 +319,10 @@ fun MainApp() {
     // 持有当前编辑器文本，供外部 intent 打开文件时判断是否有未保存修改；用普通 var 避免每次输入都触发重组
     val editorTextHolder = remember { object { var text = "" } }
     var editorSaveTrigger by remember { mutableIntStateOf(0) }
+    // 右上角保存按钮专用触发器：与 editorSaveTrigger（抽屉离开自动保存共用）分开，
+    // 只作用于「点右上角保存」这一条路径。发给所有存活实例各自落盘，但不瘦身销毁
+    //（openPaths 不缩短），当前实例不会被连坐销毁重建（修复保存后光标回第一行）。
+    var topBarSaveTrigger by remember { mutableIntStateOf(0) }
     // 顶部菜单栏「搜索」「保存」「撤销」触发状态
     var editorSearchTrigger by remember { mutableIntStateOf(0) }
     // 顶部菜单栏「撤销」「重做」：触发值 + 可用态（由 EditorScreen 上报，不可用时按钮变灰）
@@ -435,6 +454,23 @@ fun MainApp() {
 
     val themeIsDark = ThemeState.isDark // Force recompose on theme toggle
     val view = LocalView.current
+    // 编辑器页顶部两栏（全局菜单栏 + Tab 栏）显示状态：由顶部浮层的「〉/〈」按钮驱动，仅在编辑器页生效
+    var editorTopBarsShown by remember { mutableStateOf(true) }
+    /**
+     * 点「〉/〈」时当场改状态栏颜色：这一步放在点击回调里执行（不在组合阶段），
+     * 窗口属性变化会真正 dispatch 出去，屏幕当场重绘。
+     * 放进 SideEffect 里不行 —— 那时还在本帧组合阶段，requestLayout 会被本次 layout 吸收，
+     * 颜色写进去了但屏幕不刷，要等切页面才看到（实测三版都栽在这）。
+     */
+    fun applyEditorStatusBarColor(collapsed: Boolean) {
+        if (view.isInEditMode) return
+        val window = (view.context as Activity).window
+        val color = (if (collapsed) Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
+        else Color(0xFF1E1E1E)).toArgb()
+        window.statusBarColor = color
+        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
+            if (collapsed) !ThemeState.isDark else false
+    }
 
     // 动态设置状态栏/导航栏/窗口背景色：非 edge-to-edge 下系统导航栏是一块可见区域，
     // 将其颜色设为编辑器真实背景色，与编辑区完全一致，底部即无色块。
@@ -450,9 +486,16 @@ fun MainApp() {
             if (currentScreen == Screen.EDITOR) {
                 val editorBarColor = Color(0xFF1E1E1E)
                 val editorBgColor = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
-                // 状态栏与顶部横栏同色
-                window.statusBarColor = editorBarColor.toArgb()
-                insetsController.isAppearanceLightStatusBars = false
+                // 顶部浮层收起后状态栏改用编辑区背景色：顶栏都没了，还留一条 #1E1E1E 会像凭空多出一条色带；
+                // 改成和正文同色后顶部与编辑区连成一片。浮层展开时仍用顶栏同色（和菜单栏对齐）。
+                val foldCollapsed = SettingsManager.devTopFold && !editorTopBarsShown
+                val targetStatusBarColor = (if (foldCollapsed) editorBgColor else editorBarColor).toArgb()
+                window.statusBarColor = targetStatusBarColor
+                // 颜色变化后的即时刷新由按钮点击回调（applyEditorStatusBarColor）负责：
+                // 那里在事件分发阶段执行，窗口属性会真正 dispatch。本 SideEffect 只负责
+                // 「进入/切回编辑器」这类没有点击动作的场景 —— 那些场景本身伴随页面切换，系统会重绘。
+                // 深色顶栏用白色图标；收起后跟着编辑区背景明暗走，浅色背景才不会白图标糊成一片
+                insetsController.isAppearanceLightStatusBars = if (foldCollapsed) !ThemeState.isDark else false
                 // 导航栏与编辑区背景同色，消除底部色块（始终跟随编辑器背景色）
                 window.navigationBarColor = editorBgColor.toArgb()
                 window.decorView.setBackgroundColor(editorBgColor.toArgb())
@@ -473,8 +516,6 @@ fun MainApp() {
     var autoWrap by remember { mutableStateOf(SettingsManager.autoWrap) }
     var smartWrap by remember { mutableStateOf(SettingsManager.smartWrap) }
     var defaultPath by remember { mutableStateOf(SettingsManager.defaultModPath()) }
-    // 编辑器页顶部两栏（全局菜单栏 + Tab 栏）显示状态：由编辑区滚动方向驱动，仅在编辑器页生效
-    var editorTopBarsShown by remember { mutableStateOf(true) }
     var browserStartPath by rememberSaveable { mutableStateOf("") }
     // 文件浏览器的「自由浏览」开关：仅侧边栏「文件浏览」入口置 true（上限放开到外部存储根，
     // 可一路返回直到 RWmod 的上级目录）；首页打开项目、查重后打开等入口置回 false，行为保持原样。
@@ -805,9 +846,11 @@ fun MainApp() {
         }
     ) {
         // 顶栏折叠动画进度（Scaffold 外层共享）：0=显示，1=折叠收起；topBar 高度与编辑区内容平移都随它联动。
-        // 浮层开关关闭时强制 0（顶栏常显，不折叠）。
+        // 单一开关「顶部浮层隐藏」控制顶栏折叠（只由汉堡右侧「〉」/ 右上角「〈」两个按钮驱动，滚动不参与），
+        // 关掉即强制 0（顶栏常显，不折叠）。
         val topFold by animateFloatAsState(
-            targetValue = if (currentScreen != Screen.EDITOR || editorTopBarsShown || !SettingsManager.devTopBarsFold) 0f else 1f,
+            targetValue = if (currentScreen != Screen.EDITOR || editorTopBarsShown ||
+                !SettingsManager.devTopFold) 0f else 1f,
             animationSpec = tween(200),
             label = "topBarFold"
         )
@@ -898,9 +941,10 @@ fun MainApp() {
                         IconButton(onClick = { editorSearchTrigger++ }, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Default.Search, "查找替换", Modifier.size(20.dp), tint = contentColor)
                         }
-                        // 保存：白色图标，仅在文件有修改（可保存）时亮起，样式同撤销/重做按钮
+                        // 保存：白色图标，仅在文件有修改（可保存）时亮起，样式同撤销/重做按钮。
+                        // 用独立触发器 topBarSaveTrigger：这条路径不销毁存活实例（当前实例不重建）
                         IconButton(
-                            onClick = { if (editorModified) editorSaveTrigger++ },
+                            onClick = { if (editorModified) topBarSaveTrigger++ },
                             enabled = editorModified,
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -1024,7 +1068,9 @@ fun MainApp() {
             val landscapeWide = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
             val fullWidthScreen = currentScreen == Screen.HOME || currentScreen == Screen.BROWSER ||
                 currentScreen == Screen.EDITOR || currentScreen == Screen.COORD_VISUAL ||
-                currentScreen == Screen.SIM_ANIM || currentScreen == Screen.VERSION_COMPARE
+                currentScreen == Screen.SIM_ANIM || currentScreen == Screen.VERSION_COMPARE ||
+                // 设置 / 开发者模式页横屏自带左右分栏，再限宽会把它挤窄
+                currentScreen == Screen.SETTINGS || currentScreen == Screen.DEVELOPER
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                 Box(
                     if (landscapeWide && !fullWidthScreen) Modifier.widthIn(max = 900.dp).fillMaxHeight()
@@ -1228,9 +1274,11 @@ fun MainApp() {
                                             }
                                         }
                                             },
-                                            onSaveAllWorkspace = {
-                                        saveAllWorkspaceFiles()
-                                        flushInactiveInstances()
+                                            // 保存当前文件后收尾：flush=true（历史行为，ON_PAUSE/抽屉离开等路径）
+                                            // 附带销毁非前台实例瘦身；false（右上角保存）只落盘、实例全部保留
+                                            onSaveAllWorkspace = { flush ->
+                                                saveAllWorkspaceFiles()
+                                                if (flush) flushInactiveInstances()
                                             },
                                             onBack = { discard, saveAll ->
                                         // 返回目录，三种口径：discard=true 明确「不保存」（放弃全部实例不落盘并销毁工作区）；
@@ -1298,6 +1346,8 @@ fun MainApp() {
                                             saveTrigger = if (tabletMode || path == activePath) editorSaveTrigger else 0,
                                             // 平板模式不能清零（另一格还没读到同一个触发值）；单栏维持原语义：消费即清零。
                                             onSaveTriggerConsumed = { if (!tabletMode) editorSaveTrigger = 0 },
+                                            // 右上角保存按钮：发给所有存活实例（含非聚焦格），各自落盘但不销毁实例
+                                            topBarSaveTrigger = topBarSaveTrigger,
                                             onSaved = { ok ->
                                         val pending = saveAndOpenPending
                                         if (pending != null) {
@@ -1312,7 +1362,9 @@ fun MainApp() {
                                             onShowRecent = { showRecentSheet = true; recentSourceScreen = Screen.EDITOR },
                                             topBarsShown = editorTopBarsShown,
                                             topFold = topFold,
-                                            onTopBarsScroll = { dir -> if (SettingsManager.devTopBarsFold) editorTopBarsShown = dir < 0 },
+                                            // 顶栏只由「顶部浮层隐藏」的两个按钮收展，滚动方向一律不驱动折叠/展开：
+                                            // 传 null 而非空 lambda，编辑器侧连方向回调都不发（SoraCodeEditor 用 ?.invoke 消费）。
+                                            onTopBarsScroll = null,
                                             jumpLine = if (path == activePath) editorJumpLine else -1,
                                             jumpTick = if (path == activePath) editorJumpTick else 0,
                                             jumpColumnStart = if (path == activePath) editorJumpColumnStart else -1,
@@ -1359,11 +1411,45 @@ fun MainApp() {
                                     }
                                 }
                                 if (tabletMode && openPaths.size > 1) {
-                                    // 平板双栏：左右各一格，中间一条可拖的分割线（每侧最少 240dp）
+                                    // 平板双栏：左右紧贴，中间只有一条 1dp 细线。
+                                    // 拖动热区不靠加宽分割线，而是父层监听触摸：只有按在分割线附近才接管，
+                                    // 其余位置的触摸原样交给编辑器。这样视觉上没有"色带"，手感还是 ±14dp。
                                     BoxWithConstraints(Modifier.fillMaxSize()) {
                                         val totalPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
                                         val minRatio = (with(LocalDensity.current) { 240.dp.toPx() } / totalPx).coerceIn(0.15f, 0.45f)
-                                        Row(Modifier.fillMaxSize()) {
+                                        val splitNow by rememberUpdatedState(tabletSplit)
+                                        Row(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .pointerInput(totalPx, minRatio) {
+                                                    val hitHalf = 14.dp.toPx()
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(
+                                                            requireUnconsumed = false,
+                                                            pass = PointerEventPass.Initial
+                                                        )
+                                                        if (kotlin.math.abs(down.position.x - totalPx * splitNow) > hitHalf) {
+                                                            return@awaitEachGesture
+                                                        }
+                                                        // 按在分割线附近：在 Initial 阶段就消费掉，编辑器不会收到这次手势
+                                                        down.consume()
+                                                        var lastX = down.position.x
+                                                        while (true) {
+                                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                            if (!change.pressed) {
+                                                                change.consume()
+                                                                break
+                                                            }
+                                                            val dx = change.position.x - lastX
+                                                            lastX = change.position.x
+                                                            change.consume()
+                                                            tabletSplit = (tabletSplit + dx / totalPx)
+                                                                .coerceIn(minRatio, 1f - minRatio)
+                                                        }
+                                                    }
+                                                }
+                                        ) {
                                             Box(
                                                 Modifier
                                                     .weight(tabletSplit)
@@ -1380,9 +1466,7 @@ fun MainApp() {
                                                     )
                                                 }
                                             }
-                                            TabletSplitter(onDrag = { dx ->
-                                                tabletSplit = (tabletSplit + dx / totalPx).coerceIn(minRatio, 1f - minRatio)
-                                            })
+                                            TabletSplitter()
                                             Box(
                                                 Modifier
                                                     .weight(1f - tabletSplit)
@@ -1406,8 +1490,13 @@ fun MainApp() {
                                         Pane(openPaths[0], Modifier.fillMaxSize())
                                     }
                                 } else {
+                                    // key 提到列表层：实例身份跟文件走、不跟位置走。
+                                    // 切 tab 重排/保存后缩短列表时，Compose 按 key 把整棵子树（含编辑器 View）
+                                    // 原样移动复用，不再销毁重建 —— 光标、滚动、撤销栈全保留。
                                     openPaths.forEach { path ->
-                                        Pane(path, Modifier.fillMaxSize().alpha(if (path == activePath) 1f else 0f))
+                                        key(path) {
+                                            Pane(path, Modifier.fillMaxSize().alpha(if (path == activePath) 1f else 0f))
+                                        }
                                     }
                                 }
                             // 编辑器页全局菜单栏浮层：叠加在编辑器上方，随 topFold 上滑隐藏（40dp），
@@ -1430,6 +1519,11 @@ fun MainApp() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     IconButton(onClick = { showBookmarkPanel = !showBookmarkPanel }) { Icon(Icons.Default.Menu, null, tint = Color.White) }
+                                    // 顶部浮层隐藏（开发者模式开关）：汉堡右侧的灰色「〉」，点一下把顶部浮层整体收起。
+                                    // 收起后浮层连同本按钮一起移出屏幕，还原入口在编辑器右上角（见下方「〈」）。
+                                    if (SettingsManager.devTopFold) {
+                                        TopFoldToggle(collapsed = false, onClick = { editorTopBarsShown = false; applyEditorStatusBarColor(true) })
+                                    }
                                     Spacer(Modifier.weight(1f))
                                     // 撤销：由底部功能栏移至此处（书签左侧）。白色图标，仅在可撤销时亮起，
                                     // 视觉与保存按钮一致（不可撤销时 0.3 透明度且不可点）
@@ -1470,15 +1564,29 @@ fun MainApp() {
                                     IconButton(onClick = { editorSearchTrigger++ }, modifier = Modifier.size(36.dp)) {
                                         Icon(Icons.Default.Search, "查找替换", Modifier.size(20.dp), tint = Color.White)
                                     }
-                                    // 保存：白色图标，仅在文件有修改（可保存）时亮起
+                                    // 保存：白色图标，仅在文件有修改（可保存）时亮起。
+                                    // 用独立触发器 topBarSaveTrigger：这条路径不销毁存活实例（当前实例不重建）
                                     IconButton(
-                                        onClick = { if (editorModified) editorSaveTrigger++ },
+                                        onClick = { if (editorModified) topBarSaveTrigger++ },
                                         enabled = editorModified,
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(Icons.Default.Save, "保存", Modifier.size(20.dp), tint = Color.White.copy(alpha = if (editorModified) 1f else 0.3f))
                                     }
                                 }
+                            }
+                            // 顶部浮层收起后的还原入口：浮层（含「〉」按钮）已整体移出屏幕，这里在编辑器
+                            // 顶部最右侧留一个「〈」。透明度跟 topFold 走：收起动画期间淡入、展开动画期间淡出，
+                            // 不会和浮层同时出现。浮层重新展开后本按钮随即不再渲染。
+                            if (SettingsManager.devTopFold && !editorTopBarsShown) {
+                                TopFoldToggle(
+                                    collapsed = true,
+                                    onClick = { editorTopBarsShown = true; applyEditorStatusBarColor(false) },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 2.dp, end = 2.dp)
+                                        .alpha(topFold)
+                                )
                             }
                         }
                     }
@@ -1963,9 +2071,12 @@ private fun RecentFilesScreen(
                 path != null -> {
                     var history by remember(path) { mutableStateOf<List<SaveHistoryManager.SaveRecord>>(emptyList()) }
                     var historyLoading by remember(path) { mutableStateOf(true) }
-                    LaunchedEffect(path) {
+                    // 局部应用后 +1：重新读取记录并刷新 diff（不返回列表）
+                    var historyReloadTick by remember(path) { mutableStateOf(0) }
+                    LaunchedEffect(path, historyReloadTick) {
                         history = withContext(Dispatchers.IO) { SaveHistoryManager.getHistoryForFile(context, path) }
                         historyLoading = false
+                        // 记录被清空 = 差异已全部消除，此时才返回列表
                         if (history.isEmpty()) onSelectedHistoryPathChange(null)
                     }
                     Column {
@@ -1988,13 +2099,15 @@ private fun RecentFilesScreen(
                                 }
                             }
                         } else {
-                            val historyBefore = remember(path) { history.last().beforeContent }
-                            val historyAfter = remember(path) { history.first().afterContent }
+                            // history 变化（局部应用后记录重算）时必须重算首尾基线，否则 diff 仍是旧的两份内容
+                            val historyBefore = remember(path, history) { history.last().beforeContent }
+                            val historyAfter = remember(path, history) { history.first().afterContent }
                             val revertedBlockIndices = remember { mutableStateOf(setOf<Int>()) }
                             val confirmedBlockIndices = remember { mutableStateOf(setOf<Int>()) }
                             // 加载中文翻译用于 diff 显示
                             var chineseLines by remember(path) { mutableStateOf(emptyList<String>()) }
-                            LaunchedEffect(path) {
+                            // 应用回退会改写文件（mtime 变化 → 翻译缓存自动失效），需要跟着重读，否则中文对照错位
+                            LaunchedEffect(path, historyReloadTick) {
                                 withContext(Dispatchers.IO) {
                                     chineseLines = runCatching {
                                         val content = SearchTranslationCache.readCacheSync(File(path))
@@ -2037,6 +2150,15 @@ private fun RecentFilesScreen(
                                     Text("返回", fontSize = 13.sp)
                                 }
                                 Spacer(Modifier.weight(1f))
+                                TextButton(
+                                    onClick = {
+                                        // 文件正被编辑器打开时：先自动关闭其工作区（未保存修改放弃），再弹确认框，避免提示后无响应
+                                        if (path == currentOpenFilePath) onCloseEditorFile(path)
+                                        pendingRevertPath = path
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) { Text("全部回退", fontSize = 13.sp, color = RustedError) }
+                                // 有标记时「确认」位被「应用(回退N、确认M)」替代：同一位置只留一个提交入口
                                 if (hasChanges) {
                                     val revertCount = revertedBlockIndices.value.size
                                     val confirmCount = confirmedBlockIndices.value.size
@@ -2047,18 +2169,22 @@ private fun RecentFilesScreen(
                                         onClick = {
                                             // 文件正被编辑器打开时：先自动关闭其工作区（未保存修改放弃），再应用，避免提示后无响应
                                             if (path == currentOpenFilePath) onCloseEditorFile(path)
+                                            val reverted = revertedBlockIndices.value
+                                            val confirmed = confirmedBlockIndices.value
                                             scope.launch(Dispatchers.IO) {
                                                 try {
-                                                    val newContent = computePartialRevert(historyBefore, historyAfter, revertedBlockIndices.value)
+                                                    val newContent = computePartialRevert(historyBefore, historyAfter, reverted)
                                                     File(path).atomicWriteText(newContent)
-                                                    // 更新 save history：确认过的块合并到基线
-                                                    if (confirmedBlockIndices.value.isNotEmpty()) {
-                                                        val newBaseline = computeConfirmedBaseline(historyBefore, historyAfter, confirmedBlockIndices.value)
-                                                        SaveHistoryManager.updateBaseline(context, path, newBaseline)
-                                                    }
+                                                    // 记录重算为一条「基线 → 当前内容」：回退的块从当前内容侧消失、确认的块并入基线，
+                                                    // 只剩未处理块；全部处理完（基线与当前内容一致）时记录被清空
+                                                    val newBaseline = computeConfirmedBaseline(historyBefore, historyAfter, confirmed)
+                                                    SaveHistoryManager.applyPartialResult(context, path, newBaseline, newContent)
                                                     withContext(Dispatchers.Main) {
                                                         Toast.makeText(context, "已应用 ${labelParts.joinToString("、")}", Toast.LENGTH_SHORT).show()
-                                                        onSelectedHistoryPathChange(null)
+                                                        // 块索引已重排，标记清空；重读记录刷新 diff，停留在本页（记录清空后由重载逻辑返回列表）
+                                                        revertedBlockIndices.value = emptySet()
+                                                        confirmedBlockIndices.value = emptySet()
+                                                        historyReloadTick++
                                                     }
                                                 } catch (e: Exception) {
                                                     withContext(Dispatchers.Main) {
@@ -2069,24 +2195,17 @@ private fun RecentFilesScreen(
                                         },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                                     ) { Text("应用(${labelParts.joinToString("、")})", fontSize = 13.sp, color = RustedError) }
+                                } else {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch(Dispatchers.IO) {
+                                                SaveHistoryManager.confirmFile(context, path)
+                                                withContext(Dispatchers.Main) { onSelectedHistoryPathChange(null) }
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) { Text("确认", fontSize = 13.sp, color = RustedSecondary) }
                                 }
-                                TextButton(
-                                    onClick = {
-                                        // 文件正被编辑器打开时：先自动关闭其工作区（未保存修改放弃），再弹确认框，避免提示后无响应
-                                        if (path == currentOpenFilePath) onCloseEditorFile(path)
-                                        pendingRevertPath = path
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) { Text("全部回退", fontSize = 13.sp, color = RustedError) }
-                                TextButton(
-                                    onClick = {
-                                        scope.launch(Dispatchers.IO) {
-                                            SaveHistoryManager.confirmFile(context, path)
-                                            withContext(Dispatchers.Main) { onSelectedHistoryPathChange(null) }
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) { Text("确认", fontSize = 13.sp, color = RustedSecondary) }
                             }
                         }
                     }
@@ -2678,36 +2797,43 @@ fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onClick: () 
 internal fun parseHex(hex: String) = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { DarkBg }
 
 /**
- * 平板模式：两个工作区之间的分割线。
- * 视觉上只有一条 1dp 的细线；外围 8dp 是用来拖动的命中区，填成编辑器背景色，
- * 所以两格之间不会有可见的"色带/缝隙"，只有那一条线。
- * 用真实占位元素（不是叠在编辑器上方的浮层）：浮层会跟 sora 的滚动/点击抢触摸。
- * onDrag 收到的是水平拖动像素增量，由调用方换算成权重并做边界钳制。
+ * 平板模式：两个工作区之间的分割线——只有一条 1dp 细线，不占额外宽度。
+ *
+ * 拖动热区不在它身上（1dp 太细按不住），而是由外层的 Row 监听触摸：
+ * 只有按在分割线 ±14dp 内才接管拖动，其余触摸原样交给编辑器。
+ * 这样两格之间没有任何"色带"，也不会挡住编辑器的手势。
  */
 @Composable
-private fun TabletSplitter(onDrag: (Float) -> Unit) {
-    // 两格共用同一编辑器背景色，命中区填同色即视觉无缝
-    val hitBg = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
-    // 细线颜色跟随深浅主题：深色底用淡白、浅色底用淡黑，避免看起来像一道路障
-    val lineColor = if (ThemeState.isDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.14f)
+private fun TabletSplitter() {
+    // 固定黑色细线，不随深浅主题变色（老板指定）
     Box(
         Modifier
-            .width(8.dp)
+            .width(1.dp)
             .fillMaxHeight()
-            .background(hitBg)
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, dragAmount ->
-                    change.consume()
-                    onDrag(dragAmount)
-                }
-            },
+            .background(Color.Black)
+    )
+}
+
+/**
+ * 编辑器页顶部浮层的折叠/展开按钮（由开发者模式「顶部浮层隐藏」开关控制显隐）。
+ * - 展开态：菜单栏汉堡右侧的灰色「〉」，点击把浮层（菜单栏 + tab 栏）整体收起。
+ * - 收起态：编辑器顶部最右侧的「〈」，点击还原浮层。
+ * 两种状态都不加底色（透明），只用灰色箭头本身。
+ */
+@Composable
+private fun TopFoldToggle(collapsed: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(lineColor)
+        Icon(
+            if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = if (collapsed) "展开顶部浮层" else "收起顶部浮层",
+            modifier = Modifier.size(20.dp),
+            tint = Color(0xFF9E9E9E)
         )
     }
 }

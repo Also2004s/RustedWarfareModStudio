@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
@@ -63,12 +65,12 @@ fun ProjectManagerScreen(
 
     val primaryTabIndex = ProjectTagCategory.entries.indexOf(category)
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(RustedBackground)
-            .padding(horizontal = 12.dp)
-    ) {
+    // ===== 平板横屏：左边竖排分类、右边条目列表（竖排比一排滚动 Tab 更适合横屏）=====
+    // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
+    val isSplit = com.rwmodstudio.core.SettingsManager.devTabletMode
+
+    @Composable
+    fun CategoryTabsCard() {
         ElevatedCard(
             Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp),
             shape = RoundedCornerShape(16.dp),
@@ -103,7 +105,10 @@ fun ProjectManagerScreen(
                 }
             }
         }
+    }
 
+    @Composable
+    fun ValueList() {
         Box(Modifier.fillMaxSize()) {
             if (loading || info == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -203,6 +208,63 @@ fun ProjectManagerScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (isSplit) {
+        Row(Modifier.fillMaxSize().background(RustedBackground)) {
+            // 左：竖排分类
+            Column(
+                Modifier
+                    .width(168.dp)
+                    .fillMaxHeight()
+                    .background(RustedSurface)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    "分类",
+                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = RustedPrimary.copy(alpha = 0.7f)
+                )
+                ProjectTagCategory.entries.forEachIndexed { index, cat ->
+                    val selected = category == cat
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) RustedPrimary.copy(alpha = 0.12f) else Color.Transparent)
+                            .clickable {
+                                onCategoryChange(index)
+                                scope.launch { listState.animateScrollToItem(0) }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            cat.label,
+                            fontSize = 13.sp,
+                            color = if (selected) RustedPrimary else RustedOnBackground,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            Box(Modifier.weight(1f).padding(horizontal = 12.dp)) { ValueList() }
+        }
+    } else {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(RustedBackground)
+                .padding(horizontal = 12.dp)
+        ) {
+            CategoryTabsCard()
+            ValueList()
         }
     }
 }

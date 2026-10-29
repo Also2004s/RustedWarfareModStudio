@@ -57,7 +57,13 @@ fun CoordCanvas(
     // 仿真区域层（可选）：公式成立的区域掩码 + 已烘好的位图，绘在网格之上、单位之下
     regionMask: RegionMask? = null,
     regionImage: androidx.compose.ui.graphics.ImageBitmap? = null,
+    // 区域边界等值线（世界坐标线段 x1,y1,x2,y2...）：零宽度区域靠它显示
+    regionContour: FloatArray? = null,
     regionAlpha: Float = 0.24f,
+    // 标记整体缩放（1=原尺寸）：仿真页用小号，避免几个点把画面塞满
+    markerScale: Float = 1f,
+    // 是否画单位外圈那两道大圆环（拖转向用的把手）：仿真页不需要，关掉更干净
+    showRotateRings: Boolean = true,
     onScalePanChange: (Float, Float, Float) -> Unit,
     onSelfChange: (CoordSelf) -> Unit,
     onTargetChange: (Int, CoordTarget) -> Unit,
@@ -69,11 +75,11 @@ fun CoordCanvas(
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
 
-    val selfRadius = remember { with(density) { 22.dp.toPx() } }
-    val rotateRadius = remember { with(density) { 34.dp.toPx() } }
-    val targetRadius = remember { with(density) { 20.dp.toPx() } }
-    val targetRotateRadius = remember { targetRadius * 1.6f }
-    val markerRadius = remember { with(density) { 14.dp.toPx() } }
+    val selfRadius = remember(markerScale) { with(density) { (22.dp * markerScale).toPx() } }
+    val rotateRadius = remember(markerScale) { with(density) { (34.dp * markerScale).toPx() } }
+    val targetRadius = remember(markerScale) { with(density) { (20.dp * markerScale).toPx() } }
+    val targetRotateRadius = remember(targetRadius) { targetRadius * 1.6f }
+    val markerRadius = remember(markerScale) { with(density) { (14.dp * markerScale).toPx() } }
     val hitSlop = remember { with(density) { 40.dp.toPx() } }
 
     // 使用 rememberUpdatedState 避免 pointerInput 因状态变化而重启
@@ -267,6 +273,29 @@ fun CoordCanvas(
             )
         }
 
+        // 区域边界等值线：区域退化成一条线（零宽度）时，这里画出来的就是区域本身。
+        // 线宽按屏幕像素固定，与采样密度无关，所以再细也能看见。
+        if (regionContour != null && regionContour.size >= 4) {
+            val contourColor = if (isDark) Color(0xFF6FB6FF) else Color(0xFF2D7DD2)
+            var i = 0
+            while (i + 3 < regionContour.size) {
+                drawLine(
+                    color = contourColor.copy(alpha = 0.95f),
+                    start = Offset(
+                        centerX + regionContour[i] * scale,
+                        centerY + regionContour[i + 1] * scale
+                    ),
+                    end = Offset(
+                        centerX + regionContour[i + 2] * scale,
+                        centerY + regionContour[i + 3] * scale
+                    ),
+                    strokeWidth = 1.6.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+                i += 4
+            }
+        }
+
         // Self 本地坐标轴
         drawLocalAxes(selfScreen = Offset(centerX + self.x.toFloat() * scale, centerY + self.y.toFloat() * scale), self.dir, scale, isDark)
 
@@ -280,12 +309,14 @@ fun CoordCanvas(
             length = selfRadius * 1.8f,
             bodyRadius = selfRadius * 0.7f
         )
-        drawCircle(
-            color = Color(0xFF4A90FF).copy(alpha = 0.2f),
-            radius = rotateRadius,
-            center = selfScreen,
-            style = Stroke(width = 2f)
-        )
+        if (showRotateRings) {
+            drawCircle(
+                color = Color(0xFF4A90FF).copy(alpha = 0.2f),
+                radius = rotateRadius,
+                center = selfScreen,
+                style = Stroke(width = 2f)
+            )
+        }
         drawLabel(textMeasurer, "自身", selfScreen.x, selfScreen.y + selfRadius + 12f, labelStyle)
 
         // Targets
@@ -302,12 +333,14 @@ fun CoordCanvas(
             drawLabel(textMeasurer, target.name, targetScreen.x, targetScreen.y + targetRadius + 12f, labelStyle)
 
             // 目标旋转环
-            drawCircle(
-                color = Color(0xFFFF4D4D).copy(alpha = 0.2f),
-                radius = targetRotateRadius,
-                center = targetScreen,
-                style = Stroke(width = 2f)
-            )
+            if (showRotateRings) {
+                drawCircle(
+                    color = Color(0xFFFF4D4D).copy(alpha = 0.2f),
+                    radius = targetRotateRadius,
+                    center = targetScreen,
+                    style = Stroke(width = 2f)
+                )
+            }
 
             // 拖拽目标时显示与 Self 的距离
             if (index == draggedTargetIndex) {

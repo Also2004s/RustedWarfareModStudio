@@ -79,12 +79,17 @@ fun AppDialog(
     title: String,
     actions: (@Composable RowScope.() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+    // wide=true：突破系统默认弹窗宽度（平板模式下要放左右分栏）
+    wide: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismissRequest) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = !wide)
+    ) {
         Surface(
             // 屏幕边距收紧，面板占满更多空间以容纳更多信息
-            Modifier.fillMaxWidth().padding(8.dp).imePadding(),
+            (if (wide) Modifier.widthIn(max = 900.dp) else Modifier).fillMaxWidth().padding(8.dp).imePadding(),
             shape = RoundedCornerShape(18.dp),
             color = RustedBackground,
             border = BorderStroke(1.dp, RustedOnBackground.copy(alpha = 0.10f)),

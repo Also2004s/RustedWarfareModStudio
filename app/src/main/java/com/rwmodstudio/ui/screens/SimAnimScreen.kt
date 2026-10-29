@@ -57,11 +57,13 @@ fun SimAnimScreen() {
     var formula by remember { mutableStateOf(initial.formula) }
     var targets by remember { mutableStateOf(initial.targets) }
     var probeName by remember { mutableStateOf(initial.probeName) }
-    var tolerance by remember { mutableDoubleStateOf(initial.tolerance) }
+    // 用户手动选过「考察点」就不再自动推断，否则跟着公式自动定
+    var probePinned by remember { mutableStateOf(false) }
     var self by remember { mutableStateOf(CoordSelf()) }
 
     var simTime by remember { mutableDoubleStateOf(0.0) }
-    var playing by remember { mutableStateOf(true) }
+    // 默认不播放：先把一块确定的区域摆在那儿看清楚，想看运动再按播放
+    var playing by remember { mutableStateOf(false) }
     var speed by remember { mutableFloatStateOf(1f) }
     var showRegion by remember { mutableStateOf(true) }
 
@@ -92,28 +94,42 @@ fun SimAnimScreen() {
         targets = animatedUnits,
         simTime = simTime
     )
-    val ast = remember(formula) { parseCoordExpression(formula) }
+    // 支持脚本原样写法：前置 `D:表达式` 定义 + `$(D)` 引用 + `and` / `or`
+    val program = remember(formula) { parseFormulaProgram(formula) }
+
+    // 公式里出现的每个单位名都要变成画布上的一个点（否则查不到就没有点、也拖不了）。
+    // 已有的点保留位置与运动，只追加缺的名字。
+    LaunchedEffect(program) {
+        val p = program ?: return@LaunchedEffect
+        val names = mutableSetOf<String>()
+        p.definitions.forEach { (_, node) -> collectUnitNames(node, names) }
+        collectUnitNames(p.condition, names)
+        val merged = mergeDiscoveredSimTargets(targets, names)
+        if (merged.size != targets.size) targets = merged
+        // 自动定「考察点」：公式里被约束得最多的那个单位（用户手动选过就不再覆盖）
+        if (!probePinned) inferProbeName(p)?.let { probeName = it }
+    }
 
     // 区域重算节流：动画 60fps，但逐格求值不必每帧跑；约每 80ms 重算一次
     val regionTick = (simTime / 0.08).roundToInt()
     val centerX = canvasSize.width / 2f + panX
     val centerY = canvasSize.height / 2f + panY
-    // 采样格数上限（约 9000 格）：与画布像素无关，避免平板/大屏上逐格求值拖慢动画。
-    // 位图交给画布双线性放大，所以格子少一点不会显得粗糙。
+    // 采样格数上限（约 6000 格）：与画布像素无关，避免平板/大屏上逐格求值拖慢动画。
+    // 位图交给画布双线性放大，所以格子少一点不会显得粗糙；复杂的带定义公式也不会卡。
     val aspect = if (canvasSize.width > 0) canvasSize.height.toFloat() / canvasSize.width else 1f
-    val cols = kotlin.math.sqrt(9000f / aspect.coerceAtLeast(0.25f)).roundToInt().coerceIn(32, 200)
-    val rows = (9000 / cols).coerceIn(24, 200)
+    val cols = kotlin.math.sqrt(6000f / aspect.coerceAtLeast(0.25f)).roundToInt().coerceIn(32, 180)
+    val rows = (6000 / cols).coerceIn(24, 180)
     val minWorldX = (-centerX / scale).toDouble()
     val minWorldY = (-centerY / scale).toDouble()
     val maxWorldX = ((canvasSize.width - centerX) / scale).toDouble()
     val maxWorldY = ((canvasSize.height - centerY) / scale).toDouble()
 
-    val mask = remember(regionTick, ast, probeName, tolerance, showRegion, canvasSize, scale, panX, panY) {
-        if (!showRegion || ast == null || canvasSize.width <= 0) {
+    val mask = remember(regionTick, program, probeName, showRegion, canvasSize, scale, panX, panY) {
+        if (!showRegion || program == null || canvasSize.width <= 0) {
             null
         } else {
             sampleRegion(
-                ast = ast,
+                program = program,
                 base = baseCtx,
                 probeName = probeName,
                 cols = cols,
@@ -121,16 +137,20 @@ fun SimAnimScreen() {
                 minX = minWorldX,
                 minY = minWorldY,
                 stepX = (maxWorldX - minWorldX) / cols,
-                stepY = (maxWorldY - minWorldY) / rows,
-                tolerance = tolerance
+                stepY = (maxWorldY - minWorldY) / rows
             )
         }
     }
     val regionColor = if (isDark) Color(0xFF4A9EFF) else Color(0xFF2D7DD2)
     val regionImage = remember(mask, regionColor) { mask?.toImageBitmap(regionColor.toArgb()) }
+    // 有解 → 画 f=0 的边界等值线；无解（只在一条线上取等号）→ 画零集点链，是一条真正的线。
+    // 两者不能混：等值线在无解情况下会画出一个有宽度的闭合轮廓，看着就像加了容差。
+    val regionContour = remember(mask) {
+        mask?.let { if (it.hasSolution) it.contourSegments() else it.zeroPath }
+    }
 
-    val readout = remember(ast, animatedUnits, simTime, tolerance) {
-        ast?.let { evaluateReadout(it, baseCtx, tolerance) }
+    val readout = remember(program, animatedUnits, simTime) {
+        program?.let { evaluateReadout(it, baseCtx) }
     }
 
     Column(Modifier.fillMaxSize().background(bgColor)) {
@@ -148,7 +168,10 @@ fun SimAnimScreen() {
                 isDark = isDark,
                 regionMask = mask,
                 regionImage = regionImage,
+                regionContour = regionContour,
                 regionAlpha = 0.26f,
+                markerScale = 0.55f,
+                showRotateRings = false,
                 onScalePanChange = { s, x, y -> scale = s; panX = x; panY = y },
                 onSelfChange = { self = it },
                 onTargetChange = { index, t ->
@@ -185,10 +208,34 @@ fun SimAnimScreen() {
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "自由变量：$probeName（拖动可改）",
+                    "考察点：$probeName（区域 = 它放在这里时成立）",
                     fontSize = 10.sp,
                     color = RustedOnBackground.copy(alpha = 0.55f)
                 )
+                // 等号类公式（如三角不等式）在容差 0 下只成立在一条零宽度的线上，采样必然一格都采不到；
+                // 反过来恒真公式会铺满整屏。两种都不像"正常区域"，这里直接说清楚，避免以为是工具没画。
+                val hasContour = regionContour != null && regionContour.isNotEmpty()
+                val regionNote = when {
+                    mask == null -> null
+                    !mask.hasSolution && hasContour ->
+                        "区域就是这条线：绕路必须正好等于直连，差一点就不成立"
+                    !mask.hasSolution ->
+                        "视野内不成立：平移或缩放到公式涉及的范围内再看"
+                    mask.coverage >= 0.995f ->
+                        "铺满视图：这条公式在当前场景下恒成立，没有约束力"
+                    mask.coverage <= 0.0005f ->
+                        "区域退化成一条线（已用细线描出）"
+                    else -> null
+                }
+                if (regionNote != null) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        regionNote,
+                        fontSize = 10.sp,
+                        color = RustedSecondary,
+                        lineHeight = 13.sp
+                    )
+                }
             }
 
             // 右下角实时判定
@@ -284,9 +331,9 @@ fun SimAnimScreen() {
                                 formula = preset.formula
                                 targets = preset.targets
                                 probeName = preset.probeName
-                                tolerance = preset.tolerance
+                                probePinned = false
                                 simTime = 0.0
-                                playing = true
+                                playing = false
                             }
                         )
                     }
@@ -320,33 +367,41 @@ fun SimAnimScreen() {
                     TextButton(onClick = { showProbeMenu = true }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
                         Icon(Icons.Default.Tune, null, Modifier.size(14.dp), tint = RustedOnBackground.copy(alpha = 0.7f))
                         Spacer(Modifier.width(4.dp))
-                        Text("自由变量：$probeName", fontSize = 12.sp, color = RustedOnBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("考察点：$probeName", fontSize = 12.sp, color = RustedOnBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     DropdownMenu(expanded = showProbeMenu, onDismissRequest = { showProbeMenu = false }) {
                         targets.forEach { t ->
                             DropdownMenuItem(
                                 text = { Text(t.name, fontSize = 13.sp) },
-                                onClick = { showProbeMenu = false; probeName = t.name }
+                                onClick = {
+                                    showProbeMenu = false
+                                    probeName = t.name
+                                    // 手动指定后就不再跟着公式自动改
+                                    probePinned = true
+                                }
                             )
                         }
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("容差 ${fmt(tolerance)}", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.6f))
-                Slider(
-                    value = tolerance.toFloat(),
-                    onValueChange = { tolerance = it.toDouble() },
-                    valueRange = 0f..40f,
-                    modifier = Modifier.width(110.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(14.dp).height(1.5.dp).background(regionColor))
+                    Spacer(Modifier.width(5.dp))
+                    Text("区域边界", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.6f))
+                }
             }
 
             Text(
-                "提示：等号类公式（如三角不等式的等号）区域只有一条线，把容差调到 3~8 才看得见。",
+                "细线是区域边界。等号类公式（三角不等式的等号情形）区域本来就是一维曲线，照样能描出来，",
                 fontSize = 10.sp,
                 color = RustedOnBackground.copy(alpha = 0.45f)
             )
-            if (ast == null) {
+            Text(
+                "不需要给公式加任何宽容值；公式里真的要放宽，就像 +10 那样直接写进去。",
+                fontSize = 10.sp,
+                color = RustedOnBackground.copy(alpha = 0.45f)
+            )
+            if (program == null) {
                 Spacer(Modifier.height(2.dp))
                 Text("公式解析失败，请检查括号与运算符", fontSize = 11.sp, color = RustedError)
             }

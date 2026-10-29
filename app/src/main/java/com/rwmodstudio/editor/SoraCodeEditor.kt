@@ -59,6 +59,51 @@ private const val SIDE_ICON_SIZE_FACTOR = 0.85f
 private const val EDITOR_TAB_WIDTH = 4
 
 /**
+ * 存活编辑器实例登记表（弱引用）。
+ *
+ * 双栏下多个编辑器实例会共用同一套配色方案对象：改背景色/主题时只有"最后挂载"的那个实例
+ * 会收到变色通知，另一个的 View 背景还停在旧值 —— 表现就是"只有一格变色"。
+ * 这里把所有存活实例登记下来，主题变化时逐个重放颜色并 invalidate，绕开方案的订阅关系。
+ */
+private val liveEditors: MutableSet<CodeEditor> =
+    java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(java.util.WeakHashMap()))
+
+private fun registerLiveEditor(editor: CodeEditor) {
+    liveEditors.add(editor)
+}
+
+private fun unregisterLiveEditor(editor: CodeEditor) {
+    liveEditors.remove(editor)
+}
+
+/** 把所有存活编辑器的背景/配色重放一遍（只写现有方案，不重建，避免全局派发污染） */
+private fun refreshAllEditors(resolvedBg: Int, highlightTheme: String, darkTokenColors: DarkThemeColors) {
+    val snapshot = synchronized(liveEditors) { liveEditors.toList() }
+    snapshot.forEach { ed ->
+        try {
+            ed.setBackgroundColor(resolvedBg)
+            val scheme = ed.colorScheme
+            if (scheme != null) {
+                applyEditorColors(ed, scheme, highlightTheme, darkTokenColors, resolvedBg)
+            } else {
+                // 还没挂上配色方案的实例（例如另一个分栏刚创建）：补建一次，否则它用默认深色底画，看起来"没变色"
+                applyEditorTheme(
+                    ed,
+                    ThemeState.isDark,
+                    highlightTheme,
+                    ThemeState.bgColor,
+                    darkTokenColors,
+                    resolvedBg
+                )
+            }
+            ed.invalidate()
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshAllEditors failed", e)
+        }
+    }
+}
+
+/**
  * 将指定逻辑行中的光标垂直居中到视口中部。
  * sora 的渲染偏移在 EditorScroller（[CodeEditor.getOffsetX/getOffsetY]）而非 View.scrollX/Y。
  * [CodeEditor.getCharOffsetY] 返回的是该字符相对视口顶部的屏幕 Y（= 内容绝对 Y - 当前滚动偏移 getOffsetY），
@@ -593,6 +638,25 @@ fun SoraCodeEditor(
         }
     }
 
+    // 背景色兜底刷新（平板双栏专用）：
+    // 两个 EditorScreen 实例可能共用同一个配色方案对象，改背景色时只有最后应用的那个实例生效，
+    // 另一个看起来"没变"。这里让每个实例各自盯住全局主题状态，直接把自己 View 的背景和配色刷一遍——
+    // 只往现有方案上写颜色，不重建方案（重建会触发全局 ThemeRegistry 派发，污染其它实例）。
+    LaunchedEffect(ThemeState.bgColor, ThemeState.isDark, highlightTheme, darkTokenColors, rainbowSettingsTick) {
+        val resolvedBg = resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark)
+        // 关键：不是只刷自己，而是把所有存活实例都刷一遍。
+        // 双栏下两个实例共用配色方案对象，单刷自己会出现"另一个没变"。
+        refreshAllEditors(resolvedBg, highlightTheme, darkTokenColors)
+        editorRef.value?.let { editor ->
+            refreshLineStyles(editor)
+            editor.postInvalidate()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { editorRef.value?.let { unregisterLiveEditor(it) } }
+    }
+
     // 底部栏显隐
     LaunchedEffect(showBottomToolbar) {
         bottomBarRef.value?.visibility = if (showBottomToolbar) android.view.View.VISIBLE else android.view.View.GONE
@@ -1112,6 +1176,15 @@ fun SoraCodeEditor(
                 setText(text)
                 isApplyingExternalText = false
                 editorRef.value = this
+                registerLiveEditor(this)
+                // 新实例可能先按旧配色绘制（配色方案是全局共享的），下一帧用当前主题把所有实例补刷一遍
+                post {
+                    refreshAllEditors(
+                        resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark),
+                        ThemeState.highlightTheme,
+                        ThemeState.darkTokenColors
+                    )
+                }
                 refreshLineStyles(this)
                 onReady?.invoke(this)
                 // 编辑器就绪后发送一次完整的光标锚点信息，确保 IME 连接时能立即获取

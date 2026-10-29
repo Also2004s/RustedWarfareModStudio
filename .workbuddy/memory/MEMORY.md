@@ -4,10 +4,19 @@
 - 报告用「用户视角三层式」（为什么/改前/改后）+ 🔴🟡🟢；**主栏禁代码术语**，技术细节压文末。
 - **禁止擅自加兜底**（09-17）：回退/静默兼容/出错返原值必须**先提出并得到同意**；判据 = 有数据证明它必须存在吗？
 - **报告里列了 N 处方案 ≠ N 处都获授权**（10-23 被批）：他说「开始修复」时只修他点名的那个问题；顺带发现的其他缺陷/配套改动一律留在文档里等单独批准，不许打包执行。越界的要立刻回退。
+- **他说「给我方案」= 只出方案，一行代码都不许改**（10-29 被重批）：我把"给我一个可靠的解决方案"读成"去修"，擅自把项目改成 edge-to-edge（改 8 处窗口/insets 架构），被斥「绝对不允许，对项目是不可逆转的负面伤害」。
+  → **横切关注点（窗口 insets / edge-to-edge / 主题体系 / 导航结构 / 全局布局模型）一律先出方案 + 代价 + 风险，等他点头再做**；局部功能改完也必须先说明动了哪些层。
+- **禁止 edge-to-edge**（10-29 死命令）：不许 `setDecorFitsSystemWindows(false)`、不许全局 edge-to-edge 迁移、不许其等价物
+  （`SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN` / `FLAG_TRANSLUCENT_STATUS` / `FLAG_LAYOUT_NO_LIMITS` 都是同一机制的皮）。
+  老板实测在 V2505A 上导致核心功能退化，判定为**不可逆伤害**；曾擅自实施两次被重批，代码已全部回退（APK 字节级一致）。
+  连带结论：**「折叠浮层时隐藏状态栏」这个需求在本项目不做**——非 edge-to-edge 下做不出真全屏，只会留一条底色。
 - 不要把能自己判定的事抛回去问；范围以显式证据为准，结论自己焊死。
 - 「安装」= 装 debug 包（`com.rwmodstudio.debug`）；没明说"正式版"绝不碰 `com.rwmodstudio`。
 - 用户报的问题一定真实存在：先信用户先自查（装的哪个包 → APK 时间 ≥ 源码时间）。"没生效"第一查点 = 他验证的哪个包。
 - **不许操控老板真机验证**（09-23 明令）：不用 adb 启动/截图/uiautomator 核对他的描述。
+- **先对齐名词再动手**（10-25 连踩三次）：他说"自定义高亮"指的是**调色弹窗** `DarkTokenColorDialog`（标题就叫「自定义高亮」），不是规则页。项目里同名概念至少两套：①规则（按类别写关键字/正则）②调色（给类型配色）。听到专有名词先 grep title/字符串定位。
+- 他说"某某的分栏/弹窗" = **那个对象的整体布局**，别去改它里面的子对话框；也别改完再把外层分栏撤掉。
+- **平板适配只看开关**：`SettingsManager.devTabletMode`，与横竖屏无关（用 orientation 判断曾导致"开了平板模式却没分栏"）。
 
 ## 架构 / 编码
 - 原子写只用于用户数据（文件/设置/历史/待办）；可再生缓存直接 writeText。热路径禁锁（libVersion 直读 @Volatile）。
@@ -55,3 +64,24 @@
 - `dexBuilderDebug` 报 `desugar_graph...graph.bin` 拒绝访问 → 删 `app/build/intermediates/desugar_graph` 重建，**不用 clean**。
 - **改完主源码后测试编译成片 `Unresolved reference`**（连确实存在的函数都找不到）= Kotlin 增量缓存损坏。删 `app/build/kotlin` + `app/build/tmp/kotlin-classes` 后全量重编即恢复，别怀疑源码。
 - 全量单测有两个**既有失败**（与本次改动无关，stash 对照已证）：`CompletionSymbolsTest.extractFileSymbolsParsesAllCategories`、`CustomCompletionsFormatTest.extraCompletionsAllUseEmptyValueFormat`。353 个测试里固定 2 个红，别当回归。
+- **绝不使用 `cat >> 文件 <<'EOF'` 追加**（10-25 血案）：这台机器上它从**文件头覆写**，把 package + 全部 import 吃掉还截断半行。改用 python 读写或 Write/Edit。
+- MuMu 模拟器 adb：`127.0.0.1:7555`（伪装 vivo V2366GA，但 ABI=x86_64 + Android 15 可辨）；**别碰**无线连接的真机做验证操作（启动/截图/uiautomator）。
+- adb 不在 PATH：`/c/Users/Also2/AppData/Local/Android/Sdk/platform-tools/adb.exe`。当前真机 = V2505A（PD2505，Android 17），无线标识 `adb-10AG3A27S8006JQ-reRiGJ._adb-tls-connect._tcp`；另有 3 台 PD2366 伪装环境（`127.0.0.1:16416`、`:7555`、`emulator-5556`）。「安装」= 装 `com.rwmodstudio.debug`，装真机。
+- 编译报 `Unable to delete directory app\build\tmp\kotlin-classes\debug` → 杀 KotlinCompileDaemon/GradleDaemon + 删该目录后重编。
+
+## 平板模式双栏（10-25 已做 8 处）
+- 条件统一 `val isSplit = SettingsManager.devTabletMode`。
+- 已分栏：编辑器双栏、设置、开发者模式、项目管理、补全类型分类、代码表（左列表右详情）、高亮规则页（左类别目录）、**自定义高亮调色弹窗**（左 210dp 分类竖排 + 右 240dp 取色盘，`AppDialog(wide=true)`）。
+- 套路：`@Composable fun Body()` 包住原 Column + `if (isSplit) Row { 左栏 ; Body() } else Body()`；SectionHeader 类页面用 `SectionAnchor(i)`（0 高 Spacer + `onGloballyPositioned`）+ `animateScrollTo` 跳转。
+  - ⚠️ `onGloballyPositioned` 写 state 必须判 `旧值 != 新值`，否则布局→重组死循环。
+- `AppDialog` 加 `wide: Boolean = false`：true → `usePlatformDefaultWidth=false` + `widthIn(max=900dp)`。
+- 未做：翻译库、自定义补全（编辑是小表单，搬常驻面板要重写校验/删除，收益低）。
+
+## 坐标/仿真引擎（10-26）
+- **单位标记白名单** `CoordUnits.UNIT_MARKER_NAMES`，来源 = 代码表 `logicboolean` 里代表单位的那批：self/当前动作目标(thisActionTarget)/活动路径点目标(activeWaypointTarget)/最后伤害源/父单位/附件/运输/攻击中/自定义目标1-2/空单位/事件来源。
+  - `collectUnitNames` 只收白名单 → 输入到一半（"当前""当前动作"）不建点；`syncDiscoveredTargets` 会删掉改名后残留的点。
+  - 示例代码与快捷按钮里的「敌人」已改「当前动作目标」（敌人不是合法标记）。
+- 目标发现走 AST（`间距/方向` 位置参数 + `xxx.x/.y/.dir`），不用正则；求值端**不再兜底成「敌人」**。
+- 区域渲染：有解 → marching squares 画 f=0 + 填充；**无解**（三角不等式等号情形）→ 每列对 f 三分搜索取最小点连成线（`zeroPath`）。**不给用户容差**——容差是公式的事，工具负责把最小像素画出来（老板 10-25 明确）。
+- `hasSolution` 用 `minV < -1e-6` 判定（浮点抖动别当有解）。
+- 考察点自动推断 `inferProbeName`：出现次数最多的非 self 单位，平局取先出现的；手动选过才 pin。

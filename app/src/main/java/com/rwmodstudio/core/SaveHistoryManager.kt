@@ -158,6 +158,29 @@ object SaveHistoryManager {
         save(context)
     }
 
+    /**
+     * 局部应用后的记录整理：把该文件历史压缩为一条「基线 → 当前内容」记录。
+     *
+     * - [baseline]：原最早记录的 beforeContent，叠加已确认的块（确认 = 该改动归入基线）
+     * - [current]：文件写入回退结果后的实际内容（回退的块已恢复旧版本）
+     *
+     * 两者无净差异说明所有差异都被处理完 → 直接清空该文件记录（文件不再算近期修改）。
+     * 中间那些旧的保存快照不再参与展示（消费方一律取 last().beforeContent / first().afterContent），
+     * 保留它们反而会让记录链与磁盘内容脱节，所以这里重建为一条。
+     */
+    @Synchronized
+    fun applyPartialResult(context: Context, filePath: String, baseline: String, current: String) {
+        init(context)
+        val earliestTs = records.filter { it.filePath == filePath }.minByOrNull { it.timestamp }?.timestamp
+            ?: System.currentTimeMillis()
+        records.removeAll { it.filePath == filePath }
+        if (!sameContent(baseline, current)) {
+            records.add(SaveRecord(filePath, earliestTs, baseline, current))
+            records.sortByDescending { it.timestamp }
+        }
+        save(context)
+    }
+
     /** 回退修改：将文件恢复为首次保存前的内容，并清空该文件的历史记录 */
     @Synchronized
     fun revertFile(context: Context, filePath: String): Boolean {
