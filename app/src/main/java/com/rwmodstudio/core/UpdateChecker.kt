@@ -66,12 +66,13 @@ object UpdateChecker {
 
     /**
      * 拉取最新版本信息（阻塞，需在 IO 线程调用），失败抛出异常。
-     * 直连 GitHub API 失败（如国内网络被墙）时自动走 gh-proxy 镜像重试。
+     * 优先走 gh-proxy 镜像，失败再直连 GitHub API（国内直连常超时，镜像更快）。
      * 注意：仓库还没有 Release 时 GitHub API 返回 404，此时视为无新版本。
      */
     fun fetchLatest(): UpdateInfo {
         var lastError: Exception? = null
-        for (url in listOf(RELEASES_LATEST_URL, proxiedUrl(RELEASES_LATEST_URL))) {
+        // 镜像优先：国内直连 api.github.com 常"能连但极慢"，直连优先会先卡满超时
+        for (url in listOf(proxiedUrl(RELEASES_LATEST_URL), RELEASES_LATEST_URL)) {
             try {
                 return requestLatest(url)
             } catch (e: Exception) {
