@@ -165,7 +165,7 @@ object ProjectAssistant {
     private fun projectIndexFiles(root: File): List<File> = try {
         root.walkTopDown()
             .onFail { _, _ -> }
-            .filter { it.isFile && (it.extension.lowercase() == "ini" || it.extension.lowercase() == "template") }
+            .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "md") }
             .take(MAX_INDEX_FILES)
             .toList()
     } catch (_: Exception) {

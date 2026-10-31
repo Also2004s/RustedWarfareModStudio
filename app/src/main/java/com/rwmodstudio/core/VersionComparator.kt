@@ -30,7 +30,7 @@ object VersionComparator {
         val metaOnlyFiles: List<String>
     )
 
-    private val VALID_EXTENSIONS = setOf("ini", "template")
+    private val VALID_EXTENSIONS = setOf("ini", "template", "md")
 
     /** 递归获取目录下所有有效文件，返回相对路径集合 */
     fun getAllFiles(dir: File, baseDir: File): Set<String> {

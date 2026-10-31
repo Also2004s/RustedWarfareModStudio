@@ -212,7 +212,7 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
     }
 
     /**
-     * 核心节 复制与(copyFrom) 的文件补全：项目 ini/template 文件。与图片/音效路径补全同规则——
+     * 核心节 复制与(copyFrom) 的文件补全：项目 ini/template/md 文件。与图片/音效路径补全同规则——
      * 默认（未输入/未点 ROOT:）只列同目录项目文件（裸名）；
      * 输入/点击 ROOT: 后才列出跨目录项目文件（ROOT:/相对路径），且 ROOT: 前缀选项默认置顶。
      */
@@ -226,7 +226,7 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
         // ROOT: 态用「去掉 ROOT: 前缀」的子串；默认态用输入子串
         val sub = if (inRoot) prefix.trim().lowercase().removePrefix("root:").removePrefix("/").trim()
         else prefix.trim().lowercase()
-        // 全量项目 ini/template 文件（相对路径，不带 ROOT:），补全侧自行过滤
+        // 全量项目 ini/template/md 文件（相对路径，不带 ROOT:），补全侧自行过滤
         val allProjectFiles = ProjectIniFileCache.query(request.projectRoot, "", limit = 500)
 
         val raw = mutableListOf<Pair<String, String>>() // (insert, sortKey)
@@ -244,7 +244,7 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             .map { (insert, _) ->
                 createValueItem(
                     label = insert,
-                    detail = "ini/template 文件",
+                    detail = "ini/template/md 文件",
                     insertText = insert,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "string"

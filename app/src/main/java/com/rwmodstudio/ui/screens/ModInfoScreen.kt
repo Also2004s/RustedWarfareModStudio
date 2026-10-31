@@ -482,7 +482,7 @@ fun ModInfoScreen(
     /** 保存后直接把项目内（含当前 mod-info 的标题/描述）出现的旧版本 token 批量替换为新 token，不弹确认框。 */
     suspend fun replaceVersionInProject(oldToken: String, newToken: String): Set<String>? {
         val files = dir.walkTopDown()
-            .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "txt") }
+            .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "txt", "md") }
             .filter { f -> try { f.readText().indexOf(oldToken) >= 0 } catch (_: Exception) { false } }
             .toList()
         if (files.isEmpty()) return emptySet()

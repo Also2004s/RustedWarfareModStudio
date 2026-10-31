@@ -2,6 +2,7 @@ package com.rwmodstudio.feature.completion.value
 
 import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.feature.completion.CompletionProvider
+import com.rwmodstudio.feature.completion.completionMatchLevel
 
 /**
  * 图片路径值补全。
@@ -50,6 +51,34 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
         "image_applyteamcolors", "image_drawoffsetx", "image_drawoffsety",
         "iconimageuseintext"
     )
+
+    /**
+     * 接受阴影枚举值的图片属性（AUTO / AUTO_ANIMATED / NONE）。
+     * 官方属性文档：`image_shadow` 填 NONE 或 AUTO 又或者是 AUTO_ANIMATED，或图像文件；
+     * `imageShadow`（效果节）、`image_end_shadow` / `image_foot_shadow`（腿节）示例均为 AUTO。
+     * 贴花节的 `image_shadow` 文档只写 file（示例 XXX.png），不支持这三个值，由
+     * [supportsShadowAutoValues] 按节排除。
+     */
+    private val shadowAutoValueNames = setOf(
+        "image_shadow", "imageshadow", "image_end_shadow", "image_foot_shadow"
+    )
+
+    /** 阴影枚举值的展示顺序与缺省说明（说明优先取 value_desc.json 的 data.value.image.*） */
+    private val shadowAutoValues = listOf(
+        "AUTO" to "自动生成阴影",
+        "AUTO_ANIMATED" to "自动生成阴影（跟随动画帧）",
+        "NONE" to "无阴影"
+    )
+
+    /** 当前属性是否接受阴影枚举值 */
+    private fun supportsShadowAutoValues(request: ValueCompletionRequest): Boolean {
+        val prop = request.findProperty() ?: return false
+        val names = listOfNotNull(prop.name, prop.name_en).map { it.trim().lowercase() }
+        if (names.none { it in shadowAutoValueNames }) return false
+        // 贴花节 image_shadow 只接受图片文件，不给枚举值
+        if (names.any { it == "image_shadow" } && request.sectionName == "贴花") return false
+        return true
+    }
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
         val prop = request.findProperty() ?: return false
@@ -195,6 +224,24 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
                 items.remove(it)
                 items.add(0, it)
             }
+        }
+
+        // 4) 阴影枚举值：阴影类图片属性额外提供 AUTO / AUTO_ANIMATED / NONE。
+        //    只在非 SHARED:/CORE:/ROOT: 浏览态给出，并按当前输入前缀过滤（输入 AU 也命中）。
+        if (!browsingBuiltin && !inRoot && supportsShadowAutoValues(request)) {
+            val enumItems = shadowAutoValues
+                .filter { completionMatchLevel(prefix, it.first) > 0 }
+                .map { (value, fallback) ->
+                    createValueItem(
+                        label = value,
+                        detail = ValueDescriptionRepository.lookup(request.context, "data.value.image.$value")
+                            ?: fallback,
+                        insertText = value,
+                        prefixLength = rawLen,
+                        valueType = "string"
+                    )
+                }
+            if (enumItems.isNotEmpty()) items.addAll(0, enumItems)
         }
         return items
     }

@@ -22,7 +22,7 @@ object ProjectUnderstanding {
 
     private const val TAG = "ProjectUnderstanding"
 
-    private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+    private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
     private const val MAX_FILES = 5000
     /** 单个隐藏行动节最多展示的行数（行为行优先，超出丢弃属性行） */
     private const val MAX_LINES_PER_HIDDEN = 6

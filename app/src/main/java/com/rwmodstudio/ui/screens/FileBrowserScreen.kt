@@ -70,7 +70,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
 private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
 
 /** 新建 mod-info.txt 的模板内容（可视化页可读回填；空键在保存时会被过滤不写入；无 version 键，版本号习惯写在 title 里） */
@@ -395,7 +395,7 @@ fun FileBrowserScreen(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("文件名（可不带扩展名）") })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("ini", "template").forEach { ext ->
+                listOf("ini", "template", "md").forEach { ext ->
                     val selected = newFileExt == ext
                     Box(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
@@ -1028,8 +1028,8 @@ private fun BrowserPanel(
                         }
                         if (singleTarget) {
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
-                            // 仅 .ini/.txt/.template 文件可添加书签（文件夹不可）
-                            if (file.isFile && file.extension.lowercase() in setOf("ini", "txt", "template")) {
+                            // 仅 .ini/.txt/.template/.md 文件可添加书签（文件夹不可）
+                            if (file.isFile && file.extension.lowercase() in setOf("ini", "txt", "template", "md")) {
                                 // 同一个值只算一次：isBookmarked 会读收藏文件、并逐条检查文件是否存在，避免重复读盘
                                 val bookmarked = BookmarkManager.isBookmarked(file.absolutePath)
                                 FloatingMenuItem(
@@ -1234,9 +1234,9 @@ private fun FileEntry(
     val fileType = when {
         isDir -> FileType.FOLDER
         ext == "ini" -> FileType.INI
-        ext == "template" -> FileType.TEMPLATE
+        ext == "template" || ext == "md" -> FileType.TEMPLATE
         ext in IMAGE_EXTENSIONS -> FileType.IMAGE
-        ext in setOf("txt", "log", "md") -> FileType.TEXT
+        ext in setOf("txt", "log") -> FileType.TEXT
         ext in setOf("json", "xml", "yaml", "yml") -> FileType.DATA
         else -> FileType.UNKNOWN
     }

@@ -34,7 +34,7 @@ object SearchTranslationCache {
     private const val INDEX_VERSION = 1
 
     /** 支持的文件扩展名（与 HomeScreen 的 INI_EXTENSIONS 对齐） */
-    private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+    private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
 
     /** 单条缓存记录 */
     private data class CacheRecord(

@@ -31,7 +31,7 @@ private const val TAG = "InheritanceCache"
 object InheritanceCache {
     private const val INDEX_VERSION = 1
 
-    private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+    private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
 
     private data class CacheRecord(
         val targetMtime: Long,    // 目标文件 mtime

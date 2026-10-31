@@ -111,7 +111,7 @@ class TranslationDedupChecker {
                 val dir = File(path)
                 if (!dir.exists()) continue
                 dir.walkTopDown()
-                    .filter { it.isFile && (it.extension == "ini" || it.extension == "template") }
+                    .filter { it.isFile && it.extension.lowercase() in setOf("ini", "template", "md") }
                     .forEach { allFiles.add(it) }
             }
 

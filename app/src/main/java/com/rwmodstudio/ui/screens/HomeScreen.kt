@@ -78,7 +78,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 private const val TAG = "HomeSearch"
-private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
 private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
 private const val SEARCH_RESULT_LIMIT = 200
 

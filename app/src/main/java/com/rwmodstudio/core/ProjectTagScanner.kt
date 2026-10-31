@@ -25,7 +25,7 @@ object ProjectTagScanner {
     /** 当前缓存对应的扫描根目录（可能为 null） */
     fun getScannedRoot(): String? = scannedRoot
 
-    private val INI_EXTENSIONS = setOf("ini", "template", "txt")
+    private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
     private const val MAX_FILES = 5000
     private const val MAX_ITEMS_PER_CATEGORY = 2000
 

@@ -1202,7 +1202,7 @@ fun EditorScreen(
                             siblingDir?.listFiles()
                                 ?.filter {
                                     !it.name.startsWith(".") &&
-                                    (it.isDirectory || it.extension.lowercase() in setOf("ini", "template"))
+                                    (it.isDirectory || it.extension.lowercase() in setOf("ini", "template", "md"))
                                 }
                                 ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
                                 ?: emptyList()
@@ -1240,7 +1240,7 @@ fun EditorScreen(
                                 }
                                 siblingFiles.forEach { f ->
                                     val isCurrent = f.absolutePath == filePath
-                                    val enabled = if (f.isDirectory) true else !isCurrent && f.extension.lowercase() in setOf("ini", "template")
+                                    val enabled = if (f.isDirectory) true else !isCurrent && f.extension.lowercase() in setOf("ini", "template", "md")
                                     Row(
                                         Modifier
                                             .width(140.dp)
@@ -2732,7 +2732,7 @@ fun EditorScreen(
                 val q = atSearch.lowercase()
                 // 优先显示当前文件所在目录的文件
                 if (currentFileDir.isNotEmpty() && File(currentFileDir).exists()) {
-                    File(currentFileDir).listFiles()?.filter { it.isFile }?.sortedWith(compareBy<File> { !it.extension.lowercase().let { ext -> ext == "ini" || ext == "template" } }.thenBy { it.name.lowercase() })?.forEach { f ->
+                    File(currentFileDir).listFiles()?.filter { it.isFile }?.sortedWith(compareBy<File> { !it.extension.lowercase().let { ext -> ext == "ini" || ext == "template" || ext == "md" } }.thenBy { it.name.lowercase() })?.forEach { f ->
                         if (q.isEmpty() || f.name.lowercase().contains(q)) {
                             results.add(f.name)
                         }

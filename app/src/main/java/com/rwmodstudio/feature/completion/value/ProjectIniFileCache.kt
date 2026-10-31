@@ -6,13 +6,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 项目 ini/template 文件缓存（镜像 [ProjectSoundCache]）。
- * 核心节 `复制与`(copyFrom) 引用 ini/template 单位文件（支持 ROOT: 前缀），
- * 因此缓存相对路径字符串。
+ * 项目 ini/template/md 文件缓存（镜像 [ProjectSoundCache]）。
+ * 核心节 `复制与`(copyFrom) 引用 ini/template/md 单位文件（支持 ROOT: 前缀），
+ * 因此缓存相对路径字符串。`.md` 与 `.template` 同特性（仅不参与 all-units.template 自动继承）。
  */
 object ProjectIniFileCache {
 
-    private val fileExtensions = setOf("ini", "template")
+    private val fileExtensions = setOf("ini", "template", "md")
 
     @Volatile
     private var cachedProjectPath: String = ""
@@ -21,7 +21,7 @@ object ProjectIniFileCache {
     private var cachedPaths: List<String> = emptyList()
 
     /**
-     * 后台扫描 [projectPath] 下全部子目录的 ini/template 文件并缓存相对路径。
+     * 后台扫描 [projectPath] 下全部子目录的 ini/template/md 文件并缓存相对路径。
      * 不做深度限制，保证项目根下任意子目录的复制度源文件都能补全到。
      */
     suspend fun refresh(projectPath: String, maxDepth: Int = Int.MAX_VALUE) {
