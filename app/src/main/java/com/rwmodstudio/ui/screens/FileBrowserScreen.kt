@@ -63,7 +63,9 @@ import androidx.compose.ui.window.PopupProperties
 import com.rwmodstudio.core.BookmarkManager
 import com.rwmodstudio.core.FileClipboardManager
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.TextFileFormats
 import com.rwmodstudio.core.ThemeState
+import com.rwmodstudio.core.media.isAudioFileName
 import com.rwmodstudio.ui.components.*
 import com.rwmodstudio.ui.theme.*
 import java.io.File
@@ -100,6 +102,7 @@ fun FileBrowserScreen(
     activePane: Int = 0,
     toolMenuTick: Int = 0,   // 仿MT目录：「更多」菜单由全局菜单栏触发（tick 递增即弹出）
     onFileSelected: (String, String) -> Unit,
+    onViewFile: (String, String) -> Unit = { _, _ -> },
     onHome: () -> Unit,
     onShowRecent: (() -> Unit)? = null,
     onShowFileSearch: (String) -> Unit = {},
@@ -344,6 +347,7 @@ fun FileBrowserScreen(
                     onPathChange = { navigatePane(0, it) },
                     onRefreshNeeded = { browserRefreshTick++ },
                     onFileSelected = onFileSelected,
+                    onViewFile = onViewFile,
                     onImageClick = { viewingImage = it },
                     resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
                     modifier = Modifier.weight(1f),
@@ -365,6 +369,7 @@ fun FileBrowserScreen(
                     onPathChange = { navigatePane(1, it) },
                     onRefreshNeeded = { browserRefreshTick++ },
                     onFileSelected = onFileSelected,
+                    onViewFile = onViewFile,
                     onImageClick = { viewingImage = it },
                     resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
                     modifier = Modifier.weight(1f),
@@ -381,6 +386,7 @@ fun FileBrowserScreen(
                 onRefreshNeeded = { browserRefreshTick++ },
                 onPathChange = { currentPath = it },
                 onFileSelected = onFileSelected,
+                onViewFile = onViewFile,
                 onHome = onHome,
                 onImageClick = { viewingImage = it },
                 resolveConflict = { s, t, op -> awaitConflict(s, t, op) },
@@ -504,8 +510,15 @@ fun FileBrowserScreen(
                         filterQuality = FilterQuality.None
                     )
                 } ?: Text("无法加载图片", color = Color.White)
-                // 文件名
-                Text(imgFile.name, color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
+                // 文件名 + 像素尺寸
+                val imageSize = rememberImageSize(imgFile)
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(imgFile.name, color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp)
+                    ImageSizeLabel(imageSize, fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f))
+                }
                 // 关闭按钮
                 IconButton(onClick = { viewingImage = null }, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                     Icon(Icons.Default.Close, "关闭", tint = Color.White, modifier = Modifier.size(28.dp))
@@ -562,6 +575,7 @@ private fun BrowserPane(
     onRefreshNeeded: () -> Unit,
     onFileSelected: (String, String) -> Unit,
     onImageClick: (File) -> Unit,
+    onViewFile: (String, String) -> Unit = { _, _ -> },
     resolveConflict: suspend (source: File?, target: File, operation: String) -> ConflictAction,
     modifier: Modifier = Modifier,
     paneIndex: Int = -1,
@@ -788,6 +802,7 @@ private fun BrowserPanel(
     onFileSelected: (String, String) -> Unit,
     onHome: () -> Unit,
     onImageClick: (File) -> Unit,
+    onViewFile: (String, String) -> Unit = { _, _ -> },
     resolveConflict: suspend (source: File?, target: File, operation: String) -> ConflictAction,
     modifier: Modifier,
     sort: Int = 0,
@@ -914,7 +929,9 @@ private fun BrowserPanel(
                     if (multiSelectMode) toggleSelect(f.absolutePath)
                     else if (f.isDirectory) onPathChange(f.absolutePath)
                     else if (isImage) onImageClick(f)
+                    else if (isAudioFileName(f.name)) onFileSelected(f.name, f.absolutePath)
                     else if (ext in INI_EXTENSIONS) onFileSelected(f.name, f.absolutePath)
+                    else if (TextFileFormats.isViewable(f.name)) onViewFile(f.name, f.absolutePath)
                 },
                 onLongClick = { bounds ->
                     onActivate()
@@ -924,7 +941,8 @@ private fun BrowserPanel(
                 },
                 isSelected = multiSelectMode && selectedFiles.contains(f.absolutePath),
                 multiSelectMode = multiSelectMode,
-                compact = compact
+                compact = compact,
+                refreshKey = refreshTick
             )
         } }
     }
@@ -1016,6 +1034,15 @@ private fun BrowserPanel(
                                 rename = file; newName = file.name
                                 ctxMenuFile = null; ctxMenuBounds = null
                                 exitMultiSelect()
+                            })
+                        }
+                        // 只读查看：JSON / XML / YAML / CSV / 日志 / Properties 等文本格式；
+                        // .txt / .md 默认仍走编辑器，这里额外提供「不改动原文」的查看方式
+                        if (singleTarget && file.isFile && TextFileFormats.isViewable(file.name)) {
+                            FloatingMenuItem(Icons.Outlined.Visibility, "只读查看", onClick = {
+                                ctxMenuFile = null; ctxMenuBounds = null
+                                exitMultiSelect()
+                                onViewFile(file.name, file.absolutePath)
                             })
                         }
                         // 单选模式下的多选入口：进入多选并选中该文件（位于重命名下方）
@@ -1225,17 +1252,20 @@ private fun FileEntry(
     onLongClick: (Rect) -> Unit,
     isSelected: Boolean = false,
     multiSelectMode: Boolean = false,
-    compact: Boolean = false
+    compact: Boolean = false,
+    refreshKey: Any? = null
 ) {
     val isDir = file.isDirectory
     val df = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
     val ext = file.extension.lowercase()
     val isImage = ext in IMAGE_EXTENSIONS
+    val imageSize = rememberImageSize(if (isImage) file else null, refreshKey)
     val fileType = when {
         isDir -> FileType.FOLDER
         ext == "ini" -> FileType.INI
         ext == "template" || ext == "md" -> FileType.TEMPLATE
         ext in IMAGE_EXTENSIONS -> FileType.IMAGE
+        isAudioFileName(file.name) -> FileType.AUDIO
         ext in setOf("txt", "log") -> FileType.TEXT
         ext in setOf("json", "xml", "yaml", "yml") -> FileType.DATA
         else -> FileType.UNKNOWN
@@ -1327,7 +1357,11 @@ private fun FileEntry(
                 Spacer(Modifier.height(1.dp))
                 Text(
                     text = if (isDir) "文件夹  •  ${df.format(Date(file.lastModified()))}"
-                    else "${fmtSize(file.length())}  •  ${df.format(Date(file.lastModified()))}",
+                    else buildString {
+                        append(fmtSize(file.length()))
+                        imageSize?.let { append("  •  ").append(it.label) }
+                        append("  •  ").append(df.format(Date(file.lastModified())))
+                    },
                     fontSize = subSp,
                     color = RustedOnBackground.copy(alpha = 0.38f),
                     maxLines = 1,
@@ -1462,7 +1496,7 @@ private fun validateFileName(name: String): String? {
     return null
 }
 
-private enum class FileType { FOLDER, INI, TEMPLATE, IMAGE, TEXT, DATA, UNKNOWN }
+private enum class FileType { FOLDER, INI, TEMPLATE, IMAGE, AUDIO, TEXT, DATA, UNKNOWN }
 
 private data class FileTypeInfo(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1474,6 +1508,7 @@ private data class FileTypeInfo(
             FileType.INI -> FileTypeInfo(Icons.Outlined.Settings, RustedPrimary)
             FileType.TEMPLATE -> FileTypeInfo(Icons.Outlined.Code, RustedSecondary)
             FileType.IMAGE -> FileTypeInfo(Icons.Outlined.Image, Color(0xFFE91E63))
+            FileType.AUDIO -> FileTypeInfo(Icons.Outlined.MusicNote, Color(0xFF00BCD4))
             FileType.TEXT -> FileTypeInfo(Icons.Outlined.Article, Color(0xFF607D8B))
             FileType.DATA -> FileTypeInfo(Icons.Outlined.Pages, Color(0xFF9C27B0))
             FileType.UNKNOWN -> FileTypeInfo(Icons.Outlined.InsertDriveFile, Color(0xFF78909C))

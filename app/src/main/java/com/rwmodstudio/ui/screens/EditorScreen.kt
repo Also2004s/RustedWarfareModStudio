@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
@@ -107,6 +108,29 @@ private const val TAG = "EditorScreen"
 
 /** 把字体大小规整到 0.5 的倍数，让 Slider 可以一点点调 */
 private fun roundFontSize(size: Float): Float = (size * 2f).roundToInt() / 2f
+
+/**
+ * 折叠态左侧浮动图标按钮：透明背景 + 点击涟漪，只画一个矢量图标（与顶栏撤销/重做同款）。
+ * 用于顶部浮层收起后补回撤销/重做入口，不遮挡正文（无底色）。
+ */
+@Composable
+private fun FloatingEditorActionButton(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            // 默认 clickable 走 LocalIndication（Material 涟漪），背景保持透明
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription, modifier = Modifier.size(22.dp), tint = tint)
+    }
+}
 
 /** 把英文原文的列位置映射到中文显示文本的列位置。
  *  用于搜索结果基于英文原文定位、但编辑器显示中文时的高亮对齐。
@@ -596,6 +620,24 @@ fun EditorScreen(
     }
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
+    // 撤销/重做可用态刷新：sora 的 UndoManager 是「先应用内容变更、后移动栈指针」，
+    // 刚执行完 undo()/redo() 立刻读 canUndo/canRedo 拿到的是旧值，必须延后一帧（post）再读。
+    // 折叠态左侧浮动按钮据此决定「显示 / 整组不出现」（不是置灰）。
+    fun refreshUndoRedoState() {
+        val ed = editorRef ?: return
+        ed.post {
+            val u = ed.canUndo()
+            val r = ed.canRedo()
+            if (u != canUndo) {
+                canUndo = u
+                onCanUndoChange?.invoke(u)
+            }
+            if (r != canRedo) {
+                canRedo = r
+                onCanRedoChange?.invoke(r)
+            }
+        }
+    }
     var customSymbols by remember {
         val saved = SettingsManager.customSymbolsJson
         mutableStateOf(if (saved.isNotEmpty()) {
@@ -750,6 +792,8 @@ fun EditorScreen(
                     } else {
                         Log.w(TAG, "[$caller] filePath changed during save: expected=$targetPath actual=$filePath")
                     }
+                    // 保存后同步一次撤销/重做可用态（折叠态左侧浮动按钮的显示依据）
+                    refreshUndoRedoState()
                     if (!silent) showSaveToast(true)
                     onSaved?.invoke(true)
                     // 保存成功：同步工作区（当前文件已落盘、改为未修改）
@@ -2219,6 +2263,42 @@ fun EditorScreen(
             ) { CircularProgressIndicator(color = RustedPrimary) }
         }
         }
+        // —— 折叠态左侧浮动「撤销 / 重做」 ——
+        // 顶部浮层（全局菜单栏 + Tab 栏）折叠后，菜单栏里的撤销/重做会随浮层一起移出屏幕；
+        // 这里在屏幕左侧补两个纯图标浮标（透明背景 + 点击涟漪，与顶栏同款矢量图标），
+        // 垂直居中：避开顶部浮层、底部符号栏与输入法弹出的区域。
+        // 可见性：撤销栈有内容才显示撤销，重做栈有内容才显示重做；两者都没有时整组不渲染（不置灰）。
+        // 折叠/展开由宿主 topFold 驱动，这里用 alpha 跟随折叠动画淡入（展开时容器直接移除，与浮层不会并存）。
+        if (contentLoaded && focused && SettingsManager.devTopFold && !topBarsShown && (canUndo || canRedo)) {
+            // 图标颜色按编辑区实际背景明暗自适应（编辑区背景可独立于主题深浅色设置）
+            val floatingIconTint = remember(ThemeState.bgColor, ThemeState.isDark) {
+                val editorBg = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
+                if (editorBg.luminance() > 0.5f) Color.Black.copy(alpha = 0.55f)
+                else Color.White.copy(alpha = 0.85f)
+            }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp)
+                    .zIndex(2f)
+                    .alpha(topFold),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (canUndo) {
+                    FloatingEditorActionButton(Icons.Default.Undo, "撤销", floatingIconTint) {
+                        editorRef?.undo()
+                        // 执行后立即重新评估可用性（sora 先应用变更、后移动栈指针，需延后一帧读）
+                        refreshUndoRedoState()
+                    }
+                }
+                if (canRedo) {
+                    FloatingEditorActionButton(Icons.Default.Redo, "重做", floatingIconTint) {
+                        editorRef?.redo()
+                        refreshUndoRedoState()
+                    }
+                }
+            }
+        }
         // 继承链查看对话框
         if (showInheritanceView) {
             AppDialog(
@@ -2767,13 +2847,17 @@ fun EditorScreen(
                             } catch (_: Exception) { null }
                         } else null
                     }
+                    val imageSize = rememberImageSize(if (isImage) File(fullPath) else null)
                     TextButton(onClick = { val ins = if (isCurrentDirFile) File(f).name else "ROOT:/$f"; insertTextRequest = ins; insertTextTick++; isModified = true; activePopup = "" }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (imageBitmap != null) {
                                 Image(imageBitmap, null, Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.1f)))
                                 Spacer(Modifier.width(8.dp))
                             }
-                            Text(displayPath, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = if (isCurrentDirFile) RustedPrimary else RustedOnBackground)
+                            Column {
+                                Text(displayPath, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = if (isCurrentDirFile) RustedPrimary else RustedOnBackground)
+                                ImageSizeLabel(imageSize, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                            }
                         }
                     }
                 } }

@@ -76,6 +76,7 @@ import com.rwmodstudio.core.TaskProgressManager
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.UpdateChecker
 import com.rwmodstudio.core.computeLineDiff
+import com.rwmodstudio.core.media.isAudioFileName
 import com.rwmodstudio.editor.EditorViewState
 import com.rwmodstudio.editor.EditorWorkspaceEntry
 import com.rwmodstudio.editor.resolveEditorBackground
@@ -102,7 +103,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN }
+enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -177,6 +178,8 @@ fun MainApp() {
     val backStack = remember { mutableStateListOf<Screen>() }
     var drawerState = rememberDrawerState(DrawerValue.Closed)
     var selectedFile by rememberSaveable(stateSaver = pairSaver) { mutableStateOf<Pair<String, String>?>(null) }
+    // 只读文本查看器当前文件（JSON / XML / YAML / CSV 等）
+    var viewerFile by rememberSaveable(stateSaver = pairSaver) { mutableStateOf<Pair<String, String>?>(null) }
     var showEditorBackDialog by remember { mutableStateOf(false) }
     var saveAndExit by rememberSaveable { mutableStateOf(false) }
     // 保存并退出：等待所有实例保存完成再统一退出（避免「第一个完成即销毁其余实例、其余走兜底」）
@@ -529,13 +532,15 @@ fun MainApp() {
         currentScreen = Screen.EDITOR
     }
 
-    // 统一打开入口：mod-info.txt 走可视化表单页，其余走文本编辑器
+    // 统一打开入口：音频走播放页，mod-info.txt 走可视化表单页，其余走文本编辑器
     fun openFileForEdit(name: String, path: String) {
         editorJumpLine = -1
         selectedFile = name to path
         browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
         editorTopBarsShown = true
-        if (name.equals("mod-info.txt", ignoreCase = true)) {
+        if (isAudioFileName(name)) {
+            pushScreen(Screen.AUDIO)
+        } else if (name.equals("mod-info.txt", ignoreCase = true)) {
             pushScreen(Screen.MOD_INFO)
         } else {
             pushScreen(Screen.EDITOR)
@@ -547,6 +552,14 @@ fun MainApp() {
         selectedFile = name to path
         browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
         pushScreen(Screen.MOD_INFO)
+    }
+
+    // 只读查看入口：JSON / JSONC / XML / YAML / CSV / TSV / 日志 / Properties 等文本格式
+    // （.ini / .template / .txt / .md 仍按既有路径走编辑器，不改变原行为）
+    fun openTextViewer(name: String, path: String) {
+        viewerFile = name to path
+        browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+        pushScreen(Screen.TEXT_VIEWER)
     }
 
     var projectRoot by rememberSaveable { mutableStateOf("") }
@@ -862,6 +875,7 @@ fun MainApp() {
                     Screen.HOME -> "模组"
                     Screen.BROWSER -> "文件"
                     Screen.EDITOR -> selectedFile?.first ?: ""
+                    Screen.AUDIO -> selectedFile?.first ?: "音频"
                     Screen.CODE_REF -> "代码表"
                     Screen.SETTINGS -> "设置"
                     Screen.TRANSLATION -> "翻译库"
@@ -877,6 +891,7 @@ fun MainApp() {
                     Screen.HIGHLIGHT_RULES -> "规则"
                     Screen.SORT_CUSTOM -> "排序自定义"
                     Screen.RECYCLE_BIN -> "回收站"
+                    Screen.TEXT_VIEWER -> viewerFile?.first ?: "查看"
                 }
                 // 编辑器页的全局菜单栏改为浮层（渲染在 Screen.EDITOR 分支，随 topFold 上滑隐藏），
                 // 此处仅渲染非编辑器页的顶栏，始终可见、不参与折叠。
@@ -1069,6 +1084,8 @@ fun MainApp() {
             val fullWidthScreen = currentScreen == Screen.HOME || currentScreen == Screen.BROWSER ||
                 currentScreen == Screen.EDITOR || currentScreen == Screen.COORD_VISUAL ||
                 currentScreen == Screen.SIM_ANIM || currentScreen == Screen.VERSION_COMPARE ||
+                // 只读查看器需要横向滚动，横屏下不限宽
+                currentScreen == Screen.TEXT_VIEWER ||
                 // 设置 / 开发者模式页横屏自带左右分栏，再限宽会把它挤窄
                 currentScreen == Screen.SETTINGS || currentScreen == Screen.DEVELOPER
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -1112,6 +1129,9 @@ fun MainApp() {
                         onFileSelected = { n, p ->
                             openFileForEdit(n, p)
                         },
+                        onViewFile = { n, p ->
+                            openTextViewer(n, p)
+                        },
                         onHome = { clearBackStack(); currentScreen = Screen.HOME },
                         onShowRecent = { showRecentSheet = true; recentSourceScreen = currentScreen },
                         onShowFileSearch = { path ->
@@ -1148,6 +1168,12 @@ fun MainApp() {
                         onCreateModInfo = { n, p -> openModInfoPage(n, p) }
                     )
                     Screen.RECYCLE_BIN -> RecycleBinScreen()
+                    Screen.AUDIO -> AudioPlayerScreen(filePath = selectedFile?.second ?: "")
+                    Screen.TEXT_VIEWER -> {
+                        val target = viewerFile
+                        if (target == null) Box(Modifier.fillMaxSize())
+                        else TextViewerScreen(fileName = target.first, filePath = target.second)
+                    }
                     Screen.MOD_INFO -> {
                         val modInfoPath = selectedFile?.second ?: ""
                         if (modInfoPath.isEmpty()) {

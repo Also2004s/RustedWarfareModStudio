@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SaveHistoryManager
+import com.rwmodstudio.ui.components.ImageSizeLabel
+import com.rwmodstudio.ui.components.rememberImageSize
 import com.rwmodstudio.ui.theme.RustedError
 import com.rwmodstudio.ui.theme.RustedOnBackground
 import com.rwmodstudio.ui.theme.RustedPrimary
@@ -582,9 +584,10 @@ fun ModInfoScreen(
         FormField(label = "标签 tags", value = tags, onValueChange = { tags = it; markDirty("tags") }, placeholder = "模组标签，逗号分隔，如：模组,自制")
         FormField(label = "最低版本 minVersion", value = minVersion, onValueChange = { minVersion = it; markDirty("minVersion") }, placeholder = "decal 为 v1.15p9，数组为 v1.15p11，缺省会爆错")
         // 略图
+        val thumbFull = remember(thumbnail) { if (thumbnail.isNotBlank()) File(dir, thumbnail).takeIf { it.isFile() } else null }
+        val thumbSize = rememberImageSize(thumbFull)
         Text("略图 thumbnail", Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp), fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.6f))
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            val thumbFull = remember(thumbnail) { if (thumbnail.isNotBlank()) File(dir, thumbnail).takeIf { it.isFile() } else null }
             val thumbBitmap = remember(thumbFull) {
                 thumbFull?.let { try { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } catch (_: Exception) { null } }
             }
@@ -607,6 +610,12 @@ fun ModInfoScreen(
             TextButton(onClick = { showImagePicker = true }) { Text("选图") }
             if (thumbnail.isNotBlank()) TextButton(onClick = { thumbnail = ""; markDirty("thumbnail") }) { Text("清除", color = RustedError) }
         }
+        ImageSizeLabel(
+            thumbSize,
+            Modifier.padding(start = 16.dp, top = 2.dp),
+            fontSize = 10.sp,
+            color = RustedOnBackground.copy(alpha = 0.45f)
+        )
 
         HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 12.dp))
 
@@ -722,6 +731,7 @@ private fun ImagePickerDialog(
                         items(images) { name ->
                             val full = File(dir, name)
                             val bmp = remember(name) { try { BitmapFactory.decodeFile(full.absolutePath)?.asImageBitmap() } catch (_: Exception) { null } }
+                            val imageSize = rememberImageSize(full)
                             val selected = name == current
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
@@ -734,7 +744,10 @@ private fun ImagePickerDialog(
                                     Image(bmp, null, Modifier.size(36.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.1f)))
                                     Spacer(Modifier.width(10.dp))
                                 }
-                                Text(name, fontSize = 13.sp, color = if (selected) RustedPrimary else RustedOnBackground, modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, fontSize = 13.sp, color = if (selected) RustedPrimary else RustedOnBackground)
+                                    ImageSizeLabel(imageSize, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f))
+                                }
                                 if (selected) Text("✓", fontSize = 13.sp, color = RustedPrimary)
                             }
                         }
