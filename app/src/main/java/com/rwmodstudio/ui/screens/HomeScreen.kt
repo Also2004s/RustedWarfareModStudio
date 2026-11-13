@@ -61,8 +61,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.rwmodstudio.core.ImageSize
-import com.rwmodstudio.core.ImageSizeCache
 import com.rwmodstudio.core.RecycleBin
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
@@ -1646,30 +1644,20 @@ private fun ModListCard(
     val actionIcon = 20.dp
     // 目录预览图与描述（首页显示）
     var dirImage by remember(file.absolutePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var dirImageSize by remember(file.absolutePath) { mutableStateOf<ImageSize?>(null) }
     var description by remember(file.absolutePath) { mutableStateOf<String?>(null) }
     LaunchedEffect(file.absolutePath) {
         if (isDir && file.exists()) {
-            val preview = withContext(Dispatchers.IO) {
+            dirImage = withContext(Dispatchers.IO) {
                 // 优先 mod-info.txt 的 thumbnail 键，缺失/失败回退到目录第一个图片
                 // 统一走采样解码（1024px 上限），避免 2K/4K 大贴图整图解码 OOM
                 val thumbFile = resolveThumbnailFile(file)
                 val thumbBitmap = thumbFile?.let {
                     IniImageReader.decodeSampled(it)?.asImageBitmap()
                 }
-                val fallbackFile = if (thumbBitmap == null) {
-                    file.listFiles()?.firstOrNull { f -> f.extension.lowercase() in IMAGE_EXTENSIONS }
-                } else null
-                val bitmap = thumbBitmap ?: fallbackFile?.let {
-                    IniImageReader.decodeSampled(it)?.asImageBitmap()
-                }
-                val size = (if (thumbBitmap != null) thumbFile else fallbackFile)?.let {
-                    ImageSizeCache.get(it)
-                }
-                bitmap to size
+                thumbBitmap ?: file.listFiles()
+                    ?.firstOrNull { f -> f.extension.lowercase() in IMAGE_EXTENSIONS }
+                    ?.let { IniImageReader.decodeSampled(it)?.asImageBitmap() }
             }
-            dirImage = preview.first
-            dirImageSize = preview.second
             description = withContext(Dispatchers.IO) { readModInfoDescription(file) }
         }
     }
@@ -1772,7 +1760,8 @@ private fun ModListCard(
                     Spacer(Modifier.height(1.dp))
                     Text(
                         text = when {
-                            isDir -> dirImageSize?.let { "文件夹  •  预览 ${it.label}" } ?: "文件夹"
+                            // 首页只显示类型，不显示预览图尺寸（尺寸信息只在文件浏览器里看）
+                            isDir -> "文件夹"
                             isRw -> "模组包"
                             isIni -> "INI 文件"
                             else -> file.extension.uppercase()

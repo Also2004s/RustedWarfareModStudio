@@ -109,6 +109,46 @@ private const val TAG = "EditorScreen"
 /** 把字体大小规整到 0.5 的倍数，让 Slider 可以一点点调 */
 private fun roundFontSize(size: Float): Float = (size * 2f).roundToInt() / 2f
 
+/** 内联预览：点击色块后待替换的色值位置（列范围为开区间，raw 用于替换前校验） */
+private data class InlineColorTarget(
+    val line: Int,
+    val startCol: Int,
+    val endCol: Int,
+    val raw: String
+)
+
+/**
+ * ini 色值 → 调色盘认的颜色格式。
+ * 调色盘（android.graphics.Color.parseColor）把 8 位当作 #AARRGGBB，
+ * 而 RW 的 8 位写法是 #RRGGBBAA，直接传进去通道会错位，这里先换序；6 位原样返回。
+ */
+private fun inlineValueToPickerColor(raw: String): String {
+    val h = raw.removePrefix("#")
+    return if (h.length == 8) "#${h.substring(6, 8)}${h.substring(0, 6)}" else raw
+}
+
+/**
+ * 调色盘返回的颜色 → 与原值同格式的 ini 色值。
+ * - 原值 6 位（#RRGGBB）：只取 RGB，忽略透明度；
+ * - 原值 8 位（#RRGGBBAA）：调色盘给的是 #AARRGGBB，这里转成 RW 的 RGBA 顺序。
+ */
+private fun formatInlineColor(hex: String, originalLength: Int): String {
+    val h = hex.removePrefix("#").uppercase()
+    return when {
+        originalLength >= 9 -> {
+            if (h.length == 8) {
+                val alpha = h.substring(0, 2)
+                val rgb = h.substring(2)
+                "#$rgb$alpha"
+            } else {
+                "#${h.takeLast(6).padStart(6, '0')}FF"
+            }
+        }
+
+        else -> "#${h.takeLast(6).padStart(6, '0')}"
+    }
+}
+
 /**
  * 折叠态左侧浮动图标按钮：透明背景 + 点击涟漪，只画一个矢量图标（与顶栏撤销/重做同款）。
  * 用于顶部浮层收起后补回撤销/重做入口，不遮挡正文（无底色）。
@@ -274,7 +314,8 @@ fun EditorScreen(
     LaunchedEffect(mergedTables) {
         blockableStringKeys = engine.getBlockableStringKeys(buildTableTypeLookup(mergedTables))
     }
-    LaunchedEffect(Unit) {
+    // 隐藏名单变化（revision）时重建补全 Provider，保证放出/追加的条目立即生效
+    LaunchedEffect(com.rwmodstudio.feature.completion.CompletionBlocklist.revision) {
         // 确保翻译引擎已加载，再调用需要 appContext 的 API
         if (SettingsManager.devTranslationEngine && !engine.isLoaded) {
             engine.load(ctx)
@@ -392,6 +433,9 @@ fun EditorScreen(
     var rainbowSettingsTick by remember { mutableIntStateOf(0) }
     // 节名行高亮：开关 + 自定义底色（调色盘）
     var showSectionHighlightPicker by remember(filePath) { mutableStateOf(false) }
+    // 内联预览：点击色块后待替换的目标（行 + 原值列范围 + 原值文本）。
+    // 调色盘确认后按该范围替换色值；替换前校验原文未变，防止期间编辑导致改错位置。
+    var inlineColorTarget by remember(filePath) { mutableStateOf<InlineColorTarget?>(null) }
     var sectionHighlightTick by remember(filePath) { mutableIntStateOf(0) }
 
     // 输入法是否展示：控制底部快捷栏处于「完整展开」还是「折叠为方块+」
@@ -417,7 +461,8 @@ fun EditorScreen(
     // 若随 IME 弹起联动折叠 +号/重组，会把焦点与输入法一起挤掉。
     // 这些弹窗内带 HEX 输入/输入框，输入法展开时必须保持容器不被卸载；
     // 否则 effectiveIme 变 true → fabShown 变 false → if (fabShown) 容器整体卸载 → 弹窗连同输入法一起关闭（与调色盘一致）
-    val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker || showDarkTokens
+    val pickerOpen = fabShowColorPicker || symbolBarColorPicker || showSectionHighlightPicker ||
+        showDarkTokens || inlineColorTarget != null
     // imeVisible 是按「窗口可视高度被压缩多少」算的，属全窗口级：平板双栏下两侧读到同一个值。
     // 因此必须再与 focused 相与，否则一边打字两侧同时冒符号栏、同时收起 + 按钮。
     val effectiveIme = imeVisible && !pickerOpen && focused
@@ -1494,6 +1539,14 @@ fun EditorScreen(
                             }
                         },
                         onReady = { editor -> editorRef = editor; editorViewRef.value = editor },
+                        // 内联预览（开发者模式开关控制，默认关）：缩略图/色块/试听/跳转，方块与文字等高
+                        inlineDecorEnabled = SettingsManager.devInlineDecor,
+                        inlineProjectRoot = projectRoot,
+                        inlineFileDir = File(filePath).parentFile?.absolutePath ?: "",
+                        onInlineColorClick = { line, start, end, raw ->
+                            inlineColorTarget = InlineColorTarget(line, start, end, raw)
+                        },
+                        onInlineFileJump = { path -> onSwitchFile?.invoke(path) },
                         onToolbarAction = { action ->
                             when (action) {
                                 EditorToolbarAction.EDIT_SYMBOLS -> {
@@ -2242,6 +2295,33 @@ fun EditorScreen(
                                 }
                             )
                         }
+                        // 内联预览：点击色块 → 调色盘 →「应用」直接替换原色值（不是插入文本）
+                        inlineColorTarget?.let { target ->
+                            ColorPickerDialog(
+                                initialColor = inlineValueToPickerColor(target.raw),
+                                title = "修改颜色",
+                                onDismiss = { inlineColorTarget = null },
+                                onConfirm = { picked ->
+                                    val ed = editorRef
+                                    if (ed != null) {
+                                        val content = ed.text
+                                        if (target.line in 0 until content.lineCount) {
+                                            val lineLen = content.getColumnCount(target.line)
+                                            val s = target.startCol.coerceIn(0, lineLen)
+                                            val e = target.endCol.coerceIn(s, lineLen)
+                                            // 替换前校验：该范围仍是原来的色值才改，防止期间编辑后误替换到别处
+                                            if (content.getLineString(target.line).substring(s, e) == target.raw) {
+                                                content.replace(
+                                                    target.line, s, target.line, e,
+                                                    formatInlineColor(picked, target.raw.length)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    inlineColorTarget = null
+                                }
+                            )
+                        }
                     }
             }
             // 切换文件期间（loading）覆盖层：View 复用，覆盖转圈遮罩，避免显示旧内容
@@ -2262,42 +2342,6 @@ fun EditorScreen(
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator(color = RustedPrimary) }
         }
-        }
-        // —— 折叠态左侧浮动「撤销 / 重做」 ——
-        // 顶部浮层（全局菜单栏 + Tab 栏）折叠后，菜单栏里的撤销/重做会随浮层一起移出屏幕；
-        // 这里在屏幕左侧补两个纯图标浮标（透明背景 + 点击涟漪，与顶栏同款矢量图标），
-        // 垂直居中：避开顶部浮层、底部符号栏与输入法弹出的区域。
-        // 可见性：撤销栈有内容才显示撤销，重做栈有内容才显示重做；两者都没有时整组不渲染（不置灰）。
-        // 折叠/展开由宿主 topFold 驱动，这里用 alpha 跟随折叠动画淡入（展开时容器直接移除，与浮层不会并存）。
-        if (contentLoaded && focused && SettingsManager.devTopFold && !topBarsShown && (canUndo || canRedo)) {
-            // 图标颜色按编辑区实际背景明暗自适应（编辑区背景可独立于主题深浅色设置）
-            val floatingIconTint = remember(ThemeState.bgColor, ThemeState.isDark) {
-                val editorBg = Color(resolveEditorBackground(ThemeState.bgColor, ThemeState.isDark))
-                if (editorBg.luminance() > 0.5f) Color.Black.copy(alpha = 0.55f)
-                else Color.White.copy(alpha = 0.85f)
-            }
-            Column(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 4.dp)
-                    .zIndex(2f)
-                    .alpha(topFold),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                if (canUndo) {
-                    FloatingEditorActionButton(Icons.Default.Undo, "撤销", floatingIconTint) {
-                        editorRef?.undo()
-                        // 执行后立即重新评估可用性（sora 先应用变更、后移动栈指针，需延后一帧读）
-                        refreshUndoRedoState()
-                    }
-                }
-                if (canRedo) {
-                    FloatingEditorActionButton(Icons.Default.Redo, "重做", floatingIconTint) {
-                        editorRef?.redo()
-                        refreshUndoRedoState()
-                    }
-                }
-            }
         }
         // 继承链查看对话框
         if (showInheritanceView) {

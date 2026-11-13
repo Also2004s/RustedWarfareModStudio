@@ -1260,16 +1260,7 @@ private fun FileEntry(
     val ext = file.extension.lowercase()
     val isImage = ext in IMAGE_EXTENSIONS
     val imageSize = rememberImageSize(if (isImage) file else null, refreshKey)
-    val fileType = when {
-        isDir -> FileType.FOLDER
-        ext == "ini" -> FileType.INI
-        ext == "template" || ext == "md" -> FileType.TEMPLATE
-        ext in IMAGE_EXTENSIONS -> FileType.IMAGE
-        isAudioFileName(file.name) -> FileType.AUDIO
-        ext in setOf("txt", "log") -> FileType.TEXT
-        ext in setOf("json", "xml", "yaml", "yml") -> FileType.DATA
-        else -> FileType.UNKNOWN
-    }
+    val fileType = detectFileType(file)
 
     // 加载图片（仅图片文件，使用原图）
     var imageBitmap by remember(file.absolutePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
@@ -1475,14 +1466,41 @@ internal fun FloatingCheckMenuItem(
 private suspend fun loadFiles(p: String, h: Boolean, s: Int): List<File> = withContext(Dispatchers.IO) {
     val d = File(p)
     if (d.exists()) {
+        // 先按类型分组（文件夹 → 单位 → 模板 → 图片 → 音乐 → 其他），组内再按当前档位排。
+        // 类型序在名称/大小/日期三档下都生效：改 mod 时单位 ini 是主力文件，不该被大量贴图音频冲散。
         d.listFiles()?.filter { h || !it.name.startsWith(".") }?.sortedWith(
             when (s) {
-                0 -> compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() }
-                1 -> compareBy<File> { !it.isDirectory }.thenByDescending { it.length() }
-                else -> compareBy<File> { !it.isDirectory }.thenByDescending { it.lastModified() }
+                0 -> compareBy<File> { fileGroupRank(it) }.thenBy { it.name.lowercase() }
+                1 -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.length() }
+                else -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.lastModified() }
             }
         ) ?: emptyList()
     } else emptyList()
+}
+
+/** 文件浏览的类型分组序：文件夹置顶 → 单位(.ini) → 模板(.template/.md) → 图片 → 音乐 → 其他 */
+private fun fileGroupRank(f: File): Int = when (detectFileType(f)) {
+    FileType.FOLDER -> 0
+    FileType.INI -> 1
+    FileType.TEMPLATE -> 2
+    FileType.IMAGE -> 3
+    FileType.AUDIO -> 4
+    FileType.TEXT, FileType.DATA, FileType.UNKNOWN -> 5
+}
+
+/** 文件类型判定（列表图标配色与排序分组共用同一口径） */
+private fun detectFileType(file: File): FileType {
+    if (file.isDirectory) return FileType.FOLDER
+    val ext = file.extension.lowercase()
+    return when {
+        ext == "ini" -> FileType.INI
+        ext == "template" || ext == "md" -> FileType.TEMPLATE
+        ext in IMAGE_EXTENSIONS -> FileType.IMAGE
+        isAudioFileName(file.name) -> FileType.AUDIO
+        ext in setOf("txt", "log") -> FileType.TEXT
+        ext in setOf("json", "xml", "yaml", "yml") -> FileType.DATA
+        else -> FileType.UNKNOWN
+    }
 }
 
 private fun fmtSize(b: Long) = when { b < 1024 -> "$b B"; b < 1024 * 1024 -> "${b / 1024} KB"; else -> "${"%.1f".format(b / (1024.0 * 1024.0))} MB" }

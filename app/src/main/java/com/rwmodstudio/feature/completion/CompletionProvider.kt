@@ -775,9 +775,9 @@ class CompletionProvider(
     private fun getSectionCompletions(prefix: String): List<CompletionItem> {
         val sections = listOf(
             "隐藏行动_" to "hiddenAction_", "行动_" to "action_", "全局资源_" to "global_resource_", "资源_" to "resource_",
-            "核心" to "core", "图像" to "graphics", "攻击" to "attack",
+            "核心" to "core", "图像" to "graphics", "AI" to "ai", "攻击" to "attack",
             "炮塔_" to "turret_", "抛射体_" to "projectile_", "运动" to "movement",
-            "效果_" to "effect_", "动画_" to "animation_", "附属_" to "attachment_", "贴花" to "decal",
+            "效果_" to "effect_", "动画_" to "animation_", "附属_" to "attachment_", "贴花_" to "decal",
             "leg_" to "leg_", "arm_" to "arm_", "可建造_" to "canBuild_", "放置规则_" to "placementRule_"
         )
         return sections.mapNotNull { (zh, en) ->

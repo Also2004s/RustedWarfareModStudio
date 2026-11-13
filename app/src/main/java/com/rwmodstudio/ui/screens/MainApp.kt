@@ -103,7 +103,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
+enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COMPLETION_BLOCKLIST, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -882,6 +882,7 @@ fun MainApp() {
                     Screen.CUSTOM -> "自定义补全"
                     Screen.DEVELOPER -> "开发者模式"
                     Screen.COMPLETION_TYPES -> "补全类型分类"
+                    Screen.COMPLETION_BLOCKLIST -> "补全隐藏列表"
                     Screen.COORD_VISUAL -> "坐标可视化"
                     Screen.SIM_ANIM -> "仿真动画"
                     Screen.VERSION_COMPARE -> "版本对比"
@@ -1601,18 +1602,39 @@ fun MainApp() {
                                     }
                                 }
                             }
-                            // 顶部浮层收起后的还原入口：浮层（含「〉」按钮）已整体移出屏幕，这里在编辑器
-                            // 顶部最右侧留一个「〈」。透明度跟 topFold 走：收起动画期间淡入、展开动画期间淡出，
-                            // 不会和浮层同时出现。浮层重新展开后本按钮随即不再渲染。
+                            // 顶部浮层收起后的右上角动作组：撤销、重做、展开三按钮水平排列。
+                            // 与 TopFoldToggle 同款尺寸（30dp）和灰色（#9E9E9E），透明度跟 topFold 走。
+                            // 撤销/重做按可用性决定显隐，展开按钮始终显示。
                             if (SettingsManager.devTopFold && !editorTopBarsShown) {
-                                TopFoldToggle(
-                                    collapsed = true,
-                                    onClick = { editorTopBarsShown = true; applyEditorStatusBarColor(false) },
+                                Row(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .padding(top = 2.dp, end = 2.dp)
-                                        .alpha(topFold)
-                                )
+                                        .alpha(topFold),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (editorCanUndo) {
+                                        TopFoldActionIcon(
+                                            icon = Icons.Default.Undo,
+                                            contentDescription = "撤销",
+                                            enabled = true,
+                                            onClick = { editorUndoTrigger++ }
+                                        )
+                                    }
+                                    if (editorCanRedo) {
+                                        TopFoldActionIcon(
+                                            icon = Icons.Default.Redo,
+                                            contentDescription = "重做",
+                                            enabled = true,
+                                            onClick = { editorRedoTrigger++ }
+                                        )
+                                    }
+                                    TopFoldToggle(
+                                        collapsed = true,
+                                        onClick = { editorTopBarsShown = true; applyEditorStatusBarColor(false) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1671,6 +1693,9 @@ fun MainApp() {
                         onOpenCompletionTypes = {
                             pushScreen(Screen.COMPLETION_TYPES)
                         },
+                        onOpenCompletionBlocklist = {
+                            pushScreen(Screen.COMPLETION_BLOCKLIST)
+                        },
                         onOpenHighlightRules = {
                             pushScreen(Screen.HIGHLIGHT_RULES)
                         },
@@ -1687,6 +1712,7 @@ fun MainApp() {
                         callableCategory = completionTypesCallableCat,
                         onCloseCallableCategory = { completionTypesCallableCat = null }
                     )
+                    Screen.COMPLETION_BLOCKLIST -> CompletionBlocklistScreen()
                     Screen.COORD_VISUAL -> CoordVisualScreen(
                         initialText = coordVisualText,
                         onBack = { currentScreen = popScreen(Screen.EDITOR) },
@@ -2838,6 +2864,32 @@ private fun TabletSplitter() {
             .fillMaxHeight()
             .background(Color.Black)
     )
+}
+
+/**
+ * 顶部浮层收起态动作图标（撤销 / 重做）：与 TopFoldToggle 完全同款尺寸和灰色。
+ * 折叠后水平排于屏幕最右上角——撤销（左）、重做（中）、展开（右）。
+ */
+@Composable
+private fun TopFoldActionIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon, contentDescription,
+            modifier = Modifier.size(20.dp),
+            tint = Color(0xFF9E9E9E).copy(alpha = if (enabled) 1f else 0.3f)
+        )
+    }
 }
 
 /**

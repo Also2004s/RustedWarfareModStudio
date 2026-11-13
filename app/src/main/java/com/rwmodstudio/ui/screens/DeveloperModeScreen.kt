@@ -36,6 +36,7 @@ import com.rwmodstudio.ui.theme.*
 fun DeveloperModeScreen(
     onOpenMockIni: () -> Unit = {},
     onOpenCompletionTypes: () -> Unit = {},
+    onOpenCompletionBlocklist: () -> Unit = {},
     onOpenHighlightRules: () -> Unit = {},
     onOpenSortCustomization: () -> Unit = {},
     onOpenSimAnim: () -> Unit = {}
@@ -171,6 +172,13 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevActionRow(
+                icon = Icons.Default.VisibilityOff,
+                title = "补全隐藏列表",
+                subtitle = "不出现在补全候选里的条目；可放出默认项、自行追加或删除",
+                onClick = onOpenCompletionBlocklist
+            )
+            DevDivider()
+            DevActionRow(
                 icon = Icons.Default.Rule,
                 title = "规则",
                 subtitle = "自定义高亮规则：按「类别：规则」给任意关键字/正则上色",
@@ -300,6 +308,14 @@ fun DeveloperModeScreen(
                 subtitle = "汉堡右侧灰色「〉」收起浮层、右上角「〈」展开；滚动不会自动收展",
                 checked = SettingsManager.devTopFold,
                 onCheckedChange = { SettingsManager.devTopFold = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.Image,
+                title = "内联预览",
+                subtitle = "图片路径旁显示缩略图、颜色值旁显示色块（点击可调色并替换原值）、音频旁显示试听按钮、文本文件路径旁显示跳转按钮；方块与文字等高",
+                checked = SettingsManager.devInlineDecor,
+                onCheckedChange = { SettingsManager.devInlineDecor = it }
             )
             DevDivider()
             // 平板模式：整个 App 强制横屏 + 编辑器左右双工作区。

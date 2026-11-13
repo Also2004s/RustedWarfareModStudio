@@ -5,7 +5,8 @@ package com.rwmodstudio.core
  *
  * 背景：补全表里存着形如 `builtFrom_{NUM}_name`、`canBuild_#_pos`、`text_{LANG}`、`arm#_[time]`
  * 的条目——花括号 / 方括号 / `#` 是**占位符**（提示语），不是最终写进 ini 的内容；用户实际敲的是
- * 实例化后的键（`builtFrom_1_name`）。本对象负责三件事：
+ * 实例化后的键（`builtFrom_1_name`）。此外 `animation_TYPE_start` 的中间段 `TYPE` 也是占位符
+ * （动画类型名不固定），补全后写成 `animation_<光标>_start:`。本对象负责三件事：
  *
  * 1. **识别**：哪些条目算模板键（[isTemplateKey]，含键形校验，挡掉函数签名 / 变量语法 / 多后缀说明条目）；
  * 2. **匹配**：把用户输入按「占位符位通配」对齐模板（[KeyTemplateIndex.matchPrefix]）；
@@ -42,6 +43,17 @@ object KeyTemplate {
     /** 名单键里 X 占位符的位置（`mutator` 与 `_` 之间的那个 X）。 */
     private val X_PLACEHOLDER_REGEX = Regex("(?<=mutator)X(?=_)")
 
+    /**
+     * `animation_TYPE_*`（图像节动画键）中间段 `TYPE` 是**动画类型名**占位符
+     * （moving / attack / … 由游戏决定），不是固定字面。
+     * 补全时留空位并把光标停在该段，写成 `animation_<光标>_start:`。
+     *
+     * 中文名 `动画_类型_*` 不参与模板识别：中文键保存时无法反译出占位符位，
+     * 模板键一律以英文实例化形态落盘（与 `builtFrom_{NUM}_*` 一致）。
+     */
+    private val ANIMATION_TYPE_REGEX = Regex("(?<=animation_)TYPE(?=_)")
+
+
     /** 序号位占位符（只允许填数字）。`#`、`{NUM}` 与名单里的 `X` 语义一致。 */
     private val NUMERIC_PLACEHOLDERS = setOf("#", "{NUM}", "X")
 
@@ -61,15 +73,20 @@ object KeyTemplate {
         return true
     }
 
-    /** 是否为模板键（键形 + 至少含一个占位符；含名单里 X 形占位符的键也算）。 */
+    /** 是否为模板键（键形 + 至少含一个占位符；含名单里 X 形 / 动画 TYPE 占位符的键也算）。 */
     fun isTemplateKey(name: String): Boolean =
-        isKeyLike(name) && (PLACEHOLDER_REGEX.containsMatchIn(name) || name in X_PLACEHOLDER_KEYS)
+        isKeyLike(name) && (
+            PLACEHOLDER_REGEX.containsMatchIn(name) ||
+                name in X_PLACEHOLDER_KEYS ||
+                ANIMATION_TYPE_REGEX.containsMatchIn(name)
+            )
 
     /** 把键名切成「字面段 / 占位符段」交替序列。X 形占位符只对名单键生效。 */
     internal fun segmentsOf(name: String): List<Seg> {
         val ranges = mutableListOf<IntRange>()
         PLACEHOLDER_REGEX.findAll(name).forEach { ranges.add(it.range) }
         if (name in X_PLACEHOLDER_KEYS) X_PLACEHOLDER_REGEX.findAll(name).forEach { ranges.add(it.range) }
+        ANIMATION_TYPE_REGEX.findAll(name).forEach { ranges.add(it.range) }
         if (ranges.isEmpty()) return listOf(Seg.Literal(name))
         ranges.sortBy { it.first }
         val out = mutableListOf<Seg>()

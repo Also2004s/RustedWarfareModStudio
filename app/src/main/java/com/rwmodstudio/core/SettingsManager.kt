@@ -893,6 +893,13 @@ object SettingsManager {
         get() = settings.getBoolean("dev_top_fold", true)
         set(value) = settings.edit().putBoolean("dev_top_fold", value).apply()
     /**
+     * 编辑器内联预览（默认开）：在图片路径旁显示缩略图、颜色值旁显示色块、音频旁显示试听按钮、
+     * 文本文件路径旁显示跳转按钮。方块边长 = 一个字高，随字号自动对齐。
+     */
+    var devInlineDecor: Boolean
+        get() = settings.getBoolean("dev_inline_decor", true)
+        set(value) = settings.edit().putBoolean("dev_inline_decor", value).apply()
+    /**
      * 平板模式：整个 App 强制横屏 + 编辑器左右两个工作区同时编辑（中间分割线可拖）。
      * 仅开发者模式可开；开启后 MainActivity 按此请求横屏，编辑器按双栏渲染。
      */
