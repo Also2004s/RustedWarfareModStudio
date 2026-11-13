@@ -81,6 +81,8 @@ object RwmodPaths {
     val highlightRulesFile: File get() = File(configDir, "highlight_rules.json")
     /** 补全排序自定义（开发者模式→排序自定义，节 → 有序键名列表） */
     val sortCustomizationFile: File get() = File(configDir, "sort_custom.json")
+    /** 补全隐藏列表（开发者模式→补全隐藏列表，用户放出/追加的屏蔽条目） */
+    val completionBlocklistFile: File get() = File(configDir, "completion_blocklist.json")
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
     val saveHistoryFile: File get() = File(configDir, "save_history.json")

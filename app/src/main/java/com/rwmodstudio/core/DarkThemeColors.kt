@@ -152,18 +152,19 @@ data class CustomHighlightType(
         )
 
         /**
-         * 纯净预设：与 VS Code 扩展 ini-cn-highlight 的 neon 主题对齐。
+         * 纯净预设：原 VS Code 扩展 ini-cn-highlight 的 neon 主题，
+         * 2026-11-13 按用户手机上的自定义配色校准（仅同步与 neon 不同的 4 个键）。
          */
         val PresetPure = DarkThemeColors(
             ui = "#0084ff",
             plainText = "#000000",
             section = "#0084ff",
-            sectionSuffix = "#000000",
-            sectionBracket = "#252424",
-            keyword = "#000000",
+            sectionSuffix = "#950808",
+            sectionBracket = "#B0A4A4",
+            keyword = "#2B2B2B",
             control = "#dd55ff",
             other = "#000000",
-            value = "#000000",
+            value = "#6C6C5E",
             property = "#66DD99",
             comment = "#849188",
             number = "#66a3ff",

@@ -273,7 +273,16 @@ fun SoraCodeEditor(
     highlightRulesRevision: Int = HighlightRuleManager.revision,
     // 外部（如继承链对话框开合）触发重新应用主题/自定义颜色：扑灭其他实例
     // 创建配色方案时全局 ThemeRegistry 派发对本实例自定义颜色的清空。
-    themeRefreshTick: Int = 0
+    themeRefreshTick: Int = 0,
+    // —— 内联预览（开发者模式「内联预览」开关控制，默认关）——
+    // 图片路径旁缩略图、颜色值旁色块、音频旁试听按钮、文本文件路径旁跳转按钮，方块与文字等高。
+    inlineDecorEnabled: Boolean = false,
+    inlineProjectRoot: String = "",
+    inlineFileDir: String = "",
+    // 点击色块：宿主打开调色盘，确认后按 (line, startCol, endCol) 替换原色值
+    onInlineColorClick: ((line: Int, startCol: Int, endCol: Int, raw: String) -> Unit)? = null,
+    // 点击文件跳转按钮：宿主按 tab 栏切换逻辑打开目标文件
+    onInlineFileJump: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val editorRef = remember { mutableStateOf<CodeEditor?>(null) }
@@ -309,6 +318,14 @@ fun SoraCodeEditor(
     val currentOnTextChange by rememberUpdatedState(onTextChange)
     val currentOnScrollDirectionChanged by rememberUpdatedState(onScrollDirectionChanged)
     val currentRestoreViewStateRequest by rememberUpdatedState(restoreViewStateRequest)
+    // 内联预览回调/参数用 rememberUpdatedState：控制器在 AndroidView factory（非组合作用域）创建，
+    // 只能持有 State 引用，回调触发时再读最新值，避免捕获过期的 lambda。
+    val currentOnInlineColorClick by rememberUpdatedState(onInlineColorClick)
+    val currentOnInlineFileJump by rememberUpdatedState(onInlineFileJump)
+    val currentInlineProjectRoot by rememberUpdatedState(inlineProjectRoot)
+    val currentInlineFileDir by rememberUpdatedState(inlineFileDir)
+    val currentInlineDecorEnabled by rememberUpdatedState(inlineDecorEnabled)
+    val inlineControllerRef = remember { mutableStateOf<com.rwmodstudio.editor.inline.InlineDecorController?>(null) }
     var isApplyingExternalText by remember { mutableStateOf(false) }
     // 整篇替换的稳定化代次：每次 resetTextRequest 递增，旧的 postDelayed 稳定化回调据此判定失效。
     // 关键：避免「上一个文件的恢复/居中回调在本文件上误触发」——单视图跨文件切换时，
@@ -572,6 +589,14 @@ fun SoraCodeEditor(
     // 字体大小
     LaunchedEffect(fontSize) {
         editorRef.value?.setTextSize(fontSize)
+    }
+
+    // 内联预览：开关 / 项目根 / 当前文件目录变化时更新控制器（方块尺寸随字号自动跟随，无需重建）
+    LaunchedEffect(inlineDecorEnabled, inlineProjectRoot, inlineFileDir) {
+        inlineControllerRef.value?.let { controller ->
+            controller.setPaths(inlineProjectRoot, inlineFileDir)
+            controller.setEnabled(inlineDecorEnabled)
+        }
     }
 
     // 自动换行
@@ -900,6 +925,14 @@ fun SoraCodeEditor(
                 getProps().actionWhenLineNumberClicked = DirectAccessProps.LN_ACTION_PLACE_SELECTION_HOME
                 // 替换默认补全组件：回车键不提交补全项，而是关闭列表让回车正常换行
                 replaceComponent(EditorAutoCompletion::class.java, NoEnterCommitAutoCompletion(this))
+                // 补全条目改「中间省略」：长路径（ROOT:/…/xxx.png）尾部文件名不再被裁掉
+                getComponent(EditorAutoCompletion::class.java)
+                    .setAdapter(
+                        PathAwareCompletionAdapter { item ->
+                            // 图片路径补全直接显示缩略图（找不到/SHARED:/CORE: 时回退原图标）
+                            resolveCompletionImagePath(item.label.toString(), currentInlineProjectRoot, currentInlineFileDir)
+                        }
+                    )
 
                 // 自定义高亮规则（开发者模式→规则）：有启用规则时用「内置 + 用户规则」合并语法的独立注册表，
                 // 否则返回 null，走原单例注册表（行为与历史完全一致）
@@ -940,6 +973,8 @@ fun SoraCodeEditor(
                 }
                 subscribeEvent(ScrollEvent::class.java) { event, _ ->
                     reportViewState(event.editor)
+                    // 内联装饰只渲染可见行窗口：滚动后重算（内部 110ms 防抖）
+                    inlineControllerRef.value?.onScrolled()
                     // 顶部栏显隐联动：只统计手指按住时的手动滚动方向 + 累计距离阈值，滚动停顿 250ms 后上报一次。
                     // 输入法弹出对焦、tap 光标定位、恢复视图等程序化滚动（无手指按住）不计入。
                     val st = scrollTrack
@@ -1040,6 +1075,8 @@ fun SoraCodeEditor(
                         }
                     }
                     scheduleLineStyleRefresh(event.editor)
+                    // 文本变化后重算内联装饰（内部 300ms 防抖，与行样式刷新同节奏）
+                    inlineControllerRef.value?.onContentChanged()
                 }
 
                 subscribeEvent(SelectionChangeEvent::class.java) { event, _ ->
@@ -1150,6 +1187,13 @@ fun SoraCodeEditor(
                     toggleLightbulb(event.editor, event.clickedIcon.line, event)
                 }
 
+                // 内联装饰点击（色块调色 / 音频试听 / 文件跳转）：拦下事件，避免同时把光标移到点击处
+                subscribeEvent(io.github.rosemoe.sora.event.InlayHintClickEvent::class.java) { event, _ ->
+                    val controller = inlineControllerRef.value ?: return@subscribeEvent
+                    runCatching { event.intercept() }
+                    controller.handleClick(event.inlayHint)
+                }
+
                 subscribeEvent(ClickEvent::class.java) { event, _ ->
                     // 光标定位由内置 LN_ACTION_PLACE_SELECTION_HOME 处理（自动换行时落到被点击视觉行的行首）
                     if (event.motionRegion == ClickEvent.REGION_LINE_NUMBER && hasLightbulbForLine(event.editor, event.line)) {
@@ -1186,6 +1230,21 @@ fun SoraCodeEditor(
                     )
                 }
                 refreshLineStyles(this)
+                // 内联预览控制器：注册自定义 hint 渲染器，可见行窗口内扫描装饰。
+                // 回调通过 rememberUpdatedState 读取最新 lambda，不会捕获过期的宿主回调。
+                val inlineController = com.rwmodstudio.editor.inline.InlineDecorController(
+                    editor = this,
+                    context = ctx,
+                    onColorClick = { line, decor ->
+                        currentOnInlineColorClick?.invoke(line, decor.startCol, decor.endCol, decor.raw)
+                    },
+                    onFileClick = { path -> currentOnInlineFileJump?.invoke(path) }
+                )
+                inlineControllerRef.value = inlineController
+                inlineController.setPaths(currentInlineProjectRoot, currentInlineFileDir)
+                inlineController.setEnabled(currentInlineDecorEnabled)
+                // 首次布局完成后补一次刷新：onReady 时 lastVisibleLine 还是 0，只能扫到前几行
+                postDelayed({ inlineController.scheduleRefresh(0) }, 180)
                 onReady?.invoke(this)
                 // 编辑器就绪后发送一次完整的光标锚点信息，确保 IME 连接时能立即获取
                 sendCursorAnchorToIme(this, "onReady")
@@ -1319,6 +1378,9 @@ fun SoraCodeEditor(
             iconRefreshToken.runnable = null
             probeToken.runnable?.let { probeHandler.removeCallbacks(it) }
             probeToken.runnable = null
+            inlineControllerRef.value?.dispose()
+            inlineControllerRef.value = null
+            com.rwmodstudio.editor.inline.InlineAudioPreview.stop()
             (container as? LinearLayout)?.getChildAt(0)?.let { it as? CodeEditor }?.release()
         }
     )

@@ -137,7 +137,7 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
                     items.add(
                         createValueItem(
                             label = "ROOT:/$rel",
-                            detail = "项目图片 · ROOT:/",
+                            detail = "",
                             insertText = "ROOT:/$rel",
                             prefixLength = rawLen,
                             valueType = "string"
@@ -152,7 +152,7 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
                         items.add(
                             createValueItem(
                                 label = insert,
-                                detail = "图片路径",
+                                detail = "",
                                 insertText = insert,
                                 prefixLength = rawLen,
                                 valueType = "string"

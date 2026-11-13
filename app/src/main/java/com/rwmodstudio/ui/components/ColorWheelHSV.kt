@@ -400,7 +400,7 @@ private fun HsvPresetGrid(
 }
 
 private val HSV_PRESET_COLORS = listOf(
-    "#000000", "#1E1E1E", "#2B2B2B", "#4A3728",
+    "#000000", "#1E1E1E", "#2B2B2B", "#DBE8E1",
     "#F7F7F7", "#F5F5F0", "#F0F4F8", "#FDF6E3",
     "#F44336", "#FF9800", "#FFEB3B", "#4CAF50",
     "#00BCD4", "#2196F3", "#673AB7", "#E91E63"

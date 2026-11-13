@@ -1,14 +1,31 @@
 package com.rwmodstudio.feature.completion
 
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * 补全屏蔽名单测试：锁定三类（弃用 / 非键 / 非法键名）确实被挡，
- * 同时确保普通属性键、保留的模板键、values 区合法函数不被误伤。
+ * 补全隐藏名单测试：
+ * - 默认仍挡住「已弃用 / 非键 / 非法键名」三类；
+ * - `动画_类型_*` 已从默认名单放出；
+ * - 用户可以放出默认项、追加/删除自定义项，并可恢复默认。
+ *
+ * 单测环境拿不到 Android 存储路径，配置只在内存里生效（持久化代码会静默跳过），
+ * 因此每个用例前后都恢复默认，避免彼此污染。
  */
 class CompletionBlocklistTest {
+
+    @BeforeTest
+    fun resetBefore() {
+        CompletionBlocklist.resetToDefault()
+    }
+
+    @AfterTest
+    fun resetAfter() {
+        CompletionBlocklist.resetToDefault()
+    }
 
     @Test
     fun blocksDeprecatedEntries() {
@@ -16,8 +33,16 @@ class CompletionBlocklistTest {
         assertTrue(CompletionBlocklist.isBlocked("action_#_whenBuilding_cannotMove"))
         assertTrue(CompletionBlocklist.isBlocked("canBuild_#_name/pos/isLocked"))
         assertTrue(CompletionBlocklist.isBlocked("canBuild_#_pos"))
-        assertTrue(CompletionBlocklist.isBlocked("动画_类型_开始", "animation_TYPE_start"))
-        assertTrue(CompletionBlocklist.isBlocked("animation_TYPE_pingPong"))
+    }
+
+    @Test
+    fun releasesAnimationTypeEntries() {
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_开始", "animation_TYPE_start"))
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_结束", "animation_TYPE_end"))
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_缩放开始", "animation_TYPE_scale_start"))
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_缩放结束", "animation_TYPE_scale_end"))
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_速度", "animation_TYPE_speed"))
+        assertFalse(CompletionBlocklist.isBlocked("动画_类型_膨胀", "animation_TYPE_pingPong"))
     }
 
     @Test
@@ -62,5 +87,45 @@ class CompletionBlocklistTest {
         assertFalse(CompletionBlocklist.isBlocked("distance(x1, y1, x2, y2)"))
         assertFalse(CompletionBlocklist.isBlocked("select(bool, textA, textB)"))
         assertFalse(CompletionBlocklist.isBlocked("self.hp()"))
+    }
+
+    @Test
+    fun defaultEntryCanBeReleasedAndRestored() {
+        val entry = CompletionBlocklist.DEFAULT_ENTRIES.first { it.display == "自身在地上" }
+        assertTrue(CompletionBlocklist.isDefaultHidden(entry))
+
+        CompletionBlocklist.setDefaultHidden(entry, false)
+        assertFalse(CompletionBlocklist.isDefaultHidden(entry))
+        assertFalse(CompletionBlocklist.isBlocked("自身在地上", "self.gound"))
+        assertTrue(CompletionBlocklist.hasUserChanges())
+
+        CompletionBlocklist.setDefaultHidden(entry, true)
+        assertTrue(CompletionBlocklist.isDefaultHidden(entry))
+        assertTrue(CompletionBlocklist.isBlocked("自身在地上", "self.gound"))
+    }
+
+    @Test
+    fun userCanAddAndRemoveExtraEntry() {
+        assertTrue(CompletionBlocklist.addExtra("我的自定义键"))
+        assertTrue(CompletionBlocklist.isBlocked("我的自定义键"))
+        assertFalse(CompletionBlocklist.addExtra("我的自定义键")) // 重复
+        assertFalse(CompletionBlocklist.addExtra("  "))
+
+        CompletionBlocklist.removeExtra("我的自定义键")
+        assertFalse(CompletionBlocklist.isBlocked("我的自定义键"))
+        assertFalse(CompletionBlocklist.hasUserChanges())
+    }
+
+    @Test
+    fun resetRestoresDefaults() {
+        val entry = CompletionBlocklist.DEFAULT_ENTRIES.first { it.display == "敌对队伍" }
+        CompletionBlocklist.addExtra("我的自定义键")
+        CompletionBlocklist.setDefaultHidden(entry, false)
+
+        CompletionBlocklist.resetToDefault()
+
+        assertFalse(CompletionBlocklist.isBlocked("我的自定义键"))
+        assertTrue(CompletionBlocklist.isDefaultHidden(entry))
+        assertFalse(CompletionBlocklist.hasUserChanges())
     }
 }

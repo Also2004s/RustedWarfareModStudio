@@ -107,9 +107,9 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             val customNames = request.effectNames
                 .map { it.removePrefix("CUSTOM:").removePrefix("custom:") }
                 .filter { it.isNotBlank() }
-            return buildItems(request, "项目引用", customNames.map { "CUSTOM:$it" }, descPrefix = descPrefix)
+            return buildItems(request, "", customNames.map { "CUSTOM:$it" }, descPrefix = descPrefix)
         }
-        return buildItems(request, "项目引用", source, descPrefix = descPrefix)
+        return buildItems(request, "", source, descPrefix = descPrefix)
     }
 
     /** valuePrefix 是否以 CUSTOM: 开头 */
@@ -194,7 +194,7 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
                 val perName = ValueDescriptionRepository.lookup(request.context, "data.value.sound.$insert")
                 createValueItem(
                     label = insert,
-                    detail = perName ?: "音效",
+                    detail = perName ?: "",
                     insertText = insert,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "string"
@@ -244,7 +244,7 @@ class ProjectRefValueCompletionProvider : BaseValueCompletionProvider() {
             .map { (insert, _) ->
                 createValueItem(
                     label = insert,
-                    detail = "ini/template/md 文件",
+                    detail = "",
                     insertText = insert,
                     prefixLength = request.rawValuePrefixLength,
                     valueType = "string"

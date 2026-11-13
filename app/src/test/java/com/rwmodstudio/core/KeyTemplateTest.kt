@@ -28,6 +28,10 @@ class KeyTemplateTest {
         "text_{LANG}", "description_{LANG}", "showMessageToPlayer_{LANG}",
         // X 形占位符：只有这 2 条有实例证据（mutator1_ifUnitWithTags）
         "mutatorX_ifUnitWithTags", "mutatorX_ifUnitWithoutTags",
+        // 动画键：中间段 TYPE 是动画类型名占位符
+        "animation_TYPE_start", "animation_TYPE_end",
+        "animation_TYPE_scale_start", "animation_TYPE_scale_end",
+        "animation_TYPE_speed", "animation_TYPE_pingPong",
         // 下面这些「含 X 但不是占位符」的键必须不被识别（坐标轴 / 连接字母 / 参数名 / 无实例）
         "imageScaleX", "shadowOffsetX", "barrelX", "barrelOffsetX_onOddShots",
         "fireTurretXAtGround", "unloadUpToXUnitsFromSource", "offsetX", "offsetRandomXY",
@@ -140,6 +144,58 @@ class KeyTemplateTest {
         val r = renderOf("text_es", "text_{LANG}")!!
         assertEquals("text_es", r.key)
         assertNull(r.caretOffset)
+    }
+
+    // ===== 动画键：中间段 TYPE 是类型名占位符 =====
+
+    @Test
+    fun animationTypePlaceholderRendersBlankSlot() {
+        val blank = renderOf("animation_", "animation_TYPE_start")!!
+        assertEquals("animation__start", blank.key, "TYPE 位留空")
+        assertEquals(10, blank.caretOffset, "光标停在 animation_ 之后")
+    }
+
+    @Test
+    fun animationTypePlaceholderInstantiatesWhenFilled() {
+        assertEquals(
+            "animation_moving_start",
+            renderOf("animation_moving_", "animation_TYPE_start")!!.key
+        )
+        assertNull(renderOf("animation_moving_", "animation_TYPE_start")!!.caretOffset)
+        assertEquals(
+            "animation_attack_speed",
+            renderOf("animation_attack_", "animation_TYPE_speed")!!.key
+        )
+        assertEquals(
+            "animation_idle_scale_end",
+            renderOf("animation_idle_", "animation_TYPE_scale_end")!!.key
+        )
+    }
+
+    @Test
+    fun animationTypePlaceholderRecognizedOnlyForEnglishKeys() {
+        assertTrue(KeyTemplate.isTemplateKey("animation_TYPE_start"))
+        assertTrue(KeyTemplate.isTemplateKey("animation_TYPE_pingPong"))
+        // 中文名不参与模板识别（插入统一走英文实例化键）
+        assertFalse(KeyTemplate.isTemplateKey("动画_类型_开始"))
+        // 非动画前缀里的 TYPE 不是占位符
+        assertFalse(KeyTemplate.isTemplateKey("effect_TYPE_start"))
+    }
+
+    @Test
+    fun toTemplateResolvesAnimationKeys() {
+        assertEquals("animation_TYPE_start", index.toTemplate("animation_moving_start"))
+        assertEquals("animation_TYPE_start", index.toTemplate("animation__start"))
+        assertEquals("animation_TYPE_scale_start", index.toTemplate("animation_attack_scale_start"))
+        assertNull(index.toTemplate("animation"))
+    }
+
+    @Test
+    fun registryResolvesAnimationBlankSlotByEnglishName() {
+        // 值补全侧的模板注册必须含 name_en，否则 animation__pingPong 还原不出模板、查不到 bool 类型
+        KeyTemplateRegistry.register(listOf("动画_类型_膨胀", "animation_TYPE_pingPong"))
+        assertEquals("animation_TYPE_pingPong", KeyTemplateRegistry.toTemplate("animation__pingPong"))
+        assertEquals("animation_TYPE_pingPong", KeyTemplateRegistry.toTemplate("animation_moving_pingPong"))
     }
 
     // ===== 前缀命中（用户还在敲字面段） =====

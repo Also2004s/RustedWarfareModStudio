@@ -53,7 +53,12 @@ class ValueCompletionAggregator(
         // 注册序号/参数模板键集（builtFrom_{NUM}_name 等）：值补全侧要把实例化键
         // （builtFrom_1_name / 空位形态 builtFrom__name）还原成模板名才能查到类型。
         // 这里的 sectionProperties 是三表全量按分类分组的索引，涵盖所有模板键；注册幂等。
-        KeyTemplateRegistry.register(sectionProperties.values.flatten().map { it.name })
+        // 必须**中英名都注册**：模板键在中文表里 name 是中文（如 动画_类型_膨胀）、name_en 才是
+        // animation_TYPE_pingPong；补全插入的是英文空位形态（animation__pingPong），
+        // 只注册 name 会还原不出模板 → 查不到 bool 类型 → 值补全（真/假）不触发。
+        KeyTemplateRegistry.register(
+            sectionProperties.values.flatten().flatMap { listOfNotNull(it.name, it.name_en) }
+        )
         if (options.boolEnabled) providers.add(BoolValueCompletionProvider())
         if (options.logicBooleanEnabled) providers.add(LogicBooleanValueCompletionProvider())
         if (options.enumEnabled) providers.add(EnumValueCompletionProvider())
