@@ -28,7 +28,8 @@ class InlineDecorController(
     private val editor: CodeEditor,
     context: Context,
     private val onColorClick: (line: Int, decor: InlineDecor) -> Unit,
-    private val onFileClick: (String) -> Unit
+    private val onFileClick: (String) -> Unit,
+    private val onImageClick: (String) -> Unit = {}
 ) {
 
     private companion object {
@@ -123,7 +124,8 @@ class InlineDecorController(
             }
 
             InlineDecorKind.FILE -> decor.resolvedPath?.let { onFileClick(it) }
-            InlineDecorKind.IMAGE -> Unit
+            // 点击图片缩略图：宿主全屏查看原图
+            InlineDecorKind.IMAGE -> decor.resolvedPath?.let { onImageClick(it) }
         }
     }
 

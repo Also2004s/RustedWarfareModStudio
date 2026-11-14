@@ -282,7 +282,9 @@ fun SoraCodeEditor(
     // 点击色块：宿主打开调色盘，确认后按 (line, startCol, endCol) 替换原色值
     onInlineColorClick: ((line: Int, startCol: Int, endCol: Int, raw: String) -> Unit)? = null,
     // 点击文件跳转按钮：宿主按 tab 栏切换逻辑打开目标文件
-    onInlineFileJump: ((String) -> Unit)? = null
+    onInlineFileJump: ((String) -> Unit)? = null,
+    // 点击图片缩略图：宿主全屏查看原图
+    onInlineImageClick: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val editorRef = remember { mutableStateOf<CodeEditor?>(null) }
@@ -322,6 +324,7 @@ fun SoraCodeEditor(
     // 只能持有 State 引用，回调触发时再读最新值，避免捕获过期的 lambda。
     val currentOnInlineColorClick by rememberUpdatedState(onInlineColorClick)
     val currentOnInlineFileJump by rememberUpdatedState(onInlineFileJump)
+    val currentOnInlineImageClick by rememberUpdatedState(onInlineImageClick)
     val currentInlineProjectRoot by rememberUpdatedState(inlineProjectRoot)
     val currentInlineFileDir by rememberUpdatedState(inlineFileDir)
     val currentInlineDecorEnabled by rememberUpdatedState(inlineDecorEnabled)
@@ -1238,7 +1241,8 @@ fun SoraCodeEditor(
                     onColorClick = { line, decor ->
                         currentOnInlineColorClick?.invoke(line, decor.startCol, decor.endCol, decor.raw)
                     },
-                    onFileClick = { path -> currentOnInlineFileJump?.invoke(path) }
+                    onFileClick = { path -> currentOnInlineFileJump?.invoke(path) },
+                    onImageClick = { path -> currentOnInlineImageClick?.invoke(path) }
                 )
                 inlineControllerRef.value = inlineController
                 inlineController.setPaths(currentInlineProjectRoot, currentInlineFileDir)

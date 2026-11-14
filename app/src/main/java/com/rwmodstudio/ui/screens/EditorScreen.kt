@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -37,12 +38,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -53,6 +58,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.rwmodstudio.ui.theme.AppCodeFontFamily
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -146,6 +152,87 @@ private fun formatInlineColor(hex: String, originalLength: Int): String {
         }
 
         else -> "#${h.takeLast(6).padStart(6, '0')}"
+    }
+}
+
+/**
+ * 内联预览：点击编辑器里的图片缩略图后全屏查看**原图**（不是缩略图）。
+ *
+ * 原图解码失败（超大图 OOM）时按 4096px 长边兜底采样，保证仍能看到完整画面。
+ * 支持双指缩放（1x~8x）与拖动；关闭按钮在右上角。
+ */
+@Composable
+private fun InlineImagePreviewDialog(path: String, onDismiss: () -> Unit) {
+    var bitmap by remember(path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var failed by remember(path) { mutableStateOf(false) }
+    LaunchedEffect(path) {
+        val loaded = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                BitmapFactory.decodeFile(path)
+            } catch (_: OutOfMemoryError) {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(path, bounds)
+                var sample = 1
+                while (bounds.outWidth / sample > 4096 || bounds.outHeight / sample > 4096) sample *= 2
+                BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+            }
+        }
+        bitmap = loaded
+        failed = loaded == null
+    }
+    var scale by remember(path) { mutableStateOf(1f) }
+    var offset by remember(path) { mutableStateOf(Offset.Zero) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            bitmap?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = File(path).name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                        .pointerInput(path) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val next = (scale * zoom).coerceIn(1f, 8f)
+                                scale = next
+                                offset = if (next > 1f) offset + pan else Offset.Zero
+                            }
+                        }
+                )
+            }
+            if (bitmap == null) {
+                if (failed) {
+                    Text("无法加载图片", color = Color.White, modifier = Modifier.align(Alignment.Center))
+                } else {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+                }
+            }
+            Text(
+                text = if (scale > 1.01f) "${File(path).name}  ${(scale * 10).toInt() / 10f}x" else File(path).name,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+            ) {
+                Icon(Icons.Default.Close, "关闭", tint = Color.White)
+            }
+        }
     }
 }
 
@@ -436,6 +523,8 @@ fun EditorScreen(
     // 内联预览：点击色块后待替换的目标（行 + 原值列范围 + 原值文本）。
     // 调色盘确认后按该范围替换色值；替换前校验原文未变，防止期间编辑导致改错位置。
     var inlineColorTarget by remember(filePath) { mutableStateOf<InlineColorTarget?>(null) }
+    // 内联预览：点击图片缩略图后全屏查看原图的路径（null = 未打开）
+    var inlinePreviewImage by remember(filePath) { mutableStateOf<String?>(null) }
     var sectionHighlightTick by remember(filePath) { mutableIntStateOf(0) }
 
     // 输入法是否展示：控制底部快捷栏处于「完整展开」还是「折叠为方块+」
@@ -1547,6 +1636,12 @@ fun EditorScreen(
                             inlineColorTarget = InlineColorTarget(line, start, end, raw)
                         },
                         onInlineFileJump = { path -> onSwitchFile?.invoke(path) },
+                        onInlineImageClick = { path ->
+                            // 先收起输入法再打开全屏预览：否则键盘收起过程中弹窗要等窗口恢复才显示
+                            val imm = imeView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.hideSoftInputFromWindow(imeView.windowToken, 0)
+                            inlinePreviewImage = path
+                        },
                         onToolbarAction = { action ->
                             when (action) {
                                 EditorToolbarAction.EDIT_SYMBOLS -> {
@@ -2321,6 +2416,10 @@ fun EditorScreen(
                                     inlineColorTarget = null
                                 }
                             )
+                        }
+                        // 内联预览：点击图片缩略图 → 全屏查看原图（支持双指缩放、拖动）
+                        inlinePreviewImage?.let { path ->
+                            InlineImagePreviewDialog(path = path, onDismiss = { inlinePreviewImage = null })
                         }
                     }
             }
