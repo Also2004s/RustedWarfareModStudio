@@ -1614,22 +1614,19 @@ fun MainApp() {
                                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (editorCanUndo) {
-                                        TopFoldActionIcon(
-                                            icon = Icons.Default.Undo,
-                                            contentDescription = "撤销",
-                                            enabled = true,
-                                            onClick = { editorUndoTrigger++ }
-                                        )
-                                    }
-                                    if (editorCanRedo) {
-                                        TopFoldActionIcon(
-                                            icon = Icons.Default.Redo,
-                                            contentDescription = "重做",
-                                            enabled = true,
-                                            onClick = { editorRedoTrigger++ }
-                                        )
-                                    }
+                                    // 撤销、重做各占一格：不可用时保留位置并变暗，避免撤销顶到重做格上
+                                    TopFoldActionIcon(
+                                        icon = Icons.Default.Undo,
+                                        contentDescription = "撤销",
+                                        enabled = editorCanUndo,
+                                        onClick = { editorUndoTrigger++ }
+                                    )
+                                    TopFoldActionIcon(
+                                        icon = Icons.Default.Redo,
+                                        contentDescription = "重做",
+                                        enabled = editorCanRedo,
+                                        onClick = { editorRedoTrigger++ }
+                                    )
                                     TopFoldToggle(
                                         collapsed = true,
                                         onClick = { editorTopBarsShown = true; applyEditorStatusBarColor(false) }
