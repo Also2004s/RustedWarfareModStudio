@@ -37,6 +37,7 @@ fun DeveloperModeScreen(
     onOpenMockIni: () -> Unit = {},
     onOpenCompletionTypes: () -> Unit = {},
     onOpenCompletionBlocklist: () -> Unit = {},
+    onOpenSectionCompletion: () -> Unit = {},
     onOpenHighlightRules: () -> Unit = {},
     onOpenSortCustomization: () -> Unit = {},
     onOpenSimAnim: () -> Unit = {}
@@ -74,6 +75,7 @@ fun DeveloperModeScreen(
     ) {
         SectionAnchor(0)
         SectionHeader(Icons.Default.Code, "代码补全")
+        DevGroupTitle("补全开关")
         SettingsCard {
             var completionProvider by remember { mutableStateOf(SettingsManager.devCompletionProvider) }
             var valueCompletion by remember { mutableStateOf(SettingsManager.devValueCompletion) }
@@ -154,13 +156,19 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.FilterAlt,
                 title = "非值限制补全",
                 checked = nonValueLimited,
-                onCheckedChange = { nonValueLimited = it; SettingsManager.nonValueCompletionLimited = it }
+                onCheckedChange = { nonValueLimited = it; SettingsManager.nonValueCompletionLimited = it },
+                isLast = true
             )
-            DevDivider()
+        }
+
+        Spacer(Modifier.height(10.dp))
+        DevGroupTitle("补全数据与工具")
+        SettingsCard {
             DevActionRow(
                 icon = Icons.Default.Description,
                 title = "模拟ini",
                 subtitle = "按补全类型归类的模拟 ini 文件",
+                isFirst = true,
                 onClick = onOpenMockIni
             )
             DevDivider()
@@ -186,6 +194,13 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevActionRow(
+                icon = Icons.Default.Segment,
+                title = "节补全管理",
+                subtitle = "自定义输入「[」时弹出的节名列表：显示名、英文节名与顺序；可恢复内置 19 项",
+                onClick = onOpenSectionCompletion
+            )
+            DevDivider()
+            DevActionRow(
                 icon = Icons.Default.Sort,
                 title = "排序自定义",
                 subtitle = "按真实使用频次把高频键置顶；可自行增删调序（只调顺序，不增删补全项）",
@@ -198,6 +213,7 @@ fun DeveloperModeScreen(
 
         SectionAnchor(1)
         SectionHeader(Icons.Default.Language, "解析与翻译")
+        DevGroupTitle("解析")
         SettingsCard {
             DevSwitchCompact(
                 icon = Icons.Default.Segment,
@@ -226,14 +242,20 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.SpaceBar,
                 title = "节补全",
                 checked = SettingsManager.devSectionCompletion,
-                onCheckedChange = { SettingsManager.devSectionCompletion = it }
+                onCheckedChange = { SettingsManager.devSectionCompletion = it },
+                isLast = true
             )
-            DevDivider()
+        }
+
+        Spacer(Modifier.height(10.dp))
+        DevGroupTitle("翻译")
+        SettingsCard {
             DevSwitchCompact(
                 icon = Icons.Default.Translate,
                 title = "翻译自动空格",
                 checked = SettingsManager.autoSpace,
-                onCheckedChange = { SettingsManager.autoSpace = it }
+                onCheckedChange = { SettingsManager.autoSpace = it },
+                isFirst = true
             )
             DevDivider()
             DevSwitchCompact(
@@ -241,14 +263,20 @@ fun DeveloperModeScreen(
                 title = "完全匹配翻译",
                 subtitle = "补全表：无符号分割的英文/中文视为整体，仅整段命中才翻译（如 priceCredits 不再拆译）",
                 checked = SettingsManager.devFullMatchTranslation,
-                onCheckedChange = { SettingsManager.devFullMatchTranslation = it }
+                onCheckedChange = { SettingsManager.devFullMatchTranslation = it },
+                isLast = true
             )
-            DevDivider()
+        }
+
+        Spacer(Modifier.height(10.dp))
+        DevGroupTitle("性能")
+        SettingsCard {
             DevSwitchCompact(
                 icon = Icons.Default.BugReport,
                 title = "Debug 任务进度",
                 checked = SettingsManager.devDebugTaskProgress,
-                onCheckedChange = { SettingsManager.devDebugTaskProgress = it }
+                onCheckedChange = { SettingsManager.devDebugTaskProgress = it },
+                isFirst = true
             )
             DevDivider()
             DevSwitchCompact(
@@ -265,6 +293,7 @@ fun DeveloperModeScreen(
 
         SectionAnchor(2)
         SectionHeader(Icons.Default.Visibility, "界面显示")
+        DevGroupTitle("编辑器显示")
         SettingsCard {
             DevSwitchCompact(
                 icon = Icons.Default.FormatListNumbered,
@@ -289,10 +318,23 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.SubdirectoryArrowRight,
+                title = "软换行提示符",
+                checked = SettingsManager.wrapIndicatorEnabled,
+                onCheckedChange = { SettingsManager.wrapIndicatorEnabled = it },
+                isLast = true
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        DevGroupTitle("外观与预览")
+        SettingsCard {
+            DevSwitchCompact(
                 icon = Icons.Default.Palette,
                 title = "HSV 取色盘",
                 checked = SettingsManager.devHsvPicker,
-                onCheckedChange = { SettingsManager.devHsvPicker = it }
+                onCheckedChange = { SettingsManager.devHsvPicker = it },
+                isFirst = true
             )
             DevDivider()
             DevSwitchCompact(
@@ -315,9 +357,14 @@ fun DeveloperModeScreen(
                 title = "内联预览",
                 subtitle = "图片路径旁显示缩略图、颜色值旁显示色块（点击可调色并替换原值）、音频旁显示试听按钮、文本文件路径旁显示跳转按钮；方块与文字等高",
                 checked = SettingsManager.devInlineDecor,
-                onCheckedChange = { SettingsManager.devInlineDecor = it }
+                onCheckedChange = { SettingsManager.devInlineDecor = it },
+                isLast = true
             )
-            DevDivider()
+        }
+
+        Spacer(Modifier.height(10.dp))
+        DevGroupTitle("功能入口")
+        SettingsCard {
             // 平板模式：整个 App 强制横屏 + 编辑器左右双工作区。
             // 方向在 MainActivity.onCreate 按设置决定，所以切换后必须重建 Activity 才生效。
             val devContext = LocalContext.current
@@ -329,7 +376,8 @@ fun DeveloperModeScreen(
                 onCheckedChange = { on ->
                     SettingsManager.devTabletMode = on
                     (devContext as? android.app.Activity)?.recreate()
-                }
+                },
+                isFirst = true
             )
             DevDivider()
             DevSwitchCompact(
@@ -350,14 +398,8 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.AccountTree,
                 title = "继承链查看",
                 checked = SettingsManager.devInheritanceView,
-                onCheckedChange = { SettingsManager.devInheritanceView = it }
-            )
-            DevDivider()
-            DevSwitchCompact(
-                icon = Icons.Default.SubdirectoryArrowRight,
-                title = "软换行提示符",
-                checked = SettingsManager.wrapIndicatorEnabled,
-                onCheckedChange = { SettingsManager.wrapIndicatorEnabled = it }
+                onCheckedChange = { SettingsManager.devInheritanceView = it },
+                isLast = true
             )
         }
 
@@ -529,7 +571,19 @@ fun DeveloperModeScreen(
     }
 }
 
-/** 开发者模式的分区目录（顺序与 DevContent 里的 SectionAnchor 编号一致） */
+/** 分区内的子分组小标题（比 [SectionHeader] 小一号，用来把长卡片拆开分组） */
+@Composable
+private fun DevGroupTitle(text: String) {
+    Text(
+        text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = RustedOnBackground.copy(alpha = 0.55f),
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 6.dp)
+    )
+}
+
+/** 分区目录（顺序与 DevContent 里的 SectionAnchor 编号一致） */
 private val DEV_SECTIONS: List<Pair<ImageVector, String>> = listOf(
     Icons.Default.Code to "代码补全",
     Icons.Default.Language to "解析与翻译",
