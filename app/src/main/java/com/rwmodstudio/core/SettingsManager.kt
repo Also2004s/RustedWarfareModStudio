@@ -415,6 +415,11 @@ object SettingsManager {
         }
         set(value) = settings.edit().putString("highlight_theme", value).apply()
 
+    /** 节补全自定义表（JSON）；空串 = 使用内置默认表（见 [SectionCompletionConfig]） */
+    var sectionCompletionEntriesJson: String
+        get() = settings.getString("section_completion_entries", "") ?: ""
+        set(value) = settings.edit().putString("section_completion_entries", value).apply()
+
     /** 用户高亮预设列表（上限见 [HighlightThemeManager.MAX_PRESETS]，写入时 take 双保险）。 */
     var highlightPresets: List<HighlightPreset>
         get() {

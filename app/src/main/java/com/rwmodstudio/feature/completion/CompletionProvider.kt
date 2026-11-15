@@ -773,16 +773,11 @@ class CompletionProvider(
     }
 
     private fun getSectionCompletions(prefix: String): List<CompletionItem> {
-        val sections = listOf(
-            "隐藏行动_" to "hiddenAction_", "行动_" to "action_", "全局资源_" to "global_resource_", "资源_" to "resource_",
-            "核心" to "core", "图像" to "graphics", "AI" to "ai", "攻击" to "attack",
-            "炮塔_" to "turret_", "抛射体_" to "projectile_", "运动" to "movement",
-            "效果_" to "effect_", "动画_" to "animation_", "附属_" to "attachment_", "贴花_" to "decal",
-            "leg_" to "leg_", "arm_" to "arm_", "可建造_" to "canBuild_", "放置规则_" to "placementRule_"
-        )
-        return sections.mapNotNull { (zh, en) ->
-            val level = completionMatchLevel(prefix, zh)
-            if (level <= 0) null else Triple(zh, en, level)
+        // 节补全内容与顺序来自开发者模式「节补全管理」（未自定义时用内置默认表）
+        val sections = com.rwmodstudio.core.SectionCompletionConfig.entries()
+        return sections.mapNotNull { entry ->
+            val level = completionMatchLevel(prefix, entry.zh)
+            if (level <= 0) null else Triple(entry.zh, entry.en, level)
         }.sortedWith(compareByDescending<Triple<String, String, Int>> { it.third })
         .map { (zh, en) ->
             CompletionItem(label = "[$zh]", type = CompletionType.SECTION, detail = "", secondaryName = en, insertText = "[$zh]", category = listOf("节"))
