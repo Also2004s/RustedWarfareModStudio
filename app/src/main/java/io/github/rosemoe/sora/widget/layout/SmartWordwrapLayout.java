@@ -386,7 +386,24 @@ public class SmartWordwrapLayout extends WordwrapLayout {
         List<InlayHint> hints = null;
         if (!rows.isEmpty()) {
             w = rows.get(0).rowWidth;
-            hints = rows.get(0).inlayHints;
+            // 只把「锚点列真正落在本段 [rowStart, end) 内」的 hint 挂到本段。
+            // sora TextRow 的 trailing 逻辑会把 column >= 本段末尾的 hint 钳制成本段尾并挂上来，
+            // 于是一个路径 hint 会被挂到它跨越的每一个换行段，每段都画一次图标（且渲染层 keep-first
+            // 会把它留在第一个换行段 = 换行处）。过滤后每个 hint 只挂到包含其锚点列的那一段，
+            // 图标只出现一次且就在路径末尾；行尾（column == 行长度）归到最后一段。
+            int lineLen = text.getLine(line).length();
+            List<InlayHint> raw = rows.get(0).inlayHints;
+            if (raw != null && !raw.isEmpty()) {
+                List<InlayHint> kept = new ArrayList<>();
+                for (InlayHint h : raw) {
+                    int c = h.getColumn();
+                    // 落在本段内，或已到最后一段（行尾/越界列统一归最后一段，避免图标丢失）
+                    if (c >= rowStart && (c < end || end == lineLen)) {
+                        kept.add(h);
+                    }
+                }
+                hints = kept;
+            }
         }
         return new RowRegion(line, rowStart, end, hints, w, isRtlBased);
     }

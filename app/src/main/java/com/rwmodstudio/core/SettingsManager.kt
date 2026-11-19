@@ -898,6 +898,14 @@ object SettingsManager {
         get() = settings.getBoolean("dev_top_fold", true)
         set(value) = settings.edit().putBoolean("dev_top_fold", value).apply()
     /**
+     * 灯泡按钮动作（默认 true）：true = 补全提示（光标处直接激活补全列表）；false = 代码提示弹窗。
+     * 只影响编辑器底部工具栏的「灯泡/提示」按钮，不改行尾灯泡的点亮翻译。
+     */
+    var devLightbulbCompletionMode: Boolean
+        get() = settings.getBoolean("dev_lightbulb_completion_mode", true)
+        set(value) = settings.edit().putBoolean("dev_lightbulb_completion_mode", value).apply()
+
+    /**
      * 编辑器内联预览（默认开）：在图片路径旁显示缩略图、颜色值旁显示色块、音频旁显示试听按钮、
      * 文本文件路径旁显示跳转按钮。方块边长 = 一个字高，随字号自动对齐。
      */

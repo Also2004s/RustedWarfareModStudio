@@ -132,7 +132,10 @@ class ImageValueCompletionProvider : BaseValueCompletionProvider() {
         //    跨目录的 ROOT:/ 项仅在进入 ROOT: 浏览态（点击 ROOT: 或输入 ROOT:/）后才显示。
         if (!browsingBuiltin && projectPath.isNotBlank()) {
             if (inRoot) {
-                val sub = lower.removePrefix("root:").trim()
+                // 去掉 ROOT: 后还要去掉前导斜杠：缓存的项目相对路径不带前导 /，
+                // 若保留 sub 的前导 /，contains 匹配会因首字符多一个 / 而全部失配（弹窗空白）。
+                // 与音效/文件补全（ProjectRefValueCompletionProvider）保持一致。
+                val sub = lower.removePrefix("root:").removePrefix("/").trim()
                 ProjectImageCache.query(projectPath, sub, limit = 50).forEach { rel ->
                     items.add(
                         createValueItem(

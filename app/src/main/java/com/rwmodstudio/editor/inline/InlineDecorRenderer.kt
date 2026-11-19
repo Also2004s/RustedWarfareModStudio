@@ -51,6 +51,9 @@ class InlineDecorRenderer(
     private val iconCache = HashMap<Int, Bitmap>(8)
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
+    // 软换行下同一 hint 只挂到「包含其锚点列」的那一个视觉行（由 SmartWordwrapLayout.makeRegion
+    // 过滤掉被 sora trailing 钳制拉进本段的溢出 hint），渲染层无需再去重。
+
     override val typeName: String
         get() = INLINE_DECOR_TYPE
 

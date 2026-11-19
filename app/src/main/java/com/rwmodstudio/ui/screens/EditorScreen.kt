@@ -1659,7 +1659,6 @@ fun EditorScreen(
                                     editor.redo()
                                 }
                                 EditorToolbarAction.HINT -> {
-                                    // 节内空内容行：不打开属性搜索弹窗，改为弹出"该节必备但尚未出现"的补全列表
                                     val ed = editorRef
                                     val hintLine = ed?.cursor?.leftLine ?: -1
                                     val hintLineStr = if (ed != null && hintLine >= 0) ed.text.getLineString(hintLine) else ""
@@ -1668,6 +1667,7 @@ fun EditorScreen(
                                             !hintLineStr.trimStart().startsWith("[") &&
                                             !currentSection.isNullOrBlank()
                                     if (blankInSection) {
+                                        // 节内空内容行：两种模式都弹「该节必备但尚未出现」的补全列表
                                         val sectionName = currentSection!!
                                         val editorForHint = ed!!
                                         scope.launch(Dispatchers.IO) {
@@ -1692,7 +1692,15 @@ fun EditorScreen(
                                                 completion.requireCompletion()
                                             }
                                         }
+                                    } else if (SettingsManager.devLightbulbCompletionMode) {
+                                        // 补全提示模式：光标处直接激活补全列表，不打开代码提示弹窗
+                                        val completion = ed?.getComponent(EditorAutoCompletion::class.java)
+                                        if (completion != null) {
+                                            if (completion.isShowing()) completion.hide()
+                                            completion.requireCompletion()
+                                        }
                                     } else {
+                                        // 代码提示模式：按光标前单词打开属性搜索弹窗
                                         ed?.let { e ->
                                             val leftLine = e.cursor.leftLine
                                             val leftCol = e.cursor.leftColumn

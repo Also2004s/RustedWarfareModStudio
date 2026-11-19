@@ -318,6 +318,14 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.Lightbulb,
+                title = "灯泡改为补全提示",
+                subtitle = "开启后，底部灯泡按钮只在光标处弹出补全列表；关闭时为代码提示弹窗",
+                checked = SettingsManager.devLightbulbCompletionMode,
+                onCheckedChange = { SettingsManager.devLightbulbCompletionMode = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.SubdirectoryArrowRight,
                 title = "软换行提示符",
                 checked = SettingsManager.wrapIndicatorEnabled,
