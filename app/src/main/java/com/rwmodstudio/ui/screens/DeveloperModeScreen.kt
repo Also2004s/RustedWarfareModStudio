@@ -326,6 +326,14 @@ fun DeveloperModeScreen(
             )
             DevDivider()
             DevSwitchCompact(
+                icon = Icons.Default.Lightbulb,
+                title = "灯泡附带缺失键检查",
+                subtitle = "点灯泡时检查当前文件（含继承链）缺少的必备节与必备属性；只有发现缺失才在右侧浮层提示",
+                checked = SettingsManager.devRequiredCodeCheck,
+                onCheckedChange = { SettingsManager.devRequiredCodeCheck = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
                 icon = Icons.Default.SubdirectoryArrowRight,
                 title = "软换行提示符",
                 checked = SettingsManager.wrapIndicatorEnabled,

@@ -72,6 +72,7 @@ import com.rwmodstudio.core.HighlightThemeManager
 import com.rwmodstudio.core.ProjectTagScanner
 import com.rwmodstudio.core.SaveHistoryManager
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.SourceType
 import com.rwmodstudio.core.translation.CodeReferenceRepository
 import com.rwmodstudio.core.translation.SearchTranslationCache
 import com.rwmodstudio.core.translation.SectionRequiredProperties
@@ -87,6 +88,8 @@ import com.rwmodstudio.editor.ReadOnlyCodeEditor
 import com.rwmodstudio.editor.SoraCodeEditor
 import com.rwmodstudio.editor.centerCursorOnVisible
 import com.rwmodstudio.editor.resolveEditorBackground
+import com.rwmodstudio.feature.completion.RequiredCodeChecker
+import com.rwmodstudio.feature.completion.RequiredCodeReport
 import com.rwmodstudio.feature.completion.extractFileSymbols
 import com.rwmodstudio.feature.completion.mergeCompletionSymbols
 import com.rwmodstudio.feature.completion.sectionEnToZh
@@ -501,6 +504,10 @@ fun EditorScreen(
     var cursorPos by remember(filePath) { mutableIntStateOf(0) }
     var fontSizeState by remember { mutableFloatStateOf(SettingsManager.fontSize) }
     var activePopup by remember(filePath) { mutableStateOf("") }
+    // 必备代码检查（点灯泡时触发）：只在确实有缺失时才显示右侧浮层
+    var requiredReport by remember(filePath) { mutableStateOf<RequiredCodeReport?>(null) }
+    var showRequiredReport by remember(filePath) { mutableStateOf(false) }
+    var requiredChecking by remember(filePath) { mutableStateOf(false) }
     var showMore by remember(filePath) { mutableStateOf(false) }
     var showInheritanceView by remember(filePath) { mutableStateOf(false) }
     var inheritanceText by remember { mutableStateOf("") }
@@ -1659,6 +1666,32 @@ fun EditorScreen(
                                     editor.redo()
                                 }
                                 EditorToolbarAction.HINT -> {
+                                    // 缺失键检查：与原有补全/代码提示并行，只在发现缺失时才弹浮层
+                                    if (SettingsManager.devRequiredCodeCheck && !requiredChecking) {
+                                        requiredChecking = true
+                                        val ownLines = latestEditorText.ifEmpty { text }.lines()
+                                        val isTemplate = filePath.endsWith(".template", ignoreCase = true)
+                                        scope.launch {
+                                            val inherited = withContext(Dispatchers.IO) {
+                                                try {
+                                                    InheritanceResolver.resolve(filePath, homeDir)
+                                                        ?.mergedLines
+                                                        // SELF 行来自磁盘，可能未保存；当前文件一律用编辑器内存文本
+                                                        ?.filter { it.sourceType != SourceType.SELF }
+                                                        ?.map { it.content }
+                                                        ?: emptyList()
+                                                } catch (e: Exception) {
+                                                    emptyList()
+                                                }
+                                            }
+                                            val report = withContext(Dispatchers.Default) {
+                                                RequiredCodeChecker.check(inherited, ownLines, isTemplate)
+                                            }
+                                            requiredReport = report
+                                            showRequiredReport = !report.isEmpty
+                                            requiredChecking = false
+                                        }
+                                    }
                                     val ed = editorRef
                                     val hintLine = ed?.cursor?.leftLine ?: -1
                                     val hintLineStr = if (ed != null && hintLine >= 0) ed.text.getLineString(hintLine) else ""
@@ -1742,6 +1775,19 @@ fun EditorScreen(
                             isModified = true
                         }
                     )
+                    // 缺失键浮层：只有发现缺失时才显示；右侧中部、非 modal
+                    // （sora 补全列表是独立 PopupWindow，恒在本窗口之上，因此不会互相遮挡）
+                    if (showRequiredReport) {
+                        requiredReport?.let { report ->
+                            RequiredCodeReportPanel(
+                                report = report,
+                                onClose = { showRequiredReport = false },
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 6.dp)
+                            )
+                        }
+                    }
                     // 括号诊断角标：仅存在问题且设置开启（否则回调不会触发）时显示；
                     // 点击循环跳转到下一处问题并居中（与搜索跳转同款多次重定位稳定化）
                     if (bracketIssues.isNotEmpty()) {

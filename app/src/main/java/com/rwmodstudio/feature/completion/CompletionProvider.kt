@@ -85,6 +85,51 @@ internal val sectionEnToZh = mapOf(
     "placementrule" to "放置规则"
 )
 
+/** [sectionEnToZh] 的中文值集合（去重）。 */
+private val knownZhSections = sectionEnToZh.values.toSet()
+
+/** 预计算小写中文节名集合，避免每次补全都重建 */
+private val lowerZhSections = knownZhSections.map { it.lowercase() }.toSet()
+
+/**
+ * 节名映射表：英文节名 / 中文节名 到 统一中文分类。
+ * 支持 core / core_1 / global_resource_xxx / 全局资源 / 全局资源_xxx 等形式。
+ *
+ * 提为文件级 internal：供补全之外的必备代码检查（[RequiredCodeChecker]）复用同一套归一化口径。
+ */
+internal fun mapSectionName(name: String): String {
+    val trimmed = name.trim()
+    val normalized = trimmed.lowercase()
+    val normalizedNoSpace = normalized.replace(" ", "")
+
+    // 1) 精确匹配已知中文分类（不区分大小写 / 忽略空格）
+    if (normalized in lowerZhSections || normalizedNoSpace in lowerZhSections) {
+        return knownZhSections.first { it.lowercase() == normalized || it.lowercase() == normalizedNoSpace }
+    }
+
+    // 2) 去掉下划线后缀后再匹配，如 global_resource_xxx -> 全局资源，核心_1 -> 核心
+    val underscoreStripped = normalized.substringBefore('_')
+    if (underscoreStripped in lowerZhSections) {
+        return knownZhSections.first { it.lowercase() == underscoreStripped }
+    }
+    // 英文下划线后缀：core_1 -> 核心
+    sectionEnToZh[underscoreStripped]?.let { return it }
+
+    // 3) 包含已知中文分类，如 全局资源_xxx -> 全局资源
+    for (zh in knownZhSections) {
+        val low = zh.lowercase()
+        if (normalized.contains(low) || normalizedNoSpace.contains(low)) return zh
+    }
+
+    // 4) 英文完整匹配或包含，如 global_resource_xxx -> 全局资源
+    sectionEnToZh[normalized]?.let { return it }
+    for ((en, zh) in sectionEnToZh) {
+        val low = en.lowercase()
+        if (normalized.contains(low) || normalizedNoSpace.contains(low)) return zh
+    }
+    return trimmed
+}
+
 class CompletionProvider(
     private val context: Context,
     private val translationDict: TranslationDict,
@@ -205,47 +250,6 @@ class CompletionProvider(
     )
 
     enum class CompletionType { SECTION, KEY, VALUE, TEMPLATE }
-
-    /**
-     * 节名映射表：英文节名 / 中文节名 到 统一中文分类。
-     * 支持 core / core_1 / global_resource_xxx / 全局资源 / 全局资源_xxx 等形式。
-     */
-    private val knownZhSections = sectionEnToZh.values.toSet()
-    // 预计算小写中文节名集合，避免每次补全都重建
-    private val lowerZhSections = knownZhSections.map { it.lowercase() }.toSet()
-
-    private fun mapSectionName(name: String): String {
-        val trimmed = name.trim()
-        val normalized = trimmed.lowercase()
-        val normalizedNoSpace = normalized.replace(" ", "")
-
-        // 1) 精确匹配已知中文分类（不区分大小写 / 忽略空格）
-        if (normalized in lowerZhSections || normalizedNoSpace in lowerZhSections) {
-            return knownZhSections.first { it.lowercase() == normalized || it.lowercase() == normalizedNoSpace }
-        }
-
-        // 2) 去掉下划线后缀后再匹配，如 global_resource_xxx -> 全局资源，核心_1 -> 核心
-        val underscoreStripped = normalized.substringBefore('_')
-        if (underscoreStripped in lowerZhSections) {
-            return knownZhSections.first { it.lowercase() == underscoreStripped }
-        }
-        // 英文下划线后缀：core_1 -> 核心
-        sectionEnToZh[underscoreStripped]?.let { return it }
-
-        // 3) 包含已知中文分类，如 全局资源_xxx -> 全局资源
-        for (zh in knownZhSections) {
-            val low = zh.lowercase()
-            if (normalized.contains(low) || normalizedNoSpace.contains(low)) return zh
-        }
-
-        // 4) 英文完整匹配或包含，如 global_resource_xxx -> 全局资源
-        sectionEnToZh[normalized]?.let { return it }
-        for ((en, zh) in sectionEnToZh) {
-            val low = en.lowercase()
-            if (normalized.contains(low) || normalizedNoSpace.contains(low)) return zh
-        }
-        return trimmed
-    }
 
     private fun List<CompletionItem>.withDetail(): List<CompletionItem> {
         return map { item ->

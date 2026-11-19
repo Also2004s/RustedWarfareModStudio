@@ -906,6 +906,14 @@ object SettingsManager {
         set(value) = settings.edit().putBoolean("dev_lightbulb_completion_mode", value).apply()
 
     /**
+     * 灯泡附带缺失键检查（默认关）：点底部灯泡时，除原有补全/代码提示外，再检查当前文件
+     * （含继承链）缺少的必备节与节内必备属性，只有发现缺失才在编辑区右侧浮层展示。只读，不插入。
+     */
+    var devRequiredCodeCheck: Boolean
+        get() = settings.getBoolean("dev_required_code_check", false)
+        set(value) = settings.edit().putBoolean("dev_required_code_check", value).apply()
+
+    /**
      * 编辑器内联预览（默认开）：在图片路径旁显示缩略图、颜色值旁显示色块、音频旁显示试听按钮、
      * 文本文件路径旁显示跳转按钮。方块边长 = 一个字高，随字号自动对齐。
      */

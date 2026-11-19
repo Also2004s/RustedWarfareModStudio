@@ -49,6 +49,13 @@ import kotlinx.serialization.json.Json
  */
 object SectionRequiredProperties {
 
+    /**
+     * 单位文件必备的四个节。
+     * 依据 RW 反编译：`class_436` 里 core/graphics/attack/movement 四节均为无条件读取，
+     * 缺任一节直接抛 `Could not find ... in section:<section>`。
+     */
+    val REQUIRED_SECTIONS = listOf("核心", "图像", "攻击", "运动")
+
     private const val TAG = "SectionRequiredProperties"
     private const val ASSET_PATH = "data/section_required.json"
 
