@@ -103,6 +103,12 @@ object RwmodPaths {
     fun importConfigTempFile(timestamp: Long = System.currentTimeMillis()): File = File(cacheDir, "import_config_${timestamp}.zip")
     val localConfigImportDir: File get() = File(cacheDir, "local_config_import").also { it.mkdirs() }
 
+    /**
+     * 分享临时目录：文件管理器分享时把文件/文件夹（打成 zip）复制到这里，
+     * 再经 FileProvider 分享（FileProvider 只暴露 RWmod 目录树）。
+     */
+    val shareDir: File get() = File(cacheDir, "share").also { it.mkdirs() }
+
     /** AI 项目理解缓存目录：扫描新版项目结构（单位名/隐藏行动），缓存供后续报告复用 */
     val aiCacheDir: File
         get() = File(cacheDir, "ai").also { it.mkdirs() }

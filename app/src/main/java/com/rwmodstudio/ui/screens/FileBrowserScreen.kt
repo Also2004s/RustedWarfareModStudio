@@ -66,11 +66,20 @@ import com.rwmodstudio.core.SettingsManager
 import com.rwmodstudio.core.TextFileFormats
 import com.rwmodstudio.core.ThemeState
 import com.rwmodstudio.core.media.isAudioFileName
+import com.rwmodstudio.util.IniImageReader
 import com.rwmodstudio.ui.components.*
 import com.rwmodstudio.ui.theme.*
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import com.rwmodstudio.core.RwmodPaths
+import androidx.core.content.FileProvider
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 private val INI_EXTENSIONS = setOf("ini", "template", "txt", "md")
 private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
@@ -819,7 +828,10 @@ private fun BrowserPanel(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var files by remember { mutableStateOf(listOf<File>()) }
+    // 与 path 同步读取：切换目录的同一帧就换成新目录内容。
+    // 原来用 LaunchedEffect 异步加载，path 变了但列表还是上一目录的内容，加载完成再替换，
+    // 视觉上就是"进入目录时闪一下"。目录读取只是 listFiles + 排序（量级几百项），同步无感。
+    val files = remember(path, sort, hidden, refreshTick) { loadFiles(path, hidden, sort) }
     var rename by remember { mutableStateOf<File?>(null) }
     var del by remember { mutableStateOf<File?>(null) }
     var newName by remember { mutableStateOf("") }
@@ -850,6 +862,47 @@ private fun BrowserPanel(
         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
     }
 
+    // 分享：先把文件复制（文件夹则打包成 zip）到 RWmod/cache/share，再经 FileProvider 发出。
+    // FileProvider 只暴露 RWmod 目录树，mod 目录里的文件不能直接分享。
+    fun shareFiles(targets: List<File>) {
+        if (targets.isEmpty()) return
+        // 文件夹要打包，给个即时反馈，避免点完没反应
+        toast("正在准备分享…")
+        scope.launch {
+            val items = prepareShareItems(context, targets)
+            withContext(Dispatchers.Main) {
+                if (items.isEmpty()) {
+                    toast("分享准备失败")
+                    return@withContext
+                }
+                if (items.size < targets.size) toast("部分文件准备失败，已跳过")
+                val intent = if (items.size == 1) {
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = items.first().mime
+                        putExtra(Intent.EXTRA_STREAM, items.first().uri)
+                    }
+                } else {
+                    Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                        type = if (items.map { it.mime }.distinct().size == 1) items.first().mime else "*/*"
+                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(items.map { it.uri }))
+                    }
+                }
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // 部分接收端（微信/QQ 等）只认 ClipData 里的 URI 授权，补充一份
+                val clip = android.content.ClipData.newRawUri("分享", items.first().uri)
+                for (i in 1 until items.size) {
+                    clip.addItem(android.content.ClipData.Item(items[i].uri))
+                }
+                intent.clipData = clip
+                try {
+                    context.startActivity(Intent.createChooser(intent, "分享"))
+                } catch (e: Exception) {
+                    toast("没有可用的分享应用")
+                }
+            }
+        }
+    }
+
     // 移动/复制的统一结果提示
     fun reportTransfer(r: TransferOutcome, verb: String, targetDir: String) {
         val dirName = File(targetDir).name.ifEmpty { targetDir }
@@ -862,7 +915,6 @@ private fun BrowserPanel(
         }
     }
 
-    LaunchedEffect(path, sort, hidden, refreshTick) { files = loadFiles(path, hidden, sort) }
     LaunchedEffect(path) {
         // 双栏时仅激活栏写 lastPath，避免非激活栏覆盖
         if (isActive) SettingsManager.lastPath = path
@@ -1072,6 +1124,12 @@ private fun BrowserPanel(
                                 HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                             }
                         }
+                        FloatingMenuItem(Icons.Outlined.Share, "分享", onClick = {
+                            ctxMenuFile = null; ctxMenuBounds = null
+                            val toShare = targets.map { File(it) }
+                            exitMultiSelect()
+                            shareFiles(toShare)
+                        })
                         FloatingMenuItem(Icons.Outlined.DeleteOutline, "删除", tint = RustedError, onClick = {
                             if (targets.size > 1) delMulti = targets else del = file
                             ctxMenuFile = null; ctxMenuBounds = null
@@ -1262,13 +1320,14 @@ private fun FileEntry(
     val imageSize = rememberImageSize(if (isImage) file else null, refreshKey)
     val fileType = detectFileType(file)
 
-    // 加载图片（仅图片文件，使用原图）
+    // 加载图片（仅图片文件）：列表只显示 22-28dp 缩略图，用采样解码（256px 上限），
+    // 避免进入贴图目录时逐个整图解码造成卡顿/闪动
     var imageBitmap by remember(file.absolutePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     LaunchedEffect(file.absolutePath) {
         if (isImage && file.exists()) {
             imageBitmap = withContext(Dispatchers.IO) {
                 try {
-                    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                    IniImageReader.decodeSampled(file, 256)?.asImageBitmap()
                 } catch (_: Exception) { null }
             }
         }
@@ -1463,19 +1522,98 @@ internal fun FloatingCheckMenuItem(
     }
 }
 
-private suspend fun loadFiles(p: String, h: Boolean, s: Int): List<File> = withContext(Dispatchers.IO) {
+private fun loadFiles(p: String, h: Boolean, s: Int): List<File> {
     val d = File(p)
-    if (d.exists()) {
-        // 先按类型分组（文件夹 → 单位 → 模板 → 图片 → 音乐 → 其他），组内再按当前档位排。
-        // 类型序在名称/大小/日期三档下都生效：改 mod 时单位 ini 是主力文件，不该被大量贴图音频冲散。
-        d.listFiles()?.filter { h || !it.name.startsWith(".") }?.sortedWith(
-            when (s) {
-                0 -> compareBy<File> { fileGroupRank(it) }.thenBy { it.name.lowercase() }
-                1 -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.length() }
-                else -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.lastModified() }
+    if (!d.exists()) return emptyList()
+    // 先按类型分组（文件夹 → 单位 → 模板 → 图片 → 音乐 → 其他），组内再按当前档位排。
+    // 类型序在名称/大小/日期三档下都生效：改 mod 时单位 ini 是主力文件，不该被大量贴图音频冲散。
+    return d.listFiles()?.filter { h || !it.name.startsWith(".") }?.sortedWith(
+        when (s) {
+            0 -> compareBy<File> { fileGroupRank(it) }.thenBy { it.name.lowercase() }
+            1 -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.length() }
+            else -> compareBy<File> { fileGroupRank(it) }.thenByDescending { it.lastModified() }
+        }
+    ) ?: emptyList()
+}
+
+/** 分享产物：content:// URI 与对应 MIME。 */
+private data class ShareItem(val uri: Uri, val mime: String)
+
+/**
+ * 准备分享项（IO）：文件复制到 `RWmod/cache/share/<时间戳>/`，文件夹打包成同名 zip。
+ * 放在 RWmod 下是为了走 FileProvider（它只暴露 RWmod 目录树）。
+ */
+private suspend fun prepareShareItems(context: Context, targets: List<File>): List<ShareItem> =
+    withContext(Dispatchers.IO) {
+        val root = RwmodPaths.shareDir
+        // 清理一天前的分享产物，避免长期堆积
+        val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+        root.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { old ->
+            runCatching { old.deleteRecursively() }
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val dir = File(root, stamp).also { it.mkdirs() }
+        targets.mapNotNull { src ->
+            try {
+                if (!src.exists()) return@mapNotNull null
+                val shared = if (src.isDirectory) {
+                    uniqueShareTarget(dir, "${src.name}.zip").also { zipDirectory(src, it) }
+                } else {
+                    uniqueShareTarget(dir, src.name).also { src.copyTo(it, overwrite = true) }
+                }
+                val uri = FileProvider.getUriForFile(
+                    context, "${context.packageName}.fileprovider", shared
+                )
+                ShareItem(uri, shareMimeOf(src))
+            } catch (_: Exception) {
+                null
             }
-        ) ?: emptyList()
-    } else emptyList()
+        }
+    }
+
+private fun shareMimeOf(file: File): String {
+    if (file.isDirectory) return "application/zip"
+    val ext = file.extension.lowercase()
+    return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+}
+
+/** 同名时追加序号，避免多选分享跨目录的同名文件互相覆盖。 */
+private fun uniqueShareTarget(dir: File, name: String): File {
+    var target = File(dir, name)
+    if (!target.exists()) return target
+    val dot = name.lastIndexOf('.')
+    val base = if (dot > 0) name.substring(0, dot) else name
+    val ext = if (dot > 0) name.substring(dot) else ""
+    var i = 1
+    while (target.exists()) {
+        target = File(dir, "${base}_$i$ext")
+        i++
+    }
+    return target
+}
+
+/** 把文件夹递归打包成 zip：以文件夹名作为根目录（解压得到同名文件夹，而不是散开的文件），跳过隐藏项。 */
+private fun zipDirectory(src: File, out: File) {
+    ZipOutputStream(FileOutputStream(out)).use { z ->
+        val rootName = src.name
+        z.putNextEntry(ZipEntry("$rootName/"))
+        z.closeEntry()
+        src.walkTopDown().forEach { x ->
+            if (x == src) return@forEach
+            // 隐藏文件/隐藏目录下的内容都不打包（.nomedia 之类不该出现在分享包里）
+            val rel = x.relativeTo(src)
+            if (rel.path.split(File.separatorChar).any { it.startsWith(".") }) return@forEach
+            val entryName = "$rootName/" + rel.path.replace('\\', '/')
+            if (x.isDirectory) {
+                z.putNextEntry(ZipEntry("$entryName/"))
+                z.closeEntry()
+            } else {
+                z.putNextEntry(ZipEntry(entryName))
+                x.inputStream().use { it.copyTo(z) }
+                z.closeEntry()
+            }
+        }
+    }
 }
 
 /** 文件浏览的类型分组序：文件夹置顶 → 单位(.ini) → 模板(.template/.md) → 图片 → 音乐 → 其他 */
