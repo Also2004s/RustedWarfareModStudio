@@ -34,6 +34,8 @@ fun DedupResultDialog(
     disabledWords: Set<String> = emptySet(),
     onDisable: ((word: String) -> Unit)? = null,
     onDisableAll: (() -> Unit)? = null,
+    /** 点击某条查重结果跳转到对应文件的对应行（file name, absolute path, 1 基行号） */
+    onJumpToLine: ((String, String, Int) -> Unit)? = null,
     onDismiss: () -> Unit,
     onModify: () -> Unit
 ) {
@@ -113,9 +115,19 @@ fun DedupResultDialog(
                                         Column(Modifier.padding(8.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text("$fileName  行:${d.line}", fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f), fontFamily = AppCodeFontFamily,
-                                                    modifier = Modifier.clickable {
+                                                    modifier = Modifier.weight(1f).clickable {
                                                         clipboard.setPrimaryClip(ClipData.newPlainText("文件名", fileName))
                                                     })
+                                                if (onJumpToLine != null) {
+                                                    Text(
+                                                        "跳转",
+                                                        fontSize = 10.sp,
+                                                        color = RustedPrimary,
+                                                        modifier = Modifier
+                                                            .clickable { onJumpToLine(fileName, d.source, d.line) }
+                                                            .padding(horizontal = 4.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }

@@ -21,12 +21,22 @@ object UpdateChecker {
         "https://github.com/Also2004s/RustedWarfareModStudio/releases"
 
     /**
-     * GitHub 代理加速前缀：国内网络直连 github.com 常被墙，用 gh-proxy 中转。
-     * 用法：代理URL = GH_PROXY_PREFIX + 原始直链（如 github.com / api.github.com）。
+     * GitHub 代理加速前缀：国内网络直连 github.com 常被墙，用镜像中转。
+     * 单个镜像会失效（gh-proxy.com 已出现 403），因此按顺序尝试多个。
      */
-    const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
+    val GH_PROXY_PREFIXES = listOf(
+        "https://ghproxy.net/",
+        "https://gh-proxy.com/",
+        "https://ghfast.top/"
+    )
 
-    /** 给原始直链加上代理前缀 */
+    /** 兼容旧调用：默认镜像 */
+    const val GH_PROXY_PREFIX = "https://ghproxy.net/"
+
+    /** 给原始直链加上所有镜像前缀（保持顺序） */
+    fun proxiedUrls(url: String): List<String> = GH_PROXY_PREFIXES.map { it + url }
+
+    /** 给原始直链加上默认镜像前缀 */
     fun proxiedUrl(url: String): String = GH_PROXY_PREFIX + url
 
     private const val TIMEOUT_MS = 10_000
@@ -45,11 +55,14 @@ object UpdateChecker {
         /** 发布时间 */
         val publishedAt: String?,
         /** APK 附件直链（无附件则为 null，跳详情页） */
-        val apkUrl: String?
+        val apkUrl: String?,
+        /** 走 GitHub API 的资产下载地址（Accept: application/octet-stream），作为兜底源 */
+        val apkApiUrl: String? = null
     )
 
     @Serializable
     private data class ReleaseAsset(
+        val id: Long? = null,
         val name: String? = null,
         val browser_download_url: String? = null
     )
@@ -71,8 +84,8 @@ object UpdateChecker {
      */
     fun fetchLatest(): UpdateInfo {
         var lastError: Exception? = null
-        // 镜像优先：国内直连 api.github.com 常"能连但极慢"，直连优先会先卡满超时
-        for (url in listOf(proxiedUrl(RELEASES_LATEST_URL), RELEASES_LATEST_URL)) {
+        // 先直连（api.github.com 通常可达），失败再依次走镜像
+        for (url in listOf(RELEASES_LATEST_URL) + proxiedUrls(RELEASES_LATEST_URL)) {
             try {
                 return requestLatest(url)
             } catch (e: Exception) {
@@ -96,15 +109,17 @@ object UpdateChecker {
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val rel = json.decodeFromString<Release>(body)
             val tag = rel.tag_name ?: rel.name ?: ""
+            val asset = rel.assets?.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true }
             return UpdateInfo(
                 versionName = tag.removePrefix("v").trim(),
                 tagName = tag,
                 htmlUrl = rel.html_url ?: RELEASES_PAGE_URL,
                 body = rel.body?.trim() ?: "",
                 publishedAt = rel.published_at,
-                apkUrl = rel.assets
-                    ?.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true }
-                    ?.browser_download_url
+                apkUrl = asset?.browser_download_url,
+                apkApiUrl = asset?.id?.let {
+                    "https://api.github.com/repos/Also2004s/RustedWarfareModStudio/releases/assets/$it"
+                }
             )
         } finally {
             conn.disconnect()

@@ -188,6 +188,7 @@ private class FileSearchResult(
 @Composable
 fun HomeScreen(
     defaultPath: String,
+    refreshTick: Int = 0,
     onBrowseFolder: (String) -> Unit,
     onOpenFile: (String, String) -> Unit,
     onOpenFolder: (String, String) -> Unit = { _, p -> onBrowseFolder(p) },
@@ -202,9 +203,9 @@ fun HomeScreen(
     var pinned by remember(defaultPath) { mutableStateOf(SettingsManager.pinnedHomeItems) }
     var refresh by remember { mutableIntStateOf(0) }
     // 目录列表移入 IO 线程加载：大目录同步 listFiles+排序会卡组合期主线程，先置空再异步填充
-    var mods by remember(defaultPath, refresh, pinned) { mutableStateOf(emptyList<File>()) }
+    var mods by remember(defaultPath, refresh, pinned, refreshTick) { mutableStateOf(emptyList<File>()) }
     var modsLoading by remember { mutableStateOf(true) }
-    LaunchedEffect(defaultPath, refresh, pinned) {
+    LaunchedEffect(defaultPath, refresh, pinned, refreshTick) {
         modsLoading = true
         mods = withContext(Dispatchers.IO) { loadMods(dir, pinned) }
         modsLoading = false

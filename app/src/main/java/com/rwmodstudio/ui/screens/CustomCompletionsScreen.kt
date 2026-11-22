@@ -846,9 +846,6 @@ fun completionFormatInsert(item: CustomCompletion): String {
     }
 }
 
-/** 原版内置资源名（小写）：原生补全表里这些条目的名字/值受「资源名禁用翻译」控制 */
-private val builtinResourceNames = ResourceNameWhitelist.DEFAULT_NAMES.map { it.lowercase() }.toSet()
-
 fun customCompletionsToProviderItems(items: List<CustomCompletion>): List<com.rwmodstudio.feature.completion.CompletionProvider.CompletionItem> {
     // 资源名禁用翻译：内置资源名条目直接显示/插入英文原名，覆盖所有补全位置
     //（原生表里 Prices_Resources 的条目 formatCategory=values，名字已按翻译库变成中文）
@@ -856,7 +853,8 @@ fun customCompletionsToProviderItems(items: List<CustomCompletion>): List<com.rw
     return items.map { item ->
         val isBlockedResource = blockResource &&
             item.formatCategory == "values" &&
-            item.nameEn.lowercase() in builtinResourceNames
+            item.nameEn.isNotBlank() &&
+            !ResourceNameWhitelist.contains(item.nameEn)
         // 双语展示：label=主名（中文优先），副名（另一种语言）存入 secondaryName，
         // detail 只放说明文本；英文名是否显示由「英文名显示」开关在补全提供器里决定。
         val label = if (isBlockedResource) item.nameEn else item.displayPrimary()

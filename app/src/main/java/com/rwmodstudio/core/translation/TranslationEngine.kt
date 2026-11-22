@@ -98,17 +98,17 @@ class TranslationEngine private constructor() {
     }
 
     /**
-     * 一次性迁移：四类「禁用翻译」改为默认开启后，旧设置下生成的翻译缓存
-     * 仍含被翻译的标签/资源名/内存名/变量名，必须清掉并按新规则重建。
+     * 一次性迁移：四类「禁用翻译」默认开启 / 白名单语义调整后，旧设置下生成的翻译缓存
+     * 仍含旧规则的译文，必须清掉并按新规则重建。
      * 清理全部成功后才写版本号，失败留待下次启动重试。
      */
     private fun migrateTranslationBlockDefaults() {
-        if (SettingsManager.translationBlockDefaultsVersion >= 1) return
+        if (SettingsManager.translationBlockDefaultsVersion >= 2) return
         try {
             SearchTranslationCache.clearTranslationOnly()
             InheritanceCache.clearAll()
             InheritanceResolver.clearSymbolMemo()
-            SettingsManager.translationBlockDefaultsVersion = 1
+            SettingsManager.translationBlockDefaultsVersion = 2
         } catch (e: Exception) {
             Log.w(TAG, "migrate translation block defaults failed: ${e.message}")
         }
@@ -262,9 +262,9 @@ class TranslationEngine private constructor() {
             cleanName = p[0].trim()
             comment = "#" + p[1]
         }
-        if (cleanName.startsWith("global_resource_")) { stats.sectionsTranslated++; return "${indent}[全局资源_${cleanName.removePrefix("global_resource_")}]${trailing}${comment}" }
+        if (cleanName.startsWith("global_resource_")) { translationDict.recordEntry(cleanName); stats.sectionsTranslated++; return "${indent}[全局资源_${cleanName.removePrefix("global_resource_")}]${trailing}${comment}" }
         val translated = translateSectionName(cleanName)
-        if (translated != cleanName) { stats.sectionsTranslated++; return "${indent}[${translated}]${trailing}${comment}" }
+        if (translated != cleanName) { translationDict.recordEntry(cleanName); stats.sectionsTranslated++; return "${indent}[${translated}]${trailing}${comment}" }
         return "${indent}[${cleanName}]${trailing}${comment}"
     }
 
@@ -306,12 +306,17 @@ class TranslationEngine private constructor() {
             comment = "#" + p[1]
         }
         // 资源名/标签/内存名/变量名原位保护：翻译链路里这些名字出现的位置保持原文
-        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block)
+        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block, ::isWhitelistedResourceName)
         val translatedKey = translationDict.getTranslation(cleanKey)
-        if (translatedKey != cleanKey) stats.keysTranslated++
+        if (translatedKey != cleanKey) {
+            translationDict.recordEntry(cleanKey)
+            stats.keysTranslated++
+        }
         // @copyFromSection / 复制节 的值是节名，走引擎已有的节名翻译逻辑（两种语言形式都匹配）
         val translatedValue = if (cleanKey == "@copyFromSection" || cleanKey == "复制节") {
-            translateSectionName(cleanValue)
+            val sectionName = translateSectionName(cleanValue)
+            if (sectionName != cleanValue) translationDict.recordEntry(cleanValue)
+            sectionName
         } else if (shouldProtectValue(cleanKey, block)) {
             // 标签/内存名/变量名禁用翻译：值整体保持原文（键照常翻译）
             protectedValue
@@ -385,14 +390,17 @@ class TranslationEngine private constructor() {
         lines: List<String>,
         autoSpace: Boolean,
         enToZh: Boolean,
-        forcedLineIndices: Set<Int> = emptySet()
+        forcedLineIndices: Set<Int> = emptySet(),
+        blockOverride: NameProtector.Options? = null
     ): List<String> {
         val result = mutableListOf<String>()
         // 四个开关一次取齐，整份文件翻译共用（避免每个值重复读设置、放大锁竞争）
-        val block = NameProtector.Options.current()
+        val block = blockOverride ?: NameProtector.Options.current()
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
+            // 统计时记录当前行号（无收集器时为空操作）
+            translationDict.setCollectLine(i + 1)
             val force = i in forcedLineIndices
 
             // 空行 / 注释
@@ -418,7 +426,7 @@ class TranslationEngine private constructor() {
             val defineMatch = DEFINE_PATTERN.matchEntire(line)
             if (defineMatch != null) {
                 val (indent, keyword, name, value, trailing) = defineMatch.destructured
-                val (protectedValue, namePh) = NameProtector.protect(value, "@$keyword", block)
+                val (protectedValue, namePh) = NameProtector.protect(value, "@$keyword", block, ::isWhitelistedResourceName)
                 val translatedValue = NameProtector.restore(translateValue(protectedValue, enToZh, autoSpace), namePh)
                 result.add("${indent}@${keyword} ${name}:${translatedValue}${trailing}")
                 i++
@@ -494,7 +502,7 @@ class TranslationEngine private constructor() {
 
             // 未匹配任何规则（非标准 INI 行），用词典做文本级翻译
             // 名字位置（资源名/标签/内存名/变量名）同样保护，避免自由文本里的引用被译掉
-            val (protectedLine, namePh) = NameProtector.protect(line, "", block)
+            val (protectedLine, namePh) = NameProtector.protect(line, "", block, ::isWhitelistedResourceName)
             result.add(NameProtector.restore(translationDict.translateInText(protectedLine, enToZh), namePh))
             i++
         }
@@ -513,9 +521,9 @@ class TranslationEngine private constructor() {
             cleanName = p[0].trim()
             comment = "#" + p[1]
         }
-        if (cleanName.startsWith("全局资源_")) return "${indent}[global_resource_${cleanName.removePrefix("全局资源_")}]${trailing}${comment}"
+        if (cleanName.startsWith("全局资源_")) { translationDict.recordEntry(cleanName); return "${indent}[global_resource_${cleanName.removePrefix("全局资源_")}]${trailing}${comment}" }
         val translated = translationDict.getSectionTranslationBack(cleanName)
-        if (translated != cleanName) return "${indent}[${translated}]${trailing}${comment}"
+        if (translated != cleanName) { translationDict.recordEntry(cleanName); return "${indent}[${translated}]${trailing}${comment}" }
         if (cleanName.contains("_")) { val p = cleanName.split("_", limit = 2); val tp = translationDict.getSectionTranslationBack(p[0]); if (tp != p[0]) return "${indent}[${tp}_${p[1]}]${trailing}${comment}" }
         return "${indent}[${cleanName}]${trailing}${comment}"
     }
@@ -534,10 +542,14 @@ class TranslationEngine private constructor() {
             comment = "#" + p[1]
         }
         // 资源名/标签/内存名/变量名原位保护：翻译链路里这些名字出现的位置保持原文
-        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block)
+        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block, ::isWhitelistedResourceName)
+        val translatedKey = translationDict.getTranslationBack(cleanKey)
+        if (translatedKey != cleanKey) translationDict.recordEntry(cleanKey)
         // @copyFromSection / 复制节 的值是节名，走引擎已有的节名反向翻译逻辑（两种语言形式都匹配）
         val translatedValue = if (cleanKey == "复制节" || cleanKey == "@copyFromSection") {
-            translateSectionNameBack(cleanValue)
+            val sectionName = translateSectionNameBack(cleanValue)
+            if (sectionName != cleanValue) translationDict.recordEntry(cleanValue)
+            sectionName
         } else if (shouldProtectValue(cleanKey, block)) {
             // 标签/内存名/变量名禁用翻译：值整体保持原文（键照常翻译）
             protectedValue
@@ -548,7 +560,7 @@ class TranslationEngine private constructor() {
             translateValue(protectedValue, false, autoSpace)
         }
         // 保留原始分隔符（含空格），autoSpace关闭时不做任何修改
-        return "${indent}${translationDict.getTranslationBack(cleanKey)}${separator}${NameProtector.restore(translatedValue, namePh)}${comment}"
+        return "${indent}${translatedKey}${separator}${NameProtector.restore(translatedValue, namePh)}${comment}"
     }
 
     /**
@@ -563,7 +575,7 @@ class TranslationEngine private constructor() {
         block: NameProtector.Options
     ): String {
         // 多行文本里同样可能引用资源名/内存名/变量，先做名字保护再翻译
-        val (protectedContent, namePh) = NameProtector.protect(content, englishKeyOf(key), block)
+        val (protectedContent, namePh) = NameProtector.protect(content, englishKeyOf(key), block, ::isWhitelistedResourceName)
         val translated = if (shouldBlockKey(key)) {
             if (blocklist.forcePercentVariables) translatePercentVariableSingle(protectedContent, enToZh)
             else protectedContent
@@ -576,6 +588,109 @@ class TranslationEngine private constructor() {
     /** 属性名转英文（用于判断资源/内存等属性上下文；不过滤禁用词/白名单，翻译不了的保持原样） */
     private fun englishKeyOf(key: String): String =
         translationDict.getTranslationBackUnfiltered(key.trim()).removePrefix("@").trim()
+
+    /** 白名单里的资源名允许翻译：英文名直接命中，中文名先反查英文再判断 */
+    private fun isWhitelistedResourceName(token: String): Boolean {
+        val t = token.trim()
+        if (t.isEmpty()) return false
+        if (t.lowercase() in ResourceNameWhitelist.names()) return true
+        val en = translationDict.getTranslationBackUnfiltered(t)
+        return en != t && en.lowercase() in ResourceNameWhitelist.names()
+    }
+
+    /**
+     * 统计一段 INI 文本按「英→中」翻译时的词条数，并列出被四类禁用保护跳过的词条。
+     * 与真实翻译共用行分类、属性保护与禁用判断；不生成译文。
+     */
+    data class SkippedOccurrence(val word: String, val line: Int, val category: String)
+
+    data class EntryCountResult(
+        val translated: Int,
+        val skipped: Int,
+        /** 被跳过的词条，每出现一次一条（line 为文件内 1 基行号） */
+        val skippedOccurrences: List<SkippedOccurrence>
+    )
+
+    fun countEnToZhEntriesDetailed(text: String): EntryCountResult {
+        if (text.isEmpty()) return EntryCountResult(0, 0, emptyList())
+        val onBlock = NameProtector.Options.current()
+        val offBlock = NameProtector.Options(false, false, false, false)
+        val lines = text.lines()
+
+        // 真实翻译两遍（英→中）：开关全开 / 全关
+        val onEnZh = translateCollected(text, onBlock, enToZh = true)
+        val offEnZh = translateCollected(text, offBlock, enToZh = true)
+        // 中→英方向也要算：中文名字在“显示中文”时不会被翻，但保存反译时会被禁用跳过
+        val onZhEn = translateCollected(text, onBlock, enToZh = false)
+        val offZhEn = translateCollected(text, offBlock, enToZh = false)
+
+        val skipped = mutableListOf<SkippedOccurrence>()
+        collectSkipped(offEnZh, onEnZh, lines, onBlock, skipped)
+        collectSkipped(offZhEn, onZhEn, lines, onBlock, skipped)
+        return EntryCountResult(onEnZh.size, skipped.size, skipped)
+    }
+
+    private fun collectSkipped(
+        offHits: List<Pair<String, Int>>,
+        onHits: List<Pair<String, Int>>,
+        lines: List<String>,
+        block: NameProtector.Options,
+        out: MutableList<SkippedOccurrence>
+    ) {
+        val remaining = HashMap<String, Int>()
+        onHits.forEach { (word, _) -> remaining[word] = (remaining[word] ?: 0) + 1 }
+        for ((word, line) in offHits) {
+            val c = remaining[word] ?: 0
+            if (c > 0) remaining[word] = c - 1
+            else out.add(
+                SkippedOccurrence(
+                    word,
+                    line,
+                    classifySkipped(word, lines.getOrNull(line - 1) ?: "", block)
+                )
+            )
+        }
+    }
+
+    /** 用真实翻译跑一遍并收集实际应用的词条（开关由 block 决定，不写盘/不读写缓存） */
+    private fun translateCollected(
+        text: String,
+        block: NameProtector.Options,
+        enToZh: Boolean
+    ): List<Pair<String, Int>> {
+        translationDict.startEntryCollection()
+        return try {
+            processLines(text.lines(), false, enToZh = enToZh, blockOverride = block)
+            translationDict.finishEntryCollection()
+        } catch (e: Exception) {
+            translationDict.finishEntryCollection()
+            throw e
+        }
+    }
+
+    /** 按词条在行内的位置/所属属性判定跳过来源，供页面按来源拆分显示 */
+    private fun classifySkipped(word: String, line: String, block: NameProtector.Options): String {
+        val esc = Regex.escape(word)
+        if (Regex("(?:资源|resource)\\s*\\.\\s*$esc", RegexOption.IGNORE_CASE).containsMatchIn(line)) return "资源名"
+        if (Regex("(?:内存|memory)\\s*\\.\\s*$esc", RegexOption.IGNORE_CASE).containsMatchIn(line)) return "内存名"
+        if (line.contains("\${$word}") || line.contains("\${$word.")) return "变量名"
+        if (Regex("(有标签|需标签|有全局标签|行动标签|消息标签|withTag|withActionTag|includes|hasTag|globalTag|messageTag|actionTag)\\s*=\\s*['\"]?$esc", RegexOption.IGNORE_CASE).containsMatchIn(line)) return "标签"
+
+        KV_PATTERN.matchEntire(line)?.let { m ->
+            val key = m.groupValues[2].trim()
+            val en = englishKeyOf(key)
+            if (shouldProtectValue(key, block)) {
+                if (CompletionShared.isTagProperty(en)) return "标签"
+                if (en.equals("defineUnitMemory", true) || key.startsWith("@memory", true)) return "内存名"
+                if (key.startsWith("@define", true) || key.startsWith("@global", true)) return "变量名"
+            }
+            if (CompletionShared.isResourceProperty(en)) return "资源名"
+            if (en.equals("setUnitMemory", true) || en.equals("updateUnitMemory", true)) return "内存名"
+        }
+        // 白名单词在任意位置被词典过滤，都归资源名来源
+        if (word.lowercase() in ResourceNameWhitelist.names()) return "资源名"
+        return "其他"
+    }
 
     /**
      * 仅翻译 value 中的 %{...} 变量内部内容，其余部分保持不变。
@@ -600,10 +715,12 @@ class TranslationEngine private constructor() {
             // 与 translateSingleValue 的布尔补救逻辑对齐。
             val boolInner = if (!enToZh) {
                 ZH_BOOL_TOKEN_REGEX.replace(translatedInner) { match2 ->
+                    translationDict.recordEntry(match2.groupValues[1])
                     translationDict.getValueTranslationBack(match2.groupValues[1])
                 }
             } else {
                 EN_BOOL_TOKEN_REGEX.replace(translatedInner) { match2 ->
+                    translationDict.recordEntry(match2.groupValues[1])
                     translationDict.getValueTranslation(match2.groupValues[1].lowercase())
                 }
             }
@@ -666,9 +783,11 @@ class TranslationEngine private constructor() {
 
         // 处理布尔值（true/false 在 valueTranslations 中）
         if (enToZh && processed.lowercase() in EN_BOOLEANS) {
+            translationDict.recordEntry(processed)
             return translationDict.getValueTranslationBack(processed.lowercase())
         }
         if (!enToZh && processed in ZH_BOOLEANS) {
+            translationDict.recordEntry(processed)
             return translationDict.getValueTranslationBack(processed)
         }
 
@@ -677,13 +796,17 @@ class TranslationEngine private constructor() {
         // 中→英方向若仍去查「中文对应的英文」，会把本来就是英文目标值的 true/LAND 反查成「真」「陆地」，
         // 导致中文视图里粘贴的英文内容在保存时被写坏（true→真、LAND→陆地）。
         if (processed in translationDict.getSpecialValues()) {
+            if (enToZh) translationDict.recordEntry(processed)
             return if (enToZh) translationDict.getValueTranslationBack(processed) else processed
         }
 
         // 反向翻译时，检查 valueTranslations 中是否有对应的中文值（如 水面→WATER, 真→true）
         if (!enToZh) {
             val translated = translationDict.getValueTranslationBack(processed)
-            if (translated != processed) return translated
+            if (translated != processed) {
+                translationDict.recordEntry(processed)
+                return translated
+            }
         }
 
         // 保护翻译库中已存在且被英文引号包裹的词，如 "跟随" / '跟随'
@@ -700,10 +823,12 @@ class TranslationEngine private constructor() {
         // translateInText 使用 \b 单词边界，对单字 真/假 不可靠，且 true/false 在 valueTranslations 中而非 enToZh，需单独处理
         val boolTranslated = if (!enToZh) {
             ZH_BOOL_TOKEN_REGEX.replace(translated) { match ->
+                translationDict.recordEntry(match.groupValues[1])
                 translationDict.getValueTranslationBack(match.groupValues[1])
             }
         } else {
             EN_BOOL_TOKEN_REGEX.replace(translated) { match ->
+                translationDict.recordEntry(match.groupValues[1])
                 translationDict.getValueTranslation(match.groupValues[1].lowercase())
             }
         }

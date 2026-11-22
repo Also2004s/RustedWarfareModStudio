@@ -330,6 +330,8 @@ fun MainApp() {
     // 只作用于「点右上角保存」这一条路径。发给所有存活实例各自落盘，但不瘦身销毁
     //（openPaths 不缩短），当前实例不会被连坐销毁重建（修复保存后光标回第一行）。
     var topBarSaveTrigger by remember { mutableIntStateOf(0) }
+    // 首页模组列表刷新触发器（全局菜单栏右上角刷新按钮）
+    var homeRefreshTick by remember { mutableIntStateOf(0) }
     // 顶部菜单栏「搜索」「保存」「撤销」触发状态
     var editorSearchTrigger by remember { mutableIntStateOf(0) }
     // 顶部菜单栏「撤销」「重做」：触发值 + 可用态（由 EditorScreen 上报，不可用时按钮变灰）
@@ -1012,6 +1014,14 @@ fun MainApp() {
                             )
                         }
                     }
+                    if (currentScreen == Screen.HOME) {
+                        IconButton(
+                            onClick = { homeRefreshTick++ },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, "刷新模组列表", Modifier.size(20.dp), tint = contentColor)
+                        }
+                    }
                     if (currentScreen == Screen.PROJECT_MANAGER) {
                         IconButton(
                             onClick = {
@@ -1122,6 +1132,7 @@ fun MainApp() {
                 when (currentScreen) {
                     Screen.HOME -> HomeScreen(
                         defaultPath = defaultPath,
+                        refreshTick = homeRefreshTick,
                         onBrowseFolder = { path ->
                             // 屏蔽系统相册扫描项目内图片
                             NoMediaHelper.excludeFromMediaStore(context, File(path))
@@ -1693,7 +1704,18 @@ fun MainApp() {
                         defaultPath = defaultPath, onDefaultPathChange = { defaultPath = it; SettingsManager.defaultPath = it },
                         onNavigateToDeveloper = { pushScreen(Screen.DEVELOPER) }
                     )
-                    Screen.TRANSLATION -> TranslationEditorScreen(initialFilter = translationFilter)
+                    Screen.TRANSLATION -> TranslationEditorScreen(
+                        initialFilter = translationFilter,
+                        onJumpToLine = { path, line ->
+                            selectedFile = File(path).name to path
+                            browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+                            editorJumpLine = line
+                            editorJumpColumnStart = -1
+                            editorJumpColumnEnd = -1
+                            editorJumpTick++
+                            pushScreen(Screen.EDITOR)
+                        }
+                    )
                     Screen.CUSTOM -> CustomCompletionsScreen()
                     Screen.DEVELOPER -> DeveloperModeScreen(
                         onOpenMockIni = {
@@ -1736,7 +1758,18 @@ fun MainApp() {
                     )
                     Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
                     Screen.SORT_CUSTOM -> SortCustomizationScreen()
-                    Screen.TRANSLATION_BLOCK -> TranslationBlockScreen()
+                    Screen.TRANSLATION_BLOCK -> TranslationBlockScreen(
+                        projectRoot = projectRoot,
+                        onJumpToLine = { name, path, line ->
+                            selectedFile = name to path
+                            browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+                            editorJumpLine = line
+                            editorJumpColumnStart = -1
+                            editorJumpColumnEnd = -1
+                            editorJumpTick++
+                            pushScreen(Screen.EDITOR)
+                        }
+                    )
                     Screen.COMPLETION_TYPES -> CompletionTypeScreen(
                         callableCategory = completionTypesCallableCat,
                         onCloseCallableCategory = { completionTypesCallableCat = null }
@@ -2051,6 +2084,17 @@ fun MainApp() {
             disabledWords = disabledWords,
             onDisable = { word -> disableDedupWords(listOf(word)) },
             onDisableAll = { disableDedupWords(dedupItems.map { it.key }.toSet() - disabledWords) },
+            onJumpToLine = { name, path, line ->
+                dedupResult = null
+                dedupItems = emptyList()
+                selectedFile = name to path
+                browserStartPath = File(path).parentFile?.absolutePath ?: browserStartPath
+                editorJumpLine = line
+                editorJumpColumnStart = -1
+                editorJumpColumnEnd = -1
+                editorJumpTick++
+                pushScreen(Screen.EDITOR)
+            },
             onDismiss = { dedupResult = null; dedupItems = emptyList() },
             onModify = {
                 dedupResult = null

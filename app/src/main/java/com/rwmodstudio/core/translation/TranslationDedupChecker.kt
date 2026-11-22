@@ -118,8 +118,7 @@ class TranslationDedupChecker {
             val totalFiles = allFiles.size
             if (totalFiles == 0) {
                 onProgress?.invoke(ProgressInfo("未找到项目文件", 1f))
-                return@withContext duplicates.toList()
-            }
+                return@withContext duplicates.toList()            }
 
             // 输出目录：RWmod/dedup
             val outputDir = RwmodPaths.dedupDir

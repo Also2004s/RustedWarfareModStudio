@@ -43,9 +43,9 @@ internal object NameProtector {
     private const val PH_OPEN = '\uE000'
     private const val PH_CLOSE = '\uE001'
 
-    /** 资源名引用：`资源.名字` / `self.resource.name` / `当前动作目标.资源.名字` */
+    /** 资源名引用：`资源.名字` / `self.resource.name` / `当前动作目标.资源.名字`（名字在比较/逻辑运算符处截断） */
     private val RESOURCE_REF = Regex(
-        """((?:[\w\u4e00-\u9fff]+\.)?(?:资源|resource)\s*\.)([^.\s,()\[\]{}=+\-*/%!'"]+)""",
+        """((?:[\w\u4e00-\u9fff]+\.)?(?:资源|resource)\s*\.)([^.\s,()\[\]{}=+\-*/%!'"<>&|]+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -57,13 +57,13 @@ internal object NameProtector {
 
     /** 标签参数：`有标签=名字` / `withActionTag="名字"` 等（参数表里 tag/globalTag/messageTag/actionTag 的全部键名与中文名） */
     private val TAG_PARAM_RHS = Regex(
-        """(有标签|需标签|有全局标签|行动标签|消息标签|withTag|withActionTag|includes|hasTag|globalTag|messageTag|actionTag)\s*=\s*('[^']*'|[^,，)）、\s]+)""",
+        """(有标签|需标签|有全局标签|行动标签|消息标签|withTag|withActionTag|includes|hasTag|globalTag|messageTag|actionTag)\s*=\s*('[^']*'|"[^"]*"|[^,，)）、\s]+)""",
         RegexOption.IGNORE_CASE
     )
 
-    /** 内存名引用：`内存.名字` / `memory.name` */
+    /** 内存名引用：`内存.名字` / `memory.name`（名字在比较/逻辑运算符处截断） */
     private val MEMORY_REF = Regex(
-        """((?:内存|memory)\s*\.)([^.\s,()\[\]{}=+\-*/%!'"]+)""",
+        """((?:内存|memory)\s*\.)([^.\s,()\[\]{}=+\-*/%!'"<>&|]+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -88,9 +88,6 @@ internal object NameProtector {
     /** ${变量} 引用（不含点的才是变量名；含点的是节属性引用） */
     private val VARIABLE_REF = Regex("""\$\{([^}.]*)\}""")
 
-    /** 顶层（或逗号分隔）`名字 = 表达式` 的左侧名字 */
-    private val LHS_BEFORE_EQ = Regex("""(^|[,，])([ \t]*)([^,，=()\s][^,，=()]*?)([ \t]*)(?==)""")
-
     /** 逗号分隔的裸资源名（如 displayTextAppendResource: 资金） */
     private val STANDALONE_NAME = Regex(
         """(^|[,，])([ \t]*)([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff\[\]]*)([ \t]*)(?=$|[,，])"""
@@ -108,19 +105,21 @@ internal object NameProtector {
     fun protect(
         value: String,
         keyEn: String,
-        block: Options = Options.current()
+        block: Options = Options.current(),
+        /** 返回 true 的资源名不保护（白名单允许翻译）；默认全部保护 */
+        allowResourceName: (String) -> Boolean = { false }
     ): Pair<String, List<String>> {
         if (value.isEmpty()) return value to emptyList()
         val masker = Masker()
         var text = value
 
         if (block.resource) {
-            text = masker.mask(text, RESOURCE_REF, 2)
+            text = masker.mask(text, RESOURCE_REF, 2, allow = allowResourceName)
             if (isResourcePropertyKey(keyEn)) {
-                text = masker.maskLhsNames(text)
-                text = masker.mask(text, STANDALONE_NAME, 3, STANDALONE_EXCLUDED)
+                text = masker.maskTopLevelLhsNames(text, allowResourceName)
+                text = masker.mask(text, STANDALONE_NAME, 3, STANDALONE_EXCLUDED, allowResourceName)
             }
-            text = maskHasResourcesArgs(masker, text)
+            text = maskHasResourcesArgs(masker, text, allowResourceName)
         }
 
         if (block.tag && !isTagPropertyKey(keyEn)) {
@@ -131,7 +130,7 @@ internal object NameProtector {
             text = masker.mask(text, MEMORY_REF, 2)
             text = masker.mask(text, MEMORY_AT_TOKEN, 2)
             text = masker.mask(text, MEMORY_QUOTED_ARG, 3)
-            if (isKvpMemoryKey(keyEn)) text = masker.maskLhsNames(text)
+            if (isKvpMemoryKey(keyEn)) text = masker.maskTopLevelLhsNames(text)
             if (isDefineUnitMemoryKey(keyEn)) text = masker.mask(text, DEFINE_MEMORY_NAME, 2)
         }
 
@@ -173,10 +172,14 @@ internal object NameProtector {
 
     // ===== 内部工具 =====
 
-    private fun maskHasResourcesArgs(masker: Masker, text: String): String {
+    private fun maskHasResourcesArgs(
+        masker: Masker,
+        text: String,
+        allowResourceName: (String) -> Boolean
+    ): String {
         return HAS_RESOURCES_CALL.replace(text) { m ->
             val args = m.groupValues[2]
-            val maskedArgs = masker.maskLhsNames(args)
+            val maskedArgs = masker.maskTopLevelLhsNames(args, allowResourceName)
             "${m.groupValues[1]}$maskedArgs${m.groupValues[3]}"
         }
     }
@@ -184,13 +187,20 @@ internal object NameProtector {
     private class Masker {
         val originals = mutableListOf<String>()
 
-        /** 用占位符替换 regex 指定捕获组 */
-        fun mask(text: String, regex: Regex, group: Int, exclude: Set<String> = emptySet()): String {
+        /** 用占位符替换 regex 指定捕获组；allow 返回 true 的片段不保护（白名单允许翻译） */
+        fun mask(
+            text: String,
+            regex: Regex,
+            group: Int,
+            exclude: Set<String> = emptySet(),
+            allow: ((String) -> Boolean)? = null
+        ): String {
             return regex.replace(text) { m ->
                 val g = m.groups[group] ?: return@replace m.value
                 val original = g.value
                 if (original.isBlank()) return@replace m.value
                 if (exclude.isNotEmpty() && original.trim().lowercase() in exclude) return@replace m.value
+                if (allow?.invoke(original) == true) return@replace m.value
                 val ph = "\uE000${originals.size}\uE001"
                 originals.add(original)
                 val start = g.range.first - m.range.first
@@ -199,7 +209,48 @@ internal object NameProtector {
             }
         }
 
-        /** 屏蔽 `名字=表达式` 左侧的名字（资源属性/单位内存变量位置） */
-        fun maskLhsNames(text: String): String = mask(text, LHS_BEFORE_EQ, 3)
+        /**
+         * 只在最外层（括号深度 0）屏蔽 `名字=值` 的左侧名字。
+         * 嵌套函数参数（如 withinRange=500 / greaterThan=0）不动，避免把参数名当资源名/变量名保护。
+         */
+        fun maskTopLevelLhsNames(text: String, allow: ((String) -> Boolean)? = null): String {
+            val out = StringBuilder(text.length)
+            var depth = 0
+            var segStart = 0
+            var i = 0
+            fun flush(end: Int) {
+                if (end <= segStart) return
+                val seg = text.substring(segStart, end)
+                val firstOpen = seg.indexOfFirst { it == '(' || it == '[' || it == '{' }
+                val eq = seg.indexOf('=')
+                if (eq > 0 && (firstOpen < 0 || eq < firstOpen)) {
+                    val lhs = seg.substring(0, eq)
+                    val name = lhs.trim()
+                    if (name.isNotEmpty() && name.none { it.isWhitespace() } && allow?.invoke(name) != true) {
+                        val at = lhs.indexOf(name)
+                        val ph = "\uE000${originals.size}\uE001"
+                        originals.add(name)
+                        out.append(lhs, 0, at).append(ph)
+                        out.append(seg, eq, seg.length)
+                        return
+                    }
+                }
+                out.append(seg)
+            }
+            while (i < text.length) {
+                when (text[i]) {
+                    '(', '[', '{' -> depth++
+                    ')', ']', '}' -> if (depth > 0) depth--
+                    ',', '，' -> if (depth == 0) {
+                        flush(i)
+                        out.append(text[i])
+                        segStart = i + 1
+                    }
+                }
+                i++
+            }
+            flush(text.length)
+            return out.toString()
+        }
     }
 }

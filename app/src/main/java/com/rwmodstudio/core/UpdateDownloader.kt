@@ -69,9 +69,14 @@ object UpdateDownloader {
      * @param onProgress 进度回调
      * @return 下载完成后的文件
      */
-    fun downloadApk(url: String, targetFile: File, onProgress: ProgressListener): File {
+    fun downloadApk(
+        url: String,
+        targetFile: File,
+        onProgress: ProgressListener,
+        apiUrl: String? = null
+    ): File {
         var lastError: Exception? = null
-        for (source in rankSources(url)) {
+        for (source in rankSources(url, apiUrl)) {
             try {
                 return downloadFrom(source, targetFile, onProgress)
             } catch (e: Exception) {
@@ -81,12 +86,32 @@ object UpdateDownloader {
         throw lastError ?: IOException("下载失败")
     }
 
+    /** 候选下载地址：原直链 + 多镜像 + API 资产直链（及其镜像） */
+    private fun candidateUrls(originalUrl: String, apiUrl: String?): List<String> {
+        val list = mutableListOf<String>()
+        list.add(originalUrl)
+        list.addAll(UpdateChecker.proxiedUrls(originalUrl))
+        if (!apiUrl.isNullOrBlank()) {
+            list.add(apiUrl)
+            list.addAll(UpdateChecker.proxiedUrls(apiUrl))
+        }
+        return list.distinct()
+    }
+
+    /** 统一请求头：API 资产地址必须带 Accept: application/octet-stream 才会返回文件 */
+    private fun applyHeaders(conn: HttpURLConnection, url: String) {
+        conn.setRequestProperty("User-Agent", "RustedWarfareModStudio")
+        if (url.contains("/releases/assets/")) {
+            conn.setRequestProperty("Accept", "application/octet-stream")
+        }
+    }
+
     /**
-     * 并发测速：直连与镜像同时各读 1KB，按实测速度从快到慢排序。
+     * 并发测速：所有候选源同时各读 1KB，按实测速度从快到慢排序。
      * 全部探测失败时退回原始顺序（交给后续下载再试）。
      */
-    private fun rankSources(originalUrl: String): List<ProbedSource> {
-        val candidates = listOf(originalUrl, UpdateChecker.proxiedUrl(originalUrl))
+    private fun rankSources(originalUrl: String, apiUrl: String?): List<ProbedSource> {
+        val candidates = candidateUrls(originalUrl, apiUrl)
         val probed = AtomicReferenceArray<ProbedSource?>(candidates.size)
         val threads = candidates.mapIndexed { index, candidate ->
             Thread {
@@ -108,7 +133,7 @@ object UpdateDownloader {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Range", "bytes=0-${PROBE_BYTES - 1}")
-        conn.setRequestProperty("User-Agent", "RustedWarfareModStudio")
+        applyHeaders(conn, url)
         conn.connectTimeout = PROBE_TIMEOUT_MS
         conn.readTimeout = PROBE_TIMEOUT_MS
         try {
@@ -158,6 +183,7 @@ object UpdateDownloader {
         conn.requestMethod = "GET"
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS
+        applyHeaders(conn, url)
         // 临时文件名加唯一后缀：并发/重复下载时不会互相截断同一个 tmp 写坏数据
         val tmp = uniqueTmpFile(targetFile)
         try {
@@ -250,7 +276,7 @@ object UpdateDownloader {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Range", "bytes=${range.first}-${range.last}")
-        conn.setRequestProperty("User-Agent", "RustedWarfareModStudio")
+        applyHeaders(conn, url)
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS
         try {

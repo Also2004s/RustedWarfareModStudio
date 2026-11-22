@@ -75,6 +75,8 @@ class TranslationDict {
     // 预编译统一正则（加载后初始化，避免每次调用 translateInText 时重复编译）
     // @Volatile：写线程重建后保证读线程可见，配合不可变快照整体替换，读侧无锁无 CME
     @Volatile private var enToZhPattern: Regex? = null
+    /** 英→中松口径正则：只排除查重禁用词，不排除资源名白名单（用于统计“关闭四类禁用后”的词条数） */
+    @Volatile private var enToZhLoosePattern: Regex? = null
     @Volatile private var zhToEnPattern: Regex? = null
     @Volatile private var enToZhLookup: Map<String, String> = emptyMap()
     @Volatile private var zhToEnLookup: Map<String, String> = emptyMap()
@@ -975,6 +977,18 @@ class TranslationDict {
             Regex("\\b($escaped)\\b")
         } else null
 
+        // 松口径：只排除查重禁用词，不排除资源名白名单。
+        // 翻译禁用页用它算“关闭全部禁用后会翻译多少”，与当前口径相减即为跳过数。
+        val looseSorted = enToZh.entries
+            .filter { (k, v) ->
+                k.length > 1 && v != k && k !in enToZh.values && v !in disabledZh
+            }
+            .sortedByDescending { it.key.length }
+        enToZhLoosePattern = if (looseSorted.isNotEmpty()) {
+            val escaped = looseSorted.joinToString("|") { Regex.escape(it.key) }
+            Regex("\\b($escaped)\\b")
+        } else null
+
         // 中→英：只用 zhToEn；所有中文（含单字）均参与反向翻译
         // 过滤：中文 key 落在查重禁用词、或对应英文命中资源名白名单的条目都不进入匹配
         val zhSorted = zhToEn.entries
@@ -1224,20 +1238,40 @@ class TranslationDict {
     /** 某个英文资源名是否在资源名白名单里（补全显示用，忽略大小写）。 */
     fun isResourceNameEntry(name: String): Boolean = name.trim().lowercase() in resourceNameWhitelist
 
-    /** 英译中方向：该英文名是否被资源名开关停用 */
-    private fun enBlockedByResourceName(en: String): Boolean =
-        resourceNamesBlocked && en.trim().lowercase() in resourceNameWhitelist
+    /** 英译中方向：白名单现在是「允许翻译名单」，词典层不再按名单过滤 */
+    private fun enBlockedByResourceName(en: String): Boolean = false
 
-    /** 中译英方向：该中文名对应的英文是否被资源名开关停用 */
-    private fun zhBlockedByResourceName(zh: String): Boolean {
-        if (!resourceNamesBlocked) return false
-        val en = zhToEn[zh] ?: return false
-        return en.trim().lowercase() in resourceNameWhitelist
-    }
+    /** 中译英方向：白名单现在是「允许翻译名单」，词典层不再按名单过滤 */
+    private fun zhBlockedByResourceName(zh: String): Boolean = false
 
 
     /** 判断是否是中文 */
     fun isChinese(text: String): Boolean = text.any { it.code in 0x4E00..0x9FFF }
+
+    /** 翻译词条收集器（仅统计线程使用）：记录实际被翻译的 key 与行号 */
+    private val collectSink = ThreadLocal<MutableList<Pair<String, Int>>?>()
+    private val collectLine = ThreadLocal<Int>()
+
+    internal fun startEntryCollection() {
+        collectSink.set(mutableListOf())
+        collectLine.set(0)
+    }
+
+    internal fun setCollectLine(line: Int) {
+        if (collectSink.get() != null) collectLine.set(line)
+    }
+
+    internal fun finishEntryCollection(): List<Pair<String, Int>> {
+        val list = collectSink.get() ?: return emptyList()
+        collectSink.remove()
+        collectLine.remove()
+        return list
+    }
+
+    internal fun recordEntry(key: String) {
+        if (key.isBlank()) return
+        collectSink.get()?.add(key to (collectLine.get() ?: 0))
+    }
 
     /**
      * 在文本中翻译所有匹配的key（用于value中的文本翻译）
@@ -1252,8 +1286,29 @@ class TranslationDict {
 
         // 统一正则单次扫描替换，性能远高于逐键循环
         return pattern.replace(text) { match ->
-            lookup[match.groupValues[1]] ?: match.value
+            val key = match.groupValues[1]
+            val hit = lookup[key]
+            if (hit != null && hit != match.value) recordEntry(key)
+            hit ?: match.value
         }
+    }
+
+    /** 统计文本中「英→中」会命中的词典词条数（只跑正则，不生成译文）。 */
+    internal fun countEnToZhMatches(text: String): Int {
+        val pattern = enToZhPattern ?: return 0
+        return pattern.findAll(text).count()
+    }
+
+    /** 列出文本中「英→中」会命中的词典 key（按出现次数，不去重）。 */
+    internal fun collectEnToZhMatches(text: String): List<String> {
+        val pattern = enToZhPattern ?: return emptyList()
+        return pattern.findAll(text).map { it.groupValues[1] }.toList()
+    }
+
+    /** 松口径（不排除资源名白名单）的英→中命中列表，用于统计关闭禁用后的词条数。 */
+    internal fun collectLooseEnToZhMatches(text: String): List<String> {
+        val pattern = enToZhLoosePattern ?: return emptyList()
+        return pattern.findAll(text).map { it.groupValues[1] }.toList()
     }
 
     /** 获取翻译统计 */

@@ -50,20 +50,14 @@ class TranslationBlockTest {
     }
 
     @Test
-    fun resourceNameWhitelistBlocksBothDirections() {
+    fun resourceNameWhitelistDoesNotFilterDictionary() {
         val dict = newDict()
         dict.setResourceNameBlocked(true, setOf("credits"))
-
-        assertEquals("credits", dict.getTranslation("credits"))
-        assertEquals("资金", dict.getTranslationBack("资金"))
-        // 白名单外的资源名照常翻译
-        assertEquals("能量", dict.getTranslation("energy"))
-        assertEquals("energy", dict.getTranslationBack("能量"))
-
-        // 关闭开关后恢复
-        dict.setResourceNameBlocked(false, emptySet())
+        // 白名单现在是“允许翻译名单”：词典层不再按名单过滤，资源名仍可双向翻译；
+        // 名单外资源名由引擎侧名字保护决定是否保持原文。
         assertEquals("资金", dict.getTranslation("credits"))
         assertEquals("credits", dict.getTranslationBack("资金"))
+        assertEquals("energy", dict.getTranslationBack("能量"))
     }
 
     @Test

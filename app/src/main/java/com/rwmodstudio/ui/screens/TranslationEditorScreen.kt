@@ -54,7 +54,11 @@ private var activeRefreshJob: Job? = null
 private val translationSaveMutex = Mutex()
 
 @Composable
-fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFilterType.ALL) {
+fun TranslationEditorScreen(
+    initialFilter: TranslationFilterType = TranslationFilterType.ALL,
+    /** 查重结果点「跳转」时打开对应文件并定位到行（absolute path, 1 基行号） */
+    onJumpToLine: (String, Int) -> Unit = { _, _ -> }
+) {
     val context = LocalContext.current
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val scope = rememberCoroutineScope()
@@ -479,6 +483,10 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
             disabledWords = disabledWords,
             onDisable = { word -> disableWords(listOf(word)) },
             onDisableAll = { disableWords(dups.map { it.key }.toSet() - disabledWords) },
+            onJumpToLine = { _, path, line ->
+                showDedup = null
+                onJumpToLine(path, line)
+            },
             onDismiss = { showDedup = null },
             onModify = { showDedup = null; filterType = TranslationFilterType.DEDUP }
         )

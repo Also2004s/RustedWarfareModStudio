@@ -12,8 +12,12 @@ import com.rwmodstudio.core.SettingsManager
  */
 internal object TranslationRules {
 
+    /** 规则语义版本：白名单从“停用名单”改为“允许名单”等语义变化时递增，强制旧翻译缓存失效 */
+    private const val RULES_VERSION = 2
+
     fun fingerprint(): String {
         val sb = StringBuilder()
+        sb.append("v$RULES_VERSION|")
         sb.append(if (SettingsManager.devTranslationBlockTag) '1' else '0')
         sb.append(if (SettingsManager.devTranslationBlockResource) '1' else '0')
         sb.append(if (SettingsManager.devTranslationBlockMemory) '1' else '0')

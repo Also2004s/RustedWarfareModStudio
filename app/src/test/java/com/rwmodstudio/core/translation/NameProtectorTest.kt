@@ -3,6 +3,7 @@ package com.rwmodstudio.core.translation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 四类名字在整行翻译链路里的原位保护（[NameProtector]）。
@@ -61,6 +62,46 @@ class NameProtectorTest {
         val (masked, restored) = protectAndRestore("内存.攻击目标 + 读取单位内存('攻击目标')", "requirement")
         assertFalse(masked.contains("攻击目标"), "内存名不应翻译：$masked")
         assertEquals("内存.攻击目标 + 读取单位内存('攻击目标')", restored)
+    }
+
+    @Test
+    fun whitelistedResourceNameIsNotProtected() {
+        val value = "自身资源.credits + 自身资源.移动"
+        val (masked, originals) = NameProtector.protect(
+            value,
+            "requirement",
+            allowResourceName = { it == "credits" }
+        )
+        assertTrue(masked.contains("credits"), "白名单资源名应允许翻译：$masked")
+        assertFalse(masked.contains("移动"), "名单外资源名应保持原文：$masked")
+        assertEquals(value, NameProtector.restore(masked, originals))
+    }
+
+    @Test
+    fun resourceNameStopsAtComparisonOperator() {
+        val value = "自身资源.总战力<memory.攻击目标.资源.总战力*1.08"
+        val (masked, restored) = protectAndRestore(value, "requirement")
+        assertFalse(masked.contains("总战力"), "资源名应被保护：$masked")
+        assertTrue(masked.contains("memory"), "比较符后的 memory 不应被吞进资源名：$masked")
+        assertEquals(value, restored)
+    }
+
+    @Test
+    fun nestedFunctionParamsAreNotTreatedAsResourceNames() {
+        val value = "对地范围=选择(敌人有此单位数量(需标签=\"对地\",withinRange=500,greaterThan=0),0)"
+        val (masked, restored) = protectAndRestore(value, "setResourcesWithLogic")
+        assertFalse(masked.contains("对地范围"), "最外层资源名应被保护：$masked")
+        assertTrue(masked.contains("withinRange"), "嵌套参数名不应被保护：$masked")
+        assertTrue(masked.contains("greaterThan"), "嵌套参数名不应被保护：$masked")
+        assertEquals(value, restored)
+    }
+
+    @Test
+    fun doubleQuotedTagValueWithSpaceIsFullyProtected() {
+        val value = "自身有标签(有标签=\"海军 进攻\")"
+        val (masked, restored) = protectAndRestore(value, "requirement")
+        assertFalse(masked.contains("海军"), "双引号内带空格的名字也应完整保护：$masked")
+        assertEquals(value, restored)
     }
 
     @Test

@@ -41,11 +41,13 @@ internal fun translateValueName(dict: TranslationDict?, name: String): String {
 }
 
 /**
- * 资源名补全的显示/插入值：`资源名禁用翻译` 打开时一律用英文原名，
- * 覆盖所有资源名补全位置（资源属性、自身资源. 链、自身有资源(...) 参数名等）。
+ * 资源名补全的显示/插入值：`资源名禁用翻译` 打开时，只有白名单里的资源名照常翻译，
+ * 名单外的资源名一律用英文原名。覆盖所有资源名补全位置。
  */
 internal fun translateResourceName(dict: TranslationDict?, name: String): String =
-    if (com.rwmodstudio.core.SettingsManager.devTranslationBlockResource) name
+    if (com.rwmodstudio.core.SettingsManager.devTranslationBlockResource &&
+        !com.rwmodstudio.core.translation.ResourceNameWhitelist.contains(name)
+    ) name
     else translateValueName(dict, name)
 
 /**
