@@ -57,7 +57,7 @@ internal object NameProtector {
 
     /** 标签参数：`有标签=名字` / `withActionTag="名字"` 等（参数表里 tag/globalTag/messageTag/actionTag 的全部键名与中文名） */
     private val TAG_PARAM_RHS = Regex(
-        """(有标签|需标签|有全局标签|行动标签|消息标签|withTag|withActionTag|includes|hasTag|globalTag|messageTag|actionTag)\s*=\s*('[^']*'|"[^"]*"|[^,，)）、\s]+)""",
+        """(有标签|需标签|有全局标签|行动标签|消息标签|withTag|withActionTag|includes|hasTag|globalTag|messageTag|actionTag)\s*=\s*('[^']*'|"[^"]*"|[^,)\s]+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -69,7 +69,7 @@ internal object NameProtector {
 
     /** `@memory 名字` token 引用 */
     private val MEMORY_AT_TOKEN = Regex(
-        """(@memory\s+)([^\s,，:：()\[\]]+)""",
+        """(@memory\s+)([^\s,:()\[\]]+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -81,7 +81,7 @@ internal object NameProtector {
 
     /** 定义单位内存声明：`类型 名字` 里的名字 */
     private val DEFINE_MEMORY_NAME = Regex(
-        """(\b(?:int|float|string|bool|boolean|number|text|logic|unit)(?:\[\])?\s+)([^\s,，]+)""",
+        """(\b(?:int|float|string|bool|boolean|number|text|logic|unit)(?:\[\])?\s+)([^\s,]+)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -90,7 +90,7 @@ internal object NameProtector {
 
     /** 逗号分隔的裸资源名（如 displayTextAppendResource: 资金） */
     private val STANDALONE_NAME = Regex(
-        """(^|[,，])([ \t]*)([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff\[\]]*)([ \t]*)(?=$|[,，])"""
+        """(^|,)([ \t]*)([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff\[\]]*)([ \t]*)(?=$|,)"""
     )
 
     /** 裸资源名里不参与保护的布尔字面量（还原后本来也不变，避免无意义占位） */

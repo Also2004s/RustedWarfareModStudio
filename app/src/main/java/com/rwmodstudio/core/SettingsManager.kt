@@ -200,10 +200,10 @@ object SettingsManager {
         try {
             // 快捷符号栏：旧版内置默认（= : ; # [ ] , . "）一次性覆盖为新默认（手机实测配置）。
             // 用版本标记保证只覆盖一次，之后用户自己的修改不再被动。
-            if (settings.getInt("custom_symbols_defaults_version", 1) < 3) {
+            if (settings.getInt("custom_symbols_defaults_version", 1) < 4) {
                 settings.edit()
                     .putString("custom_symbols_json", DEFAULT_CUSTOM_SYMBOLS)
-                    .putInt("custom_symbols_defaults_version", 3)
+                    .putInt("custom_symbols_defaults_version", 4)
                     .apply()
                 Log.d(TAG, "Migrated custom_symbols_json to new default (one-time)")
             }

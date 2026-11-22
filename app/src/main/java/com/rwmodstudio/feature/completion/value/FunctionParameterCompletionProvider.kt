@@ -518,7 +518,7 @@ internal fun usedParamKeysInParens(lineBeforeCursor: String, paramKeys: List<Str
     val used = mutableSetOf<String>()
     for (key in paramKeys) {
         if (key.isBlank() || !afterOpen.contains(key)) continue
-        if (Regex("(^|[，,\\s（(])" + Regex.escape(key) + "\\s*=").containsMatchIn(afterOpen)) {
+        if (Regex("(^|[,\\s(])" + Regex.escape(key) + "\\s*=").containsMatchIn(afterOpen)) {
             used.add(key)
         }
     }

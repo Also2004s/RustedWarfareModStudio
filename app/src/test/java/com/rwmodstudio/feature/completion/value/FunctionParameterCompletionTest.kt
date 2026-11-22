@@ -353,13 +353,24 @@ class FunctionParameterCompletionTest {
     }
 
     @Test
-    fun usedParamsDetectedFullWidthThenHalfWidth() {
+    fun usedParamsIgnoresFullWidthCommaBoundary() {
         val used = usedParamKeysInParens(
             "requireConditional: if 敌人有此单位数量(需标签='fish'，超过=5,",
             listOf("需标签", "超过", "少于")
         )
         assertTrue("需标签" in used)
-        assertTrue("超过" in used, "半角逗号后 超过 应判为已使用")
+        assertFalse("超过" in used, "中文逗号不是参数分隔符，不能把它后面的 超过 当作独立已用参数")
+        assertTrue("少于" !in used)
+    }
+
+    @Test
+    fun usedParamsDetectedAfterAsciiComma() {
+        val used = usedParamKeysInParens(
+            "requireConditional: if 敌人有此单位数量(需标签='fish',超过=5,",
+            listOf("需标签", "超过", "少于")
+        )
+        assertTrue("需标签" in used)
+        assertTrue("超过" in used, "英文逗号后 超过 应判为已使用")
         assertTrue("少于" !in used)
     }
 

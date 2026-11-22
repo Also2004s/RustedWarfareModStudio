@@ -35,8 +35,9 @@ class CompletionParsingTest {
     }
 
     @Test
-    fun replaceablePrefixSplitsOnFullWidthComma() {
-        assertEquals("标", replaceableValuePrefix("标签1，标"), "full-width comma should be a delimiter")
+    fun replaceablePrefixDoesNotSplitOnFullWidthComma() {
+        // 中文逗号不是 ini 语法的一部分，不能当成英文逗号分隔值片段
+        assertEquals("标签1，标", replaceableValuePrefix("标签1，标"))
     }
 
     @Test
@@ -87,12 +88,12 @@ class CompletionParsingTest {
         assertFalse(shouldSuppressEmptyValueFallback("", true, true), "无键名不抑制")
     }
 
-    // ===== 自动补全触发符：半角与全角逗号都应作为单词边界 =====
+    // ===== 自动补全触发符：只认英文符号，中文标点不能当英文符号 =====
 
     @Test
-    fun triggerCharsIncludeBothCommas() {
+    fun triggerCharsContainAsciiCommaOnly() {
         assertTrue(',' in CompletionProvider.AUTO_COMPLETE_TRIGGER_CHARS, "半角逗号应为触发符")
-        assertTrue('，' in CompletionProvider.AUTO_COMPLETE_TRIGGER_CHARS, "全角逗号应为触发符（与 replaceableValuePrefix 一致）")
+        assertFalse('，' in CompletionProvider.AUTO_COMPLETE_TRIGGER_CHARS, "全角逗号不是 ini 语法，不能当触发符")
     }
 
     // ===== 翻译库桥接校验（shouldBridgeToTranslationLibrary） =====
