@@ -2851,10 +2851,14 @@ fun EditorScreen(
         var draggingSymbol by remember { mutableStateOf(-1) }
         var dragOffsetY by remember { mutableStateOf(0f) }
         var symbolRowHeight by remember { mutableStateOf(1f) }
+        var showResetConfirm by remember { mutableStateOf(false) }
         AppDialog(
             onDismissRequest = { showSymbolEditor = false },
             title = "编辑快捷符号",
             actions = {
+                // 重置放左下角，点击后二次确认
+                DialogActionButton("重置", color = RustedError) { showResetConfirm = true }
+                Spacer(Modifier.weight(1f))
                 DialogActionButton("保存") {
                     val symValue = editingSymbolValue.text
                     if (editingSymbolLabel.isNotEmpty() && symValue.isNotEmpty()) {
@@ -2865,13 +2869,6 @@ fun EditorScreen(
                         }
                         saveSymbols(); editingSymbolLabel = ""; editingSymbolValue = TextFieldValue(""); editingSymbolIndex = -1
                     }
-                }
-                DialogActionButton("重置", color = RustedError) {
-                    customSymbols = SettingsManager.defaultCustomSymbols()
-                    saveSymbols()
-                    editingSymbolIndex = -1
-                    editingSymbolLabel = ""
-                    editingSymbolValue = TextFieldValue("")
                 }
                 DialogActionButton("关闭", color = RustedOnBackground) { showSymbolEditor = false }
             }
@@ -2978,6 +2975,30 @@ fun EditorScreen(
                     val newText = StringBuilder(tf.text).insert(offset, markerStr).toString()
                     editingSymbolValue = TextFieldValue(newText, TextRange(offset + markerStr.length))
                 }, modifier = Modifier.align(Alignment.End)) { Text("插入 $CURSOR_MARKER（光标位置）") }
+            }
+        }
+        // 重置二次确认
+        if (showResetConfirm) {
+            AppDialog(
+                onDismissRequest = { showResetConfirm = false },
+                title = "重置符号栏",
+                actions = {
+                    DialogActionButton("恢复默认", color = RustedError) {
+                        customSymbols = SettingsManager.defaultCustomSymbols()
+                        saveSymbols()
+                        editingSymbolIndex = -1
+                        editingSymbolLabel = ""
+                        editingSymbolValue = TextFieldValue("")
+                        showResetConfirm = false
+                    }
+                    DialogActionButton("取消", color = RustedOnBackground) { showResetConfirm = false }
+                }
+            ) {
+                Text(
+                    "当前符号栏会被覆盖为默认符号，此操作不可撤销。",
+                    fontSize = 13.sp,
+                    color = RustedOnBackground
+                )
             }
         }
     }

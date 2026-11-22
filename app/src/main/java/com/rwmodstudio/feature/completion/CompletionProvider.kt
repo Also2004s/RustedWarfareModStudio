@@ -590,8 +590,7 @@ class CompletionProvider(
                     soundFiles = soundFiles,
                     chainSectionNames = chainSectionNames,
                     currentFileDir = currentFileDir,
-                    projectRoot = projectRoot,
-                    forceBooleanExpression = forceBooleanValueLine
+                    projectRoot = projectRoot
                 )
                 // 同 label 去重：self.readUnitMemory() 与 readUnitMemory 翻译后同为 读取单位内存，
                 // 避免同一补全重复出现两行（同 label 即同插入文本）

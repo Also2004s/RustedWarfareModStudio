@@ -136,9 +136,7 @@ class ValueCompletionAggregator(
         soundFiles: Set<String> = emptySet(),
         chainSectionNames: Map<String, Set<String>> = emptyMap(),
         currentFileDir: String = "",
-        projectRoot: String = "",
-        /** @global/@define 冒号后的值位置：按「前面已有 if」的布尔表达式上下文补全 */
-        forceBooleanExpression: Boolean = false
+        projectRoot: String = ""
     ): List<CompletionProvider.CompletionItem> {
         return getValueCompletionsGrouped(
             context = context,
@@ -174,8 +172,7 @@ class ValueCompletionAggregator(
             soundFiles = soundFiles,
             chainSectionNames = chainSectionNames,
             currentFileDir = currentFileDir,
-            projectRoot = projectRoot,
-            forceBooleanExpression = forceBooleanExpression
+            projectRoot = projectRoot
         ).flatMap { it.items }
     }
 
@@ -217,8 +214,7 @@ class ValueCompletionAggregator(
         soundFiles: Set<String> = emptySet(),
         chainSectionNames: Map<String, Set<String>> = emptyMap(),
         currentFileDir: String = "",
-        projectRoot: String = "",
-        forceBooleanExpression: Boolean = false
+        projectRoot: String = ""
     ): List<ProviderResult> {
         val request = ValueCompletionRequest(
             context = context,
@@ -256,8 +252,7 @@ class ValueCompletionAggregator(
             soundFiles = soundFiles,
             chainSectionNames = chainSectionNames,
             currentFileDir = currentFileDir,
-            projectRoot = projectRoot,
-            forceBooleanExpression = forceBooleanExpression
+            projectRoot = projectRoot
         )
 
         val results = mutableListOf<ProviderResult>()

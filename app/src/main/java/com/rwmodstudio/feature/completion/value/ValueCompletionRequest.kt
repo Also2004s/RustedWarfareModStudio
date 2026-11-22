@@ -54,13 +54,7 @@ data class ValueCompletionRequest(
     /** 当前编辑文件所在目录（绝对路径），用于图片/音效「同目录裸名、跨目录 ROOT:」补全判定 */
     val currentFileDir: String = "",
     /** 项目根目录（绝对路径），用于将项目相对路径归一到 ROOT:/ 前缀 */
-    val projectRoot: String = "",
-    /**
-     * 强制按「布尔表达式 / if 语句」上下文补全。
-     * 用于 @global / @define 变量定义冒号后的值位置：与 `需要条件:if ...` 同口径，
-     * 提供 真/假/if 入口、if 后的操作数集、and/or/not 与比较/算术运算符。
-     */
-    val forceBooleanExpression: Boolean = false
+    val projectRoot: String = ""
 ) {
     /**
      * 在当前节（或全局）中查找属性定义（数据来自自定义补全三表）。

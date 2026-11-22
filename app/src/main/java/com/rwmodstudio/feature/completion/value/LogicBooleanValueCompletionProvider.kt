@@ -7,6 +7,16 @@ import com.rwmodstudio.feature.completion.completionMatchLevel
 import com.rwmodstudio.feature.completion.LOGIC_SYNTAX_ITEMS
 
 /**
+ * @global / @define 变量定义行（冒号后是值位置）。
+ * 该位置按「前面已经写了 if」的布尔表达式上下文补全，与 需要条件:if | 完全同口径。
+ */
+private val DIRECTIVE_VALUE_LINE_REGEX =
+    Regex("""^\s*@(define|global)\s+[^:]+:""", RegexOption.IGNORE_CASE)
+
+internal fun isDirectiveValueLine(textBeforeCursor: String): Boolean =
+    DIRECTIVE_VALUE_LINE_REGEX.containsMatchIn(textBeforeCursor.substringAfterLast('\n'))
+
+/**
  * 值名翻译：剥离参数括号取基名后交给翻译引擎（TranslationDict.getValueTranslation）翻译。
  * 带参函数名（如 select(bool, textA, textB)、distance(x1, y1, x2, y2)）在数据里是「参数签名」形式，
  * 直接翻译查不到（翻译库存的是基名 select/distance）。剥离 `(...)` 后取基名，翻译引擎命中返回中文
@@ -263,10 +273,10 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
     private var signatureCache: Map<String, List<LogicTarget>>? = null
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
-        // @global / @define 冒号后的值位置：按「前面已有 if」的布尔表达式上下文补全。
-        // 括号内若是已知命名参数函数（如 队伍中此单位数量(），让位给参数 Provider——
-        // 与 需要条件 里的抑制口径一致，否则参数列表会被操作数淹没。
-        if (request.forceBooleanExpression) {
+        // @global / @define 冒号后的值：按「前面已有 if」的布尔表达式上下文补全。
+        // 括号内若是已知命名参数函数（如 队伍中此单位数量(），让位给参数 Provider，
+        // 与 需要条件 里的抑制口径一致。
+        if (isDirectiveValueLine(request.textBeforeCursor)) {
             if (request.isInsideParentheses() &&
                 isKnownParamFunctionContext(request.textBeforeCursor, request.context, request.translationDict)
             ) return false
@@ -369,9 +379,11 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
                 ?.let { memoryTypeToLogicTarget(it) } ?: LogicTarget.UNKNOWN
             else LogicTarget.UNKNOWN
         } else null
+        // @global/@define 冒号后的值行：按「前面已有 if」处理
+        val directiveValueLine = isDirectiveValueLine(request.textBeforeCursor)
         val propertyTarget = when {
             // @global / @define 冒号后的值：固定按布尔表达式（if 语句）上下文
-            request.forceBooleanExpression -> LogicTarget.BOOLEAN
+            directiveValueLine -> LogicTarget.BOOLEAN
             // %{...} 插值内：无条件按「布尔值表达式」弹补全（布尔/数值/文本/任意/单位标记全集），
             // 不依赖外层属性类型或上下文推断——插值本质是逻辑表达式，无需额外条件。
             interpFragment != null -> LogicTarget.BOOLEAN
@@ -386,7 +398,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         // @global/@define 冒号后的值：按「前面已经写了 if」处理——状态机直接从 if 后的操作数开始，
         // 不会再弹 if/真/假 入口（与 需要条件:if | 光标处完全同口径）。
         val exprText = when {
-            request.forceBooleanExpression -> "if " + when {
+            directiveValueLine -> "if " + when {
                 rhsFragment != null -> rhsFragment
                 interpFragment != null -> interpFragment
                 else -> request.textBeforeCursor.substringAfter(':')
@@ -450,7 +462,7 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         // filterPrefix 会把空格当分隔，输入 `自动触发:if `（if 后空格）时被切空而误判为空入口；
         // 用 exprText（光标前到 `:` 的整段）判断，`if ` 非空白 → 进入表达式状态机。
         // @global/@define 冒号后视为「已经处在 if 条件内部」：不再弹 if/真/假 入口（与 需要条件:if 后一致）
-        val isBooleanEntry = !request.forceBooleanExpression &&
+        val isBooleanEntry = !directiveValueLine &&
             expectedTarget == LogicTarget.BOOLEAN && !request.isInsideParentheses() &&
             exprText.isBlank() && interpFragment == null
         // 括号内布尔表达式起点（选择( 第1参 / 函数布尔参数 空前缀）：此为表达式起点，
