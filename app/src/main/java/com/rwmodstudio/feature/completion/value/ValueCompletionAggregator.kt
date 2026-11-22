@@ -133,13 +133,13 @@ class ValueCompletionAggregator(
             memoryTypes = memoryTypes,
             forceBooleanExpression = true
         )
-        val items = forcedBooleanProvider.provideCompletionItems(request).toMutableList()
-        // 光标在函数括号内（如 @global v:队伍中此单位数量(需标签=）时，参数名/参数值由参数 Provider 补，
-        // 与 需要条件 里的同名函数行为一致。
+        // 括号内若是已知命名参数函数，参数补全优先且只返回参数（与 需要条件 同口径），
+        // 不再混入布尔操作数；纯位置参数函数（选择( 等）没有命名参数 → 回落到逻辑表达式。
         if (request.isInsideParentheses() && options.functionParamEnabled) {
-            items += functionParamProvider.provideCompletionItems(request)
+            val paramItems = functionParamProvider.provideCompletionItems(request)
+            if (paramItems.isNotEmpty()) return paramItems
         }
-        return items.distinctBy { it.label }
+        return forcedBooleanProvider.provideCompletionItems(request)
     }
 
     /**

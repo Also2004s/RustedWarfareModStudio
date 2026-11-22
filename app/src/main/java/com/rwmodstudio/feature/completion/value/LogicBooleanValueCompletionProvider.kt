@@ -263,8 +263,15 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
     private var signatureCache: Map<String, List<LogicTarget>>? = null
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
-        // @global / @define 冒号后的值位置：固定按布尔表达式（if 语句）上下文补全
-        if (request.forceBooleanExpression) return true
+        // @global / @define 冒号后的值位置：按「前面已有 if」的布尔表达式上下文补全。
+        // 括号内若是已知命名参数函数（如 队伍中此单位数量(），让位给参数 Provider——
+        // 与 需要条件 里的抑制口径一致，否则参数列表会被操作数淹没。
+        if (request.forceBooleanExpression) {
+            if (request.isInsideParentheses() &&
+                isKnownParamFunctionContext(request.textBeforeCursor, request.context, request.translationDict)
+            ) return false
+            return true
+        }
         // 括号内：命名参数函数（self.自身有标签(需标签=) 等）由 FunctionParameterCompletionProvider 处理，此处抑制；
         // 纯位置参数函数（选择(/rnd(/int( 等，如 选择(布尔条件, 单位参考, 任意逻辑表达式)）不在参数表，
         // 由本 Provider 按参数位置类型补逻辑表达式（选择( 第1参→布尔）。

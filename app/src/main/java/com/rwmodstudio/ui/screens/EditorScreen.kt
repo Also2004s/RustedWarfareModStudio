@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -2948,8 +2949,16 @@ fun EditorScreen(
                     }
                 } }
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                Text("点击条目可选中（高亮）并覆盖保存；再次点击取消高光，保存即新建。长按条目上下拖动可调整符号排序", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                Text("在输出值中放一个 $CURSOR_MARKER 标记，插入后光标会停在此处；不放则停在末尾", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
+                // 所有提示合并成一行，超宽滚动播放，避免弹窗被说明文字占满
+                Text(
+                    "点击条目选中并覆盖保存；再点一次取消高光，保存即新建；长按拖动排序；输出里的 $CURSOR_MARKER 标记决定插入后光标位置",
+                    fontSize = 11.sp,
+                    color = RustedOnBackground.copy(alpha = 0.5f),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().basicMarquee()
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(editingSymbolLabel, { editingSymbolLabel = it }, label = { Text("显示") }, singleLine = true, modifier = Modifier.weight(1f), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp))
                     Spacer(Modifier.width(8.dp))
