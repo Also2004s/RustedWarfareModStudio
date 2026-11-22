@@ -1327,58 +1327,46 @@ fun SoraCodeEditor(
 
             fun showCursorPad(anchor: android.view.View) {
                 cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
-                val padSize = (132 * density).toInt()
-                val cell = padSize / 3
-                val lineColor = (barFg and 0x00FFFFFF) or 0x40000000
-                val grid = android.widget.GridLayout(ctx).apply {
-                    rowCount = 3
-                    columnCount = 3
+                val padSize = (140 * density).toInt()
+                val arrowSize = (44 * density).toInt()
+                val edge = (8 * density).toInt()
+                // 圆形背景：80% 不透明（透出 20%）
+                val padBg = (barBg and 0x00FFFFFF) or (204 shl 24)
+                val container = android.widget.FrameLayout(ctx).apply {
                     background = android.graphics.drawable.GradientDrawable().apply {
-                        cornerRadius = 14 * density
-                        setColor(barBg)
-                        setStroke((1 * density).toInt(), lineColor)
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(padBg)
                     }
                     elevation = 10 * density
+                    // 点圆内空白（非箭头）也关闭
+                    setOnClickListener { cursorPadRef.value?.dismiss() }
                 }
-                fun addArrow(drawableId: Int, dx: Int, dy: Int, row: Int, colIdx: Int) {
+                fun addArrow(drawableId: Int, dx: Int, dy: Int, gravity: Int, l: Int, t: Int, r: Int, b: Int) {
                     val btn = android.widget.ImageButton(ctx).apply {
                         setImageDrawable(ContextCompat.getDrawable(ctx, drawableId))
                         setColorFilter(barFg)
                         scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                        val p = (8 * density).toInt()
+                        val p = (6 * density).toInt()
                         setPadding(p, p, p, p)
-                        setOnClickListener { moveCursorBy(dx, dy) }
+                        setOnClickListener {
+                            moveCursorBy(dx, dy)
+                            cursorPadRef.value?.dismiss()
+                        }
                     }
-                    grid.addView(
+                    container.addView(
                         btn,
-                        android.widget.GridLayout.LayoutParams(
-                            android.widget.GridLayout.spec(row),
-                            android.widget.GridLayout.spec(colIdx)
-                        ).apply { width = cell; height = cell }
+                        android.widget.FrameLayout.LayoutParams(arrowSize, arrowSize, gravity).apply {
+                            leftMargin = l; topMargin = t; rightMargin = r; bottomMargin = b
+                        }
                     )
                 }
-                addArrow(R.drawable.ic_arrow_up, 0, -1, 0, 1)
-                addArrow(R.drawable.ic_arrow_left, -1, 0, 1, 0)
-                addArrow(R.drawable.ic_arrow_right, 1, 0, 1, 2)
-                addArrow(R.drawable.ic_arrow_down, 0, 1, 2, 1)
-                // 轮盘中心圆点
-                grid.addView(
-                    android.view.View(ctx).apply {
-                        background = android.graphics.drawable.GradientDrawable().apply {
-                            shape = android.graphics.drawable.GradientDrawable.OVAL
-                            setColor(lineColor)
-                        }
-                    },
-                    android.widget.GridLayout.LayoutParams(
-                        android.widget.GridLayout.spec(1),
-                        android.widget.GridLayout.spec(1)
-                    ).apply {
-                        width = (8 * density).toInt()
-                        height = (8 * density).toInt()
-                        setGravity(android.view.Gravity.CENTER)
-                    }
-                )
-                val popup = android.widget.PopupWindow(grid, padSize, padSize, false).apply {
+                val centerH = android.view.Gravity.CENTER_HORIZONTAL
+                val centerV = android.view.Gravity.CENTER_VERTICAL
+                addArrow(R.drawable.ic_arrow_up, 0, -1, android.view.Gravity.TOP or centerH, 0, edge, 0, 0)
+                addArrow(R.drawable.ic_arrow_down, 0, 1, android.view.Gravity.BOTTOM or centerH, 0, 0, 0, edge)
+                addArrow(R.drawable.ic_arrow_left, -1, 0, android.view.Gravity.START or centerV, edge, 0, 0, 0)
+                addArrow(R.drawable.ic_arrow_right, 1, 0, android.view.Gravity.END or centerV, 0, 0, edge, 0)
+                val popup = android.widget.PopupWindow(container, padSize, padSize, false).apply {
                     isOutsideTouchable = true
                     setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
                     elevation = 10 * density
@@ -1388,6 +1376,12 @@ fun SoraCodeEditor(
                 cursorPadRef.value = popup
             }
 
+            // 长按弹出轮盘后，手指继续拖向某方向即触发并关闭轮盘
+            var padHoldActive = false
+            var padHoldTriggered = false
+            var padDownX = 0f
+            var padDownY = 0f
+
             val cursorPadButton = android.widget.ImageButton(ctx).apply {
                 tag = "cursor_pad"
                 setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_cursor))
@@ -1395,10 +1389,55 @@ fun SoraCodeEditor(
                 resolveRipple(ctx)?.let { background = it }
                 scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+                // 单击左移
                 setOnClickListener { moveCursorBy(-1, 0) }
                 setOnLongClickListener {
+                    padHoldActive = true
+                    padHoldTriggered = false
                     showCursorPad(this)
                     true
+                }
+                setOnTouchListener { _, ev ->
+                    when (ev.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            padDownX = ev.rawX
+                            padDownY = ev.rawY
+                            padHoldActive = false
+                            padHoldTriggered = false
+                            false
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            if (padHoldActive && !padHoldTriggered) {
+                                val dx = ev.rawX - padDownX
+                                val dy = ev.rawY - padDownY
+                                val threshold = 26 * density
+                                if (kotlin.math.abs(dx) > threshold || kotlin.math.abs(dy) > threshold) {
+                                    if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                        moveCursorBy(if (dx > 0) 1 else -1, 0)
+                                    } else {
+                                        moveCursorBy(0, if (dy > 0) 1 else -1)
+                                    }
+                                    padHoldTriggered = true
+                                    cursorPadRef.value?.dismiss()
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        android.view.MotionEvent.ACTION_UP,
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            if (ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL &&
+                                padHoldActive && !padHoldTriggered
+                            ) {
+                                cursorPadRef.value?.dismiss()
+                            }
+                            padHoldActive = false
+                            padHoldTriggered = false
+                            false
+                        }
+                        else -> false
+                    }
                 }
             }
 
