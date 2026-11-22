@@ -1327,9 +1327,9 @@ fun SoraCodeEditor(
 
             fun showCursorPad(anchor: android.view.View) {
                 cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
-                // 轮盘直径 / 箭头格大小 / 距边缘间距：收紧，避免圆盘过大、内容与边框之间留白太多
-                val padSize = (116 * density).toInt()
-                val arrowSize = (40 * density).toInt()
+                // 轮盘直径 / 箭头格大小 / 距边缘间距：格子加大，留白收紧
+                val padSize = (124 * density).toInt()
+                val arrowSize = (48 * density).toInt()
                 val edge = (4 * density).toInt()
                 // 圆形背景：90% 不透明（透出 10%）
                 val padBg = (barBg and 0x00FFFFFF) or (230 shl 24)
@@ -1380,9 +1380,8 @@ fun SoraCodeEditor(
                 cursorPadRef.value = popup
             }
 
-            // 长按弹出轮盘后，手指继续拖向某方向即触发并关闭轮盘
+            // 长按弹出轮盘后，拖动方向在松手时按扇形判定并触发
             var padHoldActive = false
-            var padHoldTriggered = false
             var padDownX = 0f
             var padDownY = 0f
 
@@ -1397,7 +1396,6 @@ fun SoraCodeEditor(
                 setOnClickListener { moveCursorBy(-1, 0) }
                 setOnLongClickListener {
                     padHoldActive = true
-                    padHoldTriggered = false
                     showCursorPad(this)
                     true
                 }
@@ -1410,35 +1408,34 @@ fun SoraCodeEditor(
                             padDownX = ev.rawX
                             padDownY = ev.rawY
                             padHoldActive = false
-                            padHoldTriggered = false
                             false
                         }
-                        android.view.MotionEvent.ACTION_MOVE -> {
-                            if (padHoldActive && !padHoldTriggered) {
-                                val dx = ev.rawX - padDownX
-                                val dy = ev.rawY - padDownY
-                                val threshold = 26 * density
-                                if (kotlin.math.abs(dx) > threshold || kotlin.math.abs(dy) > threshold) {
-                                    if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
-                                        moveCursorBy(if (dx > 0) 1 else -1, 0)
-                                    } else {
-                                        moveCursorBy(0, if (dy > 0) 1 else -1)
+                        android.view.MotionEvent.ACTION_MOVE -> false
+                        android.view.MotionEvent.ACTION_UP -> {
+                            v.parent?.requestDisallowInterceptTouchEvent(false)
+                            // 松手才判定：按手指最终所在的扇形方向触发，然后轮盘消失
+                            if (padHoldActive) {
+                                val dx = (ev.rawX - padDownX).toDouble()
+                                val dy = (ev.rawY - padDownY).toDouble()
+                                val distance = kotlin.math.hypot(dx, dy)
+                                if (distance >= 12 * density) {
+                                    val angle = Math.toDegrees(kotlin.math.atan2(dy, dx))
+                                    when {
+                                        angle >= -45 && angle < 45 -> moveCursorBy(1, 0)    // 右扇形
+                                        angle >= 45 && angle < 135 -> moveCursorBy(0, 1)    // 下扇形
+                                        angle >= 135 || angle < -135 -> moveCursorBy(-1, 0) // 左扇形
+                                        else -> moveCursorBy(0, -1)                         // 上扇形
                                     }
-                                    padHoldTriggered = true
-                                    cursorPadRef.value?.dismiss()
                                 }
-                                true
-                            } else {
-                                false
+                                cursorPadRef.value?.dismiss()
                             }
+                            padHoldActive = false
+                            false
                         }
-                        android.view.MotionEvent.ACTION_UP,
                         android.view.MotionEvent.ACTION_CANCEL -> {
                             v.parent?.requestDisallowInterceptTouchEvent(false)
-                            // 手指离开屏幕：轮盘立即消失，不触发（只允许滑动触发）
                             if (padHoldActive) cursorPadRef.value?.dismiss()
                             padHoldActive = false
-                            padHoldTriggered = false
                             false
                         }
                         else -> false
