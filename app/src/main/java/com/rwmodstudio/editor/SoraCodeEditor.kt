@@ -1327,9 +1327,10 @@ fun SoraCodeEditor(
 
             fun showCursorPad(anchor: android.view.View) {
                 cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
-                val padSize = (140 * density).toInt()
-                val arrowSize = (44 * density).toInt()
-                val edge = (8 * density).toInt()
+                // 轮盘直径 / 箭头格大小 / 距边缘间距：收紧，避免圆盘过大、内容与边框之间留白太多
+                val padSize = (116 * density).toInt()
+                val arrowSize = (40 * density).toInt()
+                val edge = (4 * density).toInt()
                 // 圆形背景：90% 不透明（透出 10%）
                 val padBg = (barBg and 0x00FFFFFF) or (230 shl 24)
                 val container = android.widget.FrameLayout(ctx).apply {
@@ -1346,7 +1347,7 @@ fun SoraCodeEditor(
                         setColorFilter(barFg)
                         scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        val p = (6 * density).toInt()
+                        val p = (4 * density).toInt()
                         setPadding(p, p, p, p)
                     }
                     container.addView(
@@ -1400,9 +1401,12 @@ fun SoraCodeEditor(
                     showCursorPad(this)
                     true
                 }
-                setOnTouchListener { _, ev ->
+                setOnTouchListener { v, ev ->
                     when (ev.actionMasked) {
                         android.view.MotionEvent.ACTION_DOWN -> {
+                            // 符号栏外层是 HorizontalScrollView：不禁用父级拦截的话，
+                            // 横向拖动会被它当滚动抢走，导致轮盘左右方向收不到 MOVE（只有上下生效）
+                            v.parent?.requestDisallowInterceptTouchEvent(true)
                             padDownX = ev.rawX
                             padDownY = ev.rawY
                             padHoldActive = false
@@ -1430,6 +1434,7 @@ fun SoraCodeEditor(
                         }
                         android.view.MotionEvent.ACTION_UP,
                         android.view.MotionEvent.ACTION_CANCEL -> {
+                            v.parent?.requestDisallowInterceptTouchEvent(false)
                             // 手指离开屏幕：轮盘立即消失，不触发（只允许滑动触发）
                             if (padHoldActive) cursorPadRef.value?.dismiss()
                             padHoldActive = false
