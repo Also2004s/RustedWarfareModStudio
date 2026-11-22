@@ -376,6 +376,12 @@ class CompletionProvider(
     ): List<CompletionItem> {
         val results = mutableListOf<CompletionItem>()
 
+        // 注释行（# / ; 开头）不参与任何补全：否则在注释里输入中文逗号等触发符时，
+        // rawPrefix 被切成空、行内又没有 ':'（keyPart 为空），会落进通用补全主源，
+        // 空前缀对自定义补全表是「全部命中」，直接弹出整张表。
+        val lineForCommentCheck = textBeforeCursor.substringAfterLast('\n').trimStart()
+        if (lineForCommentCheck.startsWith("#") || lineForCommentCheck.startsWith(";")) return emptyList()
+
         // 手动「代码提示」：节内空内容行点击灯泡 → 只列该节必备且尚未出现的属性。
         // 一次性请求，无论是否命中都消费掉，避免污染后续补全。
         pendingSectionHint?.let { hint ->
