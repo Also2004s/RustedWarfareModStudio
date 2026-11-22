@@ -1905,6 +1905,8 @@ private class CursorPadSectorView(context: android.content.Context) : android.vi
         style = android.graphics.Paint.Style.FILL
     }
     private val bounds = android.graphics.RectF()
+    private val sectorPath = android.graphics.Path()
+    private val holePath = android.graphics.Path()
     private var centerAngleDeg: Float? = null
 
     fun highlight(centerAngle: Float?) {
@@ -1919,6 +1921,17 @@ private class CursorPadSectorView(context: android.content.Context) : android.vi
         val cx = width / 2f
         val cy = height / 2f
         bounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
-        canvas.drawArc(bounds, center - 45f, 90f, true, paint)
+        // 扇形减去中心圆：中心留出不参与高光的圆形区域
+        sectorPath.reset()
+        sectorPath.moveTo(cx, cy)
+        sectorPath.arcTo(bounds, center - 45f, 90f, false)
+        sectorPath.close()
+        holePath.reset()
+        holePath.addCircle(cx, cy, radius * 0.3f, android.graphics.Path.Direction.CCW)
+        if (sectorPath.op(holePath, android.graphics.Path.Op.DIFFERENCE)) {
+            canvas.drawPath(sectorPath, paint)
+        } else {
+            canvas.drawArc(bounds, center - 45f, 90f, true, paint)
+        }
     }
 }
