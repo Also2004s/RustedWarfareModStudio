@@ -72,7 +72,9 @@ object SearchTranslationCache {
             } else ""
             val codes = VerifyManager.read(VerifyManager.NATIVE_TRANSLATION) + "_" +
                     VerifyManager.read(VerifyManager.EXTRA_TRANSLATION)
-            "$libHash|$codes"
+            // 第三维：翻译禁用规则（四个开关/禁用词/白名单）。规则变化时旧缓存自动失效，
+            // 即使清理任务没跑到也不会把旧规则译文当成新鲜结果。
+            "$libHash|$codes|${TranslationRules.fingerprint()}"
         } catch (_: Exception) { "" }
     }
 
@@ -246,7 +248,9 @@ object SearchTranslationCache {
             val hit = memoryCache.get(absPath)
             if (hit != null) {
                 val rec = index[absPath]
-                if (rec != null && file.lastModified() == rec.srcMtime) hit
+                if (rec != null && file.lastModified() == rec.srcMtime &&
+                    currentLibVersion == rec.libVersion
+                ) hit
                 else { memoryCache.remove(absPath); null }
             } else null
         }
@@ -490,9 +494,27 @@ object SearchTranslationCache {
             synchronized(memoryLock) { memoryCache.evictAll() }
             RwmodPaths.fileTranslationCacheDir.deleteRecursively()
             RwmodPaths.fileTranslationCacheDir.mkdirs()
+            // 规则/翻译库变更后重算版本：新写入的记录必须带新版本
+            currentLibVersion = computeLibVersion()
             indexLoaded = true
         }
         // 同步清除查重输出目录和查重词列表
         try { RwmodPaths.dedupDir.deleteRecursively(); RwmodPaths.dedupDir.mkdirs() } catch (e: Exception) { Log.w(TAG, "翻译缓存操作失败", e) }
+    }
+
+    /**
+     * 只清除文件翻译缓存（保留查重词列表与查重输出）。
+     * 供「翻译禁用管理」开关/白名单变更后重建缓存使用——那些场景不能把查重词一起清掉。
+     */
+    fun clearTranslationOnly() {
+        synchronized(this) {
+            index.clear()
+            synchronized(memoryLock) { memoryCache.evictAll() }
+            RwmodPaths.fileTranslationCacheDir.deleteRecursively()
+            RwmodPaths.fileTranslationCacheDir.mkdirs()
+            // 规则/翻译库变更后重算版本：新写入的记录必须带新版本
+            currentLibVersion = computeLibVersion()
+            indexLoaded = true
+        }
     }
 }

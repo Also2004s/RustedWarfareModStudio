@@ -60,6 +60,9 @@ object RwmodPaths {
     val translationCacheMetaFile: File get() = File(translationDir, "translation_cache_meta.json")
     val translationCacheSourcesFile: File get() = File(translationDir, "translation_cache_sources.json")
 
+    /** 查重词一键禁用列表（一行一词，翻译时双向停用） */
+    val disabledWordsFile: File get() = File(translationDir, "disabled_words.txt")
+
     // ==================== 补全表 ====================
 
     val extraCompletionsFile: File get() = File(completionsDir, "extra_completions.json")
@@ -83,6 +86,8 @@ object RwmodPaths {
     val sortCustomizationFile: File get() = File(configDir, "sort_custom.json")
     /** 补全隐藏列表（开发者模式→补全隐藏列表，用户放出/追加的屏蔽条目） */
     val completionBlocklistFile: File get() = File(configDir, "completion_blocklist.json")
+    /** 资源名翻译白名单（开发者模式→翻译禁用管理，用户可增删的英文资源名） */
+    val resourceNameWhitelistFile: File get() = File(configDir, "resource_name_whitelist.json")
     val verifiedBehaviorsFile: File get() = File(configDir, "verified_behaviors.json")
     val projectRegistryFile: File get() = File(configDir, "project_registry.txt")
     val saveHistoryFile: File get() = File(configDir, "save_history.json")

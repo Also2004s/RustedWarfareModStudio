@@ -49,6 +49,25 @@ object InheritanceCache {
     private val indexFile: File get() = RwmodPaths.inheritanceIndexFile
 
     /**
+     * 清空全部继承链缓存（目录 + 索引 + 内存状态）。
+     * 翻译规则变化（查重禁用词/资源名禁用等）后调用：缓存按源文件 mtime 判新鲜，
+     * 翻译规则变了 mtime 不变，必须整体清掉重建。
+     */
+    @Synchronized
+    fun clearAll() {
+        index.clear()
+        indexDirty = false
+        indexLoaded = false
+        try {
+            dataDir.deleteRecursively()
+            dataDir.mkdirs()
+        } catch (e: Exception) {
+            Log.w(TAG, "clear inheritance cache failed: ${e.message}")
+        }
+    }
+
+
+    /**
      * 当前翻译库版本（两个维度，任一变化都使继承链缓存失效重建）：
      * 1) 翻译库版本号：翻译字典合并缓存（translation_cache.txt）内容 SHA-256，
      *    自动感知 translation.txt / 附件表 / 用户表等任何翻译库数据变化；

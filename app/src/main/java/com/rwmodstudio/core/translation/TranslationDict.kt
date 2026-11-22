@@ -58,6 +58,17 @@ class TranslationDict {
     /** 特殊值翻译 */
     private val valueTranslations = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    /** 查重词一键禁用：命中这些中文词的条目在两个方向都不参与翻译 */
+    @Volatile
+    private var disabledZh: Set<String> = emptySet()
+
+    /** 资源名禁用翻译开关：为 true 时按白名单双向过滤资源名（白名单为小写英文名） */
+    @Volatile
+    private var resourceNamesBlocked: Boolean = false
+
+    @Volatile
+    private var resourceNameWhitelist: Set<String> = emptySet()
+
     /** 每个条目的来源（key 格式与缓存文件一致：普通 key 或 [section]） */
     private val entrySources = java.util.concurrent.ConcurrentHashMap<String, TranslationSource>()
 
@@ -951,8 +962,12 @@ class TranslationDict {
     /** 预编译统一正则表达式，只用 enToZh 和 zhToEn，不包含 valueTranslations（读 map 建快照，须持写锁） */
     private fun compilePatterns() = synchronized(dictWriteLock) {
         // 英→中：只用 enToZh（和Python的 translate_in_text 对齐）
+        // 过滤：译文落在查重禁用词、英文名命中资源名白名单的条目都不进入匹配
         val enSorted = enToZh.entries
-            .filter { (k, v) -> k.length > 1 && v != k && k !in enToZh.values }
+            .filter { (k, v) ->
+                k.length > 1 && v != k && k !in enToZh.values &&
+                    v !in disabledZh && !enBlockedByResourceName(k)
+            }
             .sortedByDescending { it.key.length }
         enToZhLookup = enSorted.associate { it.key to it.value }
         enToZhPattern = if (enSorted.isNotEmpty()) {
@@ -961,8 +976,12 @@ class TranslationDict {
         } else null
 
         // 中→英：只用 zhToEn；所有中文（含单字）均参与反向翻译
+        // 过滤：中文 key 落在查重禁用词、或对应英文命中资源名白名单的条目都不进入匹配
         val zhSorted = zhToEn.entries
-            .filter { (k, v) -> k.length > 0 && v != k && k !in zhToEn.values }
+            .filter { (k, v) ->
+                k.length > 0 && v != k && k !in zhToEn.values &&
+                    k !in disabledZh && !zhBlockedByResourceName(k)
+            }
             .sortedByDescending { it.key.length }
         zhToEnLookup = zhSorted.associate { it.key to it.value }
         zhToEnPattern = if (zhSorted.isNotEmpty()) {
@@ -973,8 +992,14 @@ class TranslationDict {
 
     /** 英文key → 中文key（带回退逻辑，只查 enToZh） */
     fun getTranslation(enKey: String): String {
+        // 资源名白名单停用（英译中方向）
+        if (enBlockedByResourceName(enKey)) return enKey
+
+        /** 查询结果落在查重禁用词里 → 视为不翻译 */
+        fun accept(zh: String): String = if (zh in disabledZh) enKey else zh
+
         // 直接查找 enToZh（和Python对齐，不查 valueTranslations）
-        enToZh[enKey]?.let { return it }
+        enToZh[enKey]?.let { return accept(it) }
 
         // 处理 self.XXX() 格式
         // 注意顺序：先查 self.stripped（含 self），失败才查裸 stripped。
@@ -983,22 +1008,33 @@ class TranslationDict {
             val stripped = enKey.removePrefix("self.").removeSuffix("()")
             val withSelf = "self.$stripped"
             if (withSelf != enKey) {
-                enToZh[withSelf]?.let { return it }
+                enToZh[withSelf]?.let { return accept(it) }
             }
-            enToZh[stripped]?.let { return it }
+            enToZh[stripped]?.let { return accept(it) }
         }
 
         // 处理 XXX() 格式
         if (enKey.endsWith("()")) {
             val stripped = enKey.removeSuffix("()")
-            enToZh[stripped]?.let { return it }
+            enToZh[stripped]?.let { return accept(it) }
         }
 
         return enKey
     }
 
     /** 中文key → 英文key（只查 zhToEn，和Python对齐） */
-    fun getTranslationBack(zhKey: String): String = zhToEn[zhKey] ?: zhKey
+    fun getTranslationBack(zhKey: String): String {
+        // 查重禁用词 / 资源名白名单停用（中译英方向）：原样保留
+        if (zhKey in disabledZh || zhBlockedByResourceName(zhKey)) return zhKey
+        return zhToEn[zhKey] ?: zhKey
+    }
+
+    /**
+     * 中文 → 英文反查（**不过滤禁用词/资源名白名单**）。
+     * 只用于判断属性类型（资源/标签/内存等），不能用于实际翻译：
+     * 名字清单不应影响属性判定，否则白名单里误加 price/tags 会让整行保护失效。
+     */
+    internal fun getTranslationBackUnfiltered(zhKey: String): String = zhToEn[zhKey] ?: zhKey
 
     /** 中文值 → 英文值（查 zhToEn + valueTranslations，用于value翻译）。
      *  支持 self.XXX()/XXX() 归一化：剥空括号与 self. 前缀后，先查 self.中文 再查裸 中文，
@@ -1011,10 +1047,17 @@ class TranslationDict {
     fun getValueTranslation(enValue: String): String = resolveValueTranslation(enValue, englishToChinese = true)
 
     /** 英文值查表：valueTranslations 优先，其次 enToZh（与 getValueTranslation 原语义一致） */
-    private fun lookupEnValue(form: String): String? = valueTranslations[form] ?: enToZh[form]
+    private fun lookupEnValue(form: String): String? {
+        if (enBlockedByResourceName(form)) return null
+        val hit = valueTranslations[form] ?: enToZh[form] ?: return null
+        return hit.takeUnless { it in disabledZh }
+    }
 
     /** 中文值查表：zhToEn 优先，其次 valueTranslations（与 getValueTranslationBack 原语义一致） */
-    private fun lookupZhValue(form: String): String? = zhToEn[form] ?: valueTranslations[form]
+    private fun lookupZhValue(form: String): String? {
+        if (form in disabledZh || zhBlockedByResourceName(form)) return null
+        return zhToEn[form] ?: valueTranslations[form]
+    }
 
     /**
      * 值翻译归一化回退（仅 getValueTranslation/getValueTranslationBack 使用，不改 getTranslation/getTranslationBack 与翻译引擎）。
@@ -1039,10 +1082,18 @@ class TranslationDict {
     }
 
     /** 英文section → 中文section */
-    fun getSectionTranslation(enSection: String): String = sectionEnToZh[enSection] ?: enSection
+    fun getSectionTranslation(enSection: String): String {
+        val zh = sectionEnToZh[enSection] ?: return enSection
+        // 查重禁用词：译文落在禁用表 → 节名不翻译
+        return if (zh in disabledZh) enSection else zh
+    }
 
     /** 中文section → 英文section */
-    fun getSectionTranslationBack(zhSection: String): String = sectionZhToEn[zhSection] ?: zhSection
+    fun getSectionTranslationBack(zhSection: String): String {
+        // 查重禁用词：节名本身被禁用 → 原样保留
+        if (zhSection in disabledZh) return zhSection
+        return sectionZhToEn[zhSection] ?: zhSection
+    }
 
     /**
      * 检查中文词是否在翻译库中（任何分类：Section/Key/Value）
@@ -1059,6 +1110,7 @@ class TranslationDict {
      */
     fun translateChineseToEnglish(chinese: String): String {
         if (!isChinese(chinese)) return chinese
+        if (chinese in disabledZh || zhBlockedByResourceName(chinese)) return chinese
         return zhToEn[chinese] ?: sectionZhToEn[chinese] ?: valueTranslations[chinese] ?: chinese
     }
 
@@ -1118,6 +1170,71 @@ class TranslationDict {
 
     /** 获取特殊值集合 */
     fun getSpecialValues(): Set<String> = specialValues
+
+    // ===== 翻译禁用（查重词 / 资源名白名单） =====
+
+    /** 设置查重禁用词（翻译引擎双向停用），立即重编译匹配规则 */
+    fun setDisabledWords(words: Set<String>) {
+        disabledZh = words.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        synchronized(dictWriteLock) { compilePatterns() }
+    }
+
+    /** 仅单测用：注入一批「英文=中文」词条并重编译匹配规则。 */
+    internal fun loadEntriesForTest(pairs: List<Pair<String, String>>) {
+        synchronized(dictWriteLock) {
+            pairs.forEach { (en, zh) ->
+                enToZh[en] = zh
+                zhToEn[zh] = en
+            }
+            compilePatterns()
+        }
+    }
+
+    /** 仅单测用：注入一批节名「英文=中文」。 */
+    internal fun loadSectionsForTest(pairs: List<Pair<String, String>>) {
+        pairs.forEach { (en, zh) ->
+            sectionEnToZh[en] = zh
+            sectionZhToEn[zh] = en
+        }
+    }
+
+    /**
+     * 设置资源名禁用翻译：打开后，白名单（英文资源名，小写）里的条目双向停用。
+     * 关闭时不做任何过滤（保持原行为）。
+     */
+    fun setResourceNameBlocked(enabled: Boolean, whitelist: Set<String>) {
+        resourceNamesBlocked = enabled
+        resourceNameWhitelist = whitelist.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        synchronized(dictWriteLock) { compilePatterns() }
+    }
+
+    /**
+     * 一次性注入全部翻译禁用设置（禁用词 + 资源名开关 + 白名单），只重编译一次匹配规则。
+     * 开关页面/查重弹窗的变更统一走这里，避免两个 setter 各编译一遍造成主线程卡顿。
+     */
+    fun setTranslationBlocks(words: Set<String>, resourceBlocked: Boolean, whitelist: Set<String>) {
+        disabledZh = words.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        resourceNamesBlocked = resourceBlocked
+        resourceNameWhitelist = whitelist.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        synchronized(dictWriteLock) { compilePatterns() }
+    }
+
+    fun isResourceNameBlocked(): Boolean = resourceNamesBlocked
+
+    /** 某个英文资源名是否在资源名白名单里（补全显示用，忽略大小写）。 */
+    fun isResourceNameEntry(name: String): Boolean = name.trim().lowercase() in resourceNameWhitelist
+
+    /** 英译中方向：该英文名是否被资源名开关停用 */
+    private fun enBlockedByResourceName(en: String): Boolean =
+        resourceNamesBlocked && en.trim().lowercase() in resourceNameWhitelist
+
+    /** 中译英方向：该中文名对应的英文是否被资源名开关停用 */
+    private fun zhBlockedByResourceName(zh: String): Boolean {
+        if (!resourceNamesBlocked) return false
+        val en = zhToEn[zh] ?: return false
+        return en.trim().lowercase() in resourceNameWhitelist
+    }
+
 
     /** 判断是否是中文 */
     fun isChinese(text: String): Boolean = text.any { it.code in 0x4E00..0x9FFF }

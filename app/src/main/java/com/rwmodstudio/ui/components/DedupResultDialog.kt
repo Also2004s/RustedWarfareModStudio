@@ -19,6 +19,7 @@ import com.rwmodstudio.ui.theme.AppCodeFontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rwmodstudio.core.translation.TranslationDedupChecker
+import com.rwmodstudio.ui.theme.RustedError
 import com.rwmodstudio.ui.theme.RustedOnBackground
 import com.rwmodstudio.ui.theme.RustedPrimary
 import com.rwmodstudio.ui.theme.RustedSecondary
@@ -30,6 +31,9 @@ fun DedupResultDialog(
     dups: List<TranslationDedupChecker.DuplicateInfo>,
     title: String = "查重结果",
     summary: String? = null,
+    disabledWords: Set<String> = emptySet(),
+    onDisable: ((word: String) -> Unit)? = null,
+    onDisableAll: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onModify: () -> Unit
 ) {
@@ -37,6 +41,11 @@ fun DedupResultDialog(
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     var expandedGroups by remember { mutableStateOf(setOf<String>()) }
     val grouped = remember(dups) { dups.groupBy { it.key } }
+    var showConfirmAll by remember { mutableStateOf(false) }
+    // 未禁用过的查重词数量（「全部禁用」只统计这些）
+    val disableAllCount = remember(grouped, disabledWords) {
+        grouped.keys.count { it !in disabledWords }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -66,6 +75,25 @@ fun DedupResultDialog(
                                     ) {
                                         Text(word, fontSize = 13.sp, fontFamily = AppCodeFontFamily, fontWeight = FontWeight.Medium, color = RustedPrimary)
                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (onDisable != null) {
+                                                if (word in disabledWords) {
+                                                    Text(
+                                                        "已禁用",
+                                                        fontSize = 10.sp,
+                                                        color = RustedOnBackground.copy(alpha = 0.35f),
+                                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        "禁用",
+                                                        fontSize = 10.sp,
+                                                        color = RustedError,
+                                                        modifier = Modifier
+                                                            .clickable { onDisable(word) }
+                                                            .padding(horizontal = 4.dp)
+                                                    )
+                                                }
+                                            }
                                             Text("${list.size} 处", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                                             Spacer(Modifier.width(4.dp))
                                             Icon(
@@ -100,9 +128,37 @@ fun DedupResultDialog(
         },
         confirmButton = {
             Row {
+                if (onDisableAll != null && disableAllCount > 0) {
+                    TextButton(onClick = { showConfirmAll = true }) {
+                        Text("全部禁用($disableAllCount)", color = RustedError)
+                    }
+                }
                 TextButton(onClick = onModify) { Text("修改") }
                 TextButton(onClick = onDismiss) { Text("关闭") }
             }
         }
     )
+
+    if (showConfirmAll) {
+        AlertDialog(
+            onDismissRequest = { showConfirmAll = false },
+            title = { Text("全部禁用") },
+            text = {
+                Text(
+                    "将禁用 $disableAllCount 个查重词，翻译时这些词保留原文（两个方向都不翻译）。" +
+                        "可在 翻译库 → 已禁用 里恢复。",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConfirmAll = false
+                    onDisableAll?.invoke()
+                }) { Text("全部禁用", color = RustedError) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmAll = false }) { Text("取消") }
+            }
+        )
+    }
 }

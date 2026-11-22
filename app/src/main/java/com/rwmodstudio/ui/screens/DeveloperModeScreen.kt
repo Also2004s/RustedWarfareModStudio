@@ -40,6 +40,7 @@ fun DeveloperModeScreen(
     onOpenSectionCompletion: () -> Unit = {},
     onOpenHighlightRules: () -> Unit = {},
     onOpenSortCustomization: () -> Unit = {},
+    onOpenTranslationBlock: () -> Unit = {},
     onOpenSimAnim: () -> Unit = {}
 ) {
     // ===== 平板横屏：左目录 + 右内容（与设置页同一套做法）=====
@@ -204,8 +205,15 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.Sort,
                 title = "排序自定义",
                 subtitle = "按真实使用频次把高频键置顶；可自行增删调序（只调顺序，不增删补全项）",
-                isLast = true,
                 onClick = onOpenSortCustomization
+            )
+            DevDivider()
+            DevActionRow(
+                icon = Icons.Default.Translate,
+                title = "翻译禁用管理",
+                subtitle = "标签/资源名/内存名/变量名禁用翻译开关，以及资源名白名单（补全与翻译缓存同时生效）",
+                isLast = true,
+                onClick = onOpenTranslationBlock
             )
         }
 

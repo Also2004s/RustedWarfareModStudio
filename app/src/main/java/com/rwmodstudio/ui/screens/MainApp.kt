@@ -80,7 +80,9 @@ import com.rwmodstudio.core.media.isAudioFileName
 import com.rwmodstudio.editor.EditorViewState
 import com.rwmodstudio.editor.EditorWorkspaceEntry
 import com.rwmodstudio.editor.resolveEditorBackground
+import com.rwmodstudio.core.translation.DisabledWords
 import com.rwmodstudio.core.translation.ProjectRegistry
+import com.rwmodstudio.core.translation.TranslationCacheRefresher
 import com.rwmodstudio.core.translation.TranslationDedupChecker
 import com.rwmodstudio.core.translation.TranslationEngine
 import com.rwmodstudio.core.translation.SearchTranslationCache
@@ -103,7 +105,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COMPLETION_BLOCKLIST, SECTION_COMPLETION, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
+enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COMPLETION_BLOCKLIST, SECTION_COMPLETION, TRANSLATION_BLOCK, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -197,6 +199,8 @@ fun MainApp() {
     var dedupChecking by remember { mutableStateOf(false) }
     var dedupResult by remember { mutableStateOf<String?>(null) }
     var dedupItems by remember { mutableStateOf<List<TranslationDedupChecker.DuplicateInfo>>(emptyList()) }
+    // 已禁用词（模组查重弹窗里一键禁用/状态展示）
+    var disabledWords by remember { mutableStateOf(setOf<String>()) }
     var pendingOpenFile by rememberSaveable(stateSaver = pairSaver) { mutableStateOf<Pair<String, String>?>(null) }
     var translationFilter by remember { mutableStateOf(TranslationFilterType.ALL) }
     var editorInsertText by remember { mutableStateOf("") }
@@ -695,6 +699,7 @@ fun MainApp() {
                         dedupResult = "「$folderName」未检测到与翻译库重复的内容"
                         dedupItems = emptyList()
                     } else {
+                        disabledWords = DisabledWords.words()
                         dedupItems = dups
                         dedupResult = "经过查询，项目「$folderName」内有与翻译库重复的内容，需要进行修改翻译键值或者对项目对应内容进行修改后方能使用"
                     }
@@ -756,6 +761,7 @@ fun MainApp() {
                         }
                     } else {
                         // 有重复，显示提示并跳转到翻译库
+                        disabledWords = DisabledWords.words()
                         dedupItems = dups
                         dedupResult = "经过查询，项目内有与翻译库重复的内容，需要进行修改翻译键值或者对项目对应内容进行修改后方能使用"
                     }
@@ -769,6 +775,23 @@ fun MainApp() {
                 }
             }
         }
+    }
+
+    // 模组查重弹窗一键禁用：写入禁用表 → 后台注入规则并清缓存重建；
+    // 同时从查重词列表移除（已禁用就不再是待处理查重词）。
+    fun disableDedupWords(words: Collection<String>) {
+        if (words.isEmpty()) return
+        DisabledWords.addAll(words)
+        disabledWords = DisabledWords.words()
+        TranslationCacheRefresher.onSettingsChanged(context)
+        scope.launch(Dispatchers.IO) {
+            try {
+                saveDedupWords(loadDedupWords() - words.toSet())
+            } catch (e: Exception) {
+                Log.w(TAG, "update dedup words failed", e)
+            }
+        }
+        dedupResult = "已禁用 ${words.size} 个词，翻译缓存后台重建中；重新查重可确认结果"
     }
 
     BackHandler {
@@ -892,6 +915,7 @@ fun MainApp() {
                     Screen.MOD_INFO -> "模组信息"
                     Screen.HIGHLIGHT_RULES -> "规则"
                     Screen.SORT_CUSTOM -> "排序自定义"
+                    Screen.TRANSLATION_BLOCK -> "翻译禁用管理"
                     Screen.RECYCLE_BIN -> "回收站"
                     Screen.TEXT_VIEWER -> viewerFile?.first ?: "查看"
                 }
@@ -1703,12 +1727,16 @@ fun MainApp() {
                         onOpenSortCustomization = {
                             pushScreen(Screen.SORT_CUSTOM)
                         },
+                        onOpenTranslationBlock = {
+                            pushScreen(Screen.TRANSLATION_BLOCK)
+                        },
                         onOpenSimAnim = {
                             pushScreen(Screen.SIM_ANIM)
                         }
                     )
                     Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
                     Screen.SORT_CUSTOM -> SortCustomizationScreen()
+                    Screen.TRANSLATION_BLOCK -> TranslationBlockScreen()
                     Screen.COMPLETION_TYPES -> CompletionTypeScreen(
                         callableCategory = completionTypesCallableCat,
                         onCloseCallableCategory = { completionTypesCallableCat = null }
@@ -2020,6 +2048,9 @@ fun MainApp() {
             dups = dedupItems,
             title = "查重提示",
             summary = result,
+            disabledWords = disabledWords,
+            onDisable = { word -> disableDedupWords(listOf(word)) },
+            onDisableAll = { disableDedupWords(dedupItems.map { it.key }.toSet() - disabledWords) },
             onDismiss = { dedupResult = null; dedupItems = emptyList() },
             onModify = {
                 dedupResult = null

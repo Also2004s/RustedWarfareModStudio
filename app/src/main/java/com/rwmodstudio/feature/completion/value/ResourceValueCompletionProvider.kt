@@ -66,10 +66,11 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
                 )
                 .map { it.first }
                 .map { name ->
+                    val display = translateResourceName(request.translationDict, name)
                     createValueItem(
-                        label = translateValueName(request.translationDict, name),
+                        label = display,
                         detail = "资源名",
-                        insertText = translateValueName(request.translationDict, name),
+                        insertText = display,
                         prefixLength = fragment.length,
                         valueType = "any"
                     )
@@ -99,7 +100,7 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
             )
             .map { it.first }
         return matching.map { name ->
-            val translated = translateValueName(request.translationDict, name)
+            val translated = translateResourceName(request.translationDict, name)
             val insert = if (isResourceNameLhs) "$translated=" else translated
             createValueItem(
                 label = insert,

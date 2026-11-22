@@ -56,6 +56,11 @@ object InheritanceResolver {
     )
     private val symbolMemo = ConcurrentHashMap<String, SymbolMemo>()
 
+    /** 清空继承链符号内存 memo（翻译规则变化后必须清，否则按 mtime 判新鲜会沿用旧译文）。 */
+    fun clearSymbolMemo() {
+        symbolMemo.clear()
+    }
+
     // === 公开接口 ===
 
     /**

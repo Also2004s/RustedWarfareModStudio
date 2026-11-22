@@ -321,7 +321,7 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
             .map { name ->
                 name to maxOf(
                     completionMatchLevel(prefix, name),
-                    completionMatchLevel(prefix, translateValueName(request.translationDict, name))
+                    completionMatchLevel(prefix, translateResourceName(request.translationDict, name))
                 )
             }
             .filter { it.second > 0 }
@@ -331,7 +331,7 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
             )
             .map { it.first }
             .map { name ->
-                val translated = translateValueName(request.translationDict, name)
+                val translated = translateResourceName(request.translationDict, name)
                 val insert = "$translated="
                 createValueItem(
                     label = insert,

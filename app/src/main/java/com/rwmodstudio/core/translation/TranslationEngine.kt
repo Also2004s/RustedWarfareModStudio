@@ -3,6 +3,8 @@ package com.rwmodstudio.core.translation
 import android.content.Context
 import android.util.Log
 import com.rwmodstudio.RwModApplication
+import com.rwmodstudio.core.InheritanceCache
+import com.rwmodstudio.core.InheritanceResolver
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
 import kotlinx.coroutines.Dispatchers
@@ -72,10 +74,43 @@ class TranslationEngine private constructor() {
                 // 先载翻译字典再读屏蔽词：屏蔽词加载时会按字典做中英去重，需字典先就绪
                 translationDict.loadFromAssets(context)
                 loadBlocklist(context)
+                // 查重禁用词 / 资源名白名单：必须在字典加载后注入（setter 内部会重编译匹配规则）
+                applyTranslationBlockSettings()
+                migrateTranslationBlockDefaults()
                 ensureCodeReferenceGenerated(context)
                 codeReference.loadFromAssets(context)
                 snippetRepo.load(context)
             }
+        }
+    }
+
+    /**
+     * 把「翻译禁用管理」的设置注入字典：查重禁用词 + 资源名白名单开关。
+     * 开关/白名单变更后由调用方重新调用本方法，并配合缓存重建。
+     */
+    fun applyTranslationBlockSettings() {
+        // 一次性注入（禁用词 + 资源名开关 + 白名单），只重编译一次匹配规则
+        translationDict.setTranslationBlocks(
+            DisabledWords.words(),
+            com.rwmodstudio.core.SettingsManager.devTranslationBlockResource,
+            ResourceNameWhitelist.names()
+        )
+    }
+
+    /**
+     * 一次性迁移：四类「禁用翻译」改为默认开启后，旧设置下生成的翻译缓存
+     * 仍含被翻译的标签/资源名/内存名/变量名，必须清掉并按新规则重建。
+     * 清理全部成功后才写版本号，失败留待下次启动重试。
+     */
+    private fun migrateTranslationBlockDefaults() {
+        if (SettingsManager.translationBlockDefaultsVersion >= 1) return
+        try {
+            SearchTranslationCache.clearTranslationOnly()
+            InheritanceCache.clearAll()
+            InheritanceResolver.clearSymbolMemo()
+            SettingsManager.translationBlockDefaultsVersion = 1
+        } catch (e: Exception) {
+            Log.w(TAG, "migrate translation block defaults failed: ${e.message}")
         }
     }
 
@@ -257,7 +292,12 @@ class TranslationEngine private constructor() {
         return name
     }
 
-    private fun translateKVToChinese(match: MatchResult, autoSpace: Boolean = true, force: Boolean = false): String {
+    private fun translateKVToChinese(
+        match: MatchResult,
+        autoSpace: Boolean = true,
+        force: Boolean = false,
+        block: NameProtector.Options = NameProtector.Options.current()
+    ): String {
         val (indent, key, separator, value, trailing) = match.destructured
         val cleanKey = key.trim(); var cleanValue = value.trim(); var comment = ""
         if (cleanValue.contains("#")) {
@@ -265,18 +305,23 @@ class TranslationEngine private constructor() {
             cleanValue = p[0].trim()
             comment = "#" + p[1]
         }
+        // 资源名/标签/内存名/变量名原位保护：翻译链路里这些名字出现的位置保持原文
+        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block)
         val translatedKey = translationDict.getTranslation(cleanKey)
         if (translatedKey != cleanKey) stats.keysTranslated++
         // @copyFromSection / 复制节 的值是节名，走引擎已有的节名翻译逻辑（两种语言形式都匹配）
         val translatedValue = if (cleanKey == "@copyFromSection" || cleanKey == "复制节") {
             translateSectionName(cleanValue)
+        } else if (shouldProtectValue(cleanKey, block)) {
+            // 标签/内存名/变量名禁用翻译：值整体保持原文（键照常翻译）
+            protectedValue
         } else if (!force && shouldBlockKey(cleanKey)) {
             // key 被屏蔽时 value 整体不翻译；若开启 %{} 强制翻译，则仅翻译 %{} 内部
-            if (blocklist.forcePercentVariables) translatePercentVariables(cleanValue, true, autoSpace) else cleanValue
+            if (blocklist.forcePercentVariables) translatePercentVariables(protectedValue, true, autoSpace) else protectedValue
         } else {
-            translateValue(cleanValue, true, autoSpace)
+            translateValue(protectedValue, true, autoSpace)
         }
-        return "${indent}${translatedKey}${separator}${translatedValue}${comment}"
+        return "${indent}${translatedKey}${separator}${NameProtector.restore(translatedValue, namePh)}${comment}"
     }
 
     /**
@@ -294,6 +339,28 @@ class TranslationEngine private constructor() {
         // 对 @xxx aaa 或 @xxx aaa:aaa 形式的 key，直接屏蔽其 value 翻译
         if (Regex("""@\w+\s+\S+""").matches(trimmed)) return true
         return false
+    }
+
+    /**
+     * 「翻译禁用管理」按声明位置保护：命中时该行的 value 整体保持原文（key 照常翻译）。
+     *
+     * - 标签：标签属性（中英键名都识别）的值是标签名；
+     * - 内存：`@memory 名字:类型` 行、`defineUnitMemory` 行的变量名；
+     * - 变量：`@global` / `@define` 声明的变量名（值里出现的变量名也不翻译）。
+     */
+    private fun shouldProtectValue(key: String, block: NameProtector.Options): Boolean {
+        val raw = key.trim()
+        if (raw.isEmpty()) return false
+        // 属性类型判定用「不过滤」的反查：白名单/禁用词不应影响属性识别
+        val en = translationDict.getTranslationBackUnfiltered(raw).removePrefix("@").trim()
+        val isTag = block.tag && CompletionShared.isTagProperty(en)
+        val isMemory = block.memory &&
+            (raw.startsWith("@memory", ignoreCase = true) || en.equals("defineUnitMemory", ignoreCase = true))
+        val isVariable = block.variable &&
+            (en.equals("defineUnitMemory", ignoreCase = true) ||
+                raw.startsWith("@define", ignoreCase = true) ||
+                raw.startsWith("@global", ignoreCase = true))
+        return isTag || isMemory || isVariable
     }
 
     fun translateToEnglish(chineseText: String, autoSpace: Boolean = true): String {
@@ -321,6 +388,8 @@ class TranslationEngine private constructor() {
         forcedLineIndices: Set<Int> = emptySet()
     ): List<String> {
         val result = mutableListOf<String>()
+        // 四个开关一次取齐，整份文件翻译共用（避免每个值重复读设置、放大锁竞争）
+        val block = NameProtector.Options.current()
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
@@ -349,7 +418,8 @@ class TranslationEngine private constructor() {
             val defineMatch = DEFINE_PATTERN.matchEntire(line)
             if (defineMatch != null) {
                 val (indent, keyword, name, value, trailing) = defineMatch.destructured
-                val translatedValue = translateValue(value, enToZh, autoSpace)
+                val (protectedValue, namePh) = NameProtector.protect(value, "@$keyword", block)
+                val translatedValue = NameProtector.restore(translateValue(protectedValue, enToZh, autoSpace), namePh)
                 result.add("${indent}@${keyword} ${name}:${translatedValue}${trailing}")
                 i++
                 continue
@@ -364,8 +434,8 @@ class TranslationEngine private constructor() {
                 // 普通 key-value（不以 """ 开头）
                 if (!trimmedValue.startsWith("\"\"\"")) {
                     result.add(
-                        if (enToZh) translateKVToChinese(kvMatch, autoSpace, force)
-                        else translateKVToEnglish(kvMatch, autoSpace, force)
+                        if (enToZh) translateKVToChinese(kvMatch, autoSpace, force, block)
+                        else translateKVToEnglish(kvMatch, autoSpace, force, block)
                     )
                     i++
                     continue
@@ -380,7 +450,7 @@ class TranslationEngine private constructor() {
                     // 同一行内闭合
                     val content = trimmedValue.substring(openLen, firstCloseIdx)
                     val rest = trimmedValue.substring(firstCloseIdx + openLen)
-                    val translatedContent = translateMultilineContent(content, key.trim(), enToZh)
+                    val translatedContent = translateMultilineContent(content, key.trim(), enToZh, block)
                     result.add("${indent}${translatedKey}${separator}\"\"\"${translatedContent}\"\"\"${rest}${trailing}")
                     i++
                     continue
@@ -405,7 +475,7 @@ class TranslationEngine private constructor() {
                 }
                 val beforeClose = fullContent.substring(0, closeIdx)
                 val afterClose = fullContent.substring(closeIdx + openLen)
-                val translatedBeforeClose = translateMultilineContent(beforeClose, key.trim(), enToZh)
+                val translatedBeforeClose = translateMultilineContent(beforeClose, key.trim(), enToZh, block)
                 val translatedLines = translatedBeforeClose.lines()
                 when (translatedLines.size) {
                     0 -> result.add("${indent}${translatedKey}${separator}\"\"\"\"\"\"${afterClose}${trailing}")
@@ -423,7 +493,9 @@ class TranslationEngine private constructor() {
             }
 
             // 未匹配任何规则（非标准 INI 行），用词典做文本级翻译
-            result.add(translationDict.translateInText(line, enToZh))
+            // 名字位置（资源名/标签/内存名/变量名）同样保护，避免自由文本里的引用被译掉
+            val (protectedLine, namePh) = NameProtector.protect(line, "", block)
+            result.add(NameProtector.restore(translationDict.translateInText(protectedLine, enToZh), namePh))
             i++
         }
         return result
@@ -448,7 +520,12 @@ class TranslationEngine private constructor() {
         return "${indent}[${cleanName}]${trailing}${comment}"
     }
 
-    private fun translateKVToEnglish(match: MatchResult, autoSpace: Boolean = true, force: Boolean = false): String {
+    private fun translateKVToEnglish(
+        match: MatchResult,
+        autoSpace: Boolean = true,
+        force: Boolean = false,
+        block: NameProtector.Options = NameProtector.Options.current()
+    ): String {
         val (indent, key, separator, value, trailing) = match.destructured
         val cleanKey = key.trim(); var cleanValue = value.trim(); var comment = ""
         if (cleanValue.contains("#")) {
@@ -456,17 +533,22 @@ class TranslationEngine private constructor() {
             cleanValue = p[0].trim()
             comment = "#" + p[1]
         }
+        // 资源名/标签/内存名/变量名原位保护：翻译链路里这些名字出现的位置保持原文
+        val (protectedValue, namePh) = NameProtector.protect(cleanValue, englishKeyOf(cleanKey), block)
         // @copyFromSection / 复制节 的值是节名，走引擎已有的节名反向翻译逻辑（两种语言形式都匹配）
         val translatedValue = if (cleanKey == "复制节" || cleanKey == "@copyFromSection") {
             translateSectionNameBack(cleanValue)
+        } else if (shouldProtectValue(cleanKey, block)) {
+            // 标签/内存名/变量名禁用翻译：值整体保持原文（键照常翻译）
+            protectedValue
         } else if (!force && shouldBlockKey(cleanKey)) {
             // key 被屏蔽时 value 整体不翻译；若开启 %{} 强制翻译，则仅翻译 %{} 内部
-            if (blocklist.forcePercentVariables) translatePercentVariables(cleanValue, false, autoSpace) else cleanValue
+            if (blocklist.forcePercentVariables) translatePercentVariables(protectedValue, false, autoSpace) else protectedValue
         } else {
-            translateValue(cleanValue, false, autoSpace)
+            translateValue(protectedValue, false, autoSpace)
         }
         // 保留原始分隔符（含空格），autoSpace关闭时不做任何修改
-        return "${indent}${translationDict.getTranslationBack(cleanKey)}${separator}${translatedValue}${comment}"
+        return "${indent}${translationDict.getTranslationBack(cleanKey)}${separator}${NameProtector.restore(translatedValue, namePh)}${comment}"
     }
 
     /**
@@ -474,14 +556,26 @@ class TranslationEngine private constructor() {
      * key 被屏蔽时，根据「跳过对 %{} 屏蔽」开关决定是否仅翻译 %{} 内部；
      * key 未被屏蔽时，走完整 value 翻译流程。
      */
-    private fun translateMultilineContent(content: String, key: String, enToZh: Boolean): String {
-        return if (shouldBlockKey(key)) {
-            if (blocklist.forcePercentVariables) translatePercentVariableSingle(content, enToZh)
-            else content
+    private fun translateMultilineContent(
+        content: String,
+        key: String,
+        enToZh: Boolean,
+        block: NameProtector.Options
+    ): String {
+        // 多行文本里同样可能引用资源名/内存名/变量，先做名字保护再翻译
+        val (protectedContent, namePh) = NameProtector.protect(content, englishKeyOf(key), block)
+        val translated = if (shouldBlockKey(key)) {
+            if (blocklist.forcePercentVariables) translatePercentVariableSingle(protectedContent, enToZh)
+            else protectedContent
         } else {
-            translateSingleValue(content, enToZh)
+            translateSingleValue(protectedContent, enToZh)
         }
+        return NameProtector.restore(translated, namePh)
     }
+
+    /** 属性名转英文（用于判断资源/内存等属性上下文；不过滤禁用词/白名单，翻译不了的保持原样） */
+    private fun englishKeyOf(key: String): String =
+        translationDict.getTranslationBackUnfiltered(key.trim()).removePrefix("@").trim()
 
     /**
      * 仅翻译 value 中的 %{...} 变量内部内容，其余部分保持不变。

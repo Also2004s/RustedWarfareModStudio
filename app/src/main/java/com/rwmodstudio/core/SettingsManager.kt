@@ -913,6 +913,40 @@ object SettingsManager {
         get() = settings.getBoolean("dev_required_code_check", false)
         set(value) = settings.edit().putBoolean("dev_required_code_check", value).apply()
 
+    // ===== 翻译禁用管理（开发者模式→翻译禁用管理） =====
+    // 打开后该类名字在补全、整行翻译、文件翻译缓存中都不翻译（白名单/声明位置见对应实现）。
+
+    /** 设置存储是否已初始化（JVM 单测 / 极早期调用时未初始化，读取开关需回退默认值） */
+    private val storageReady: Boolean get() = this::settings.isInitialized
+
+    /** 标签禁用翻译（默认开）：tags 等属性值中的标签名保持原文 */
+    var devTranslationBlockTag: Boolean
+        get() = if (storageReady) settings.getBoolean("dev_translation_block_tag", true) else true
+        set(value) = settings.edit().putBoolean("dev_translation_block_tag", value).apply()
+
+    /** 资源名禁用翻译（默认开）：资源名白名单里的资源名双向停用 */
+    var devTranslationBlockResource: Boolean
+        get() = if (storageReady) settings.getBoolean("dev_translation_block_resource", true) else true
+        set(value) = settings.edit().putBoolean("dev_translation_block_resource", value).apply()
+
+    /** 内存名禁用翻译（默认开）：@memory / defineUnitMemory 声明的名字保持原文 */
+    var devTranslationBlockMemory: Boolean
+        get() = if (storageReady) settings.getBoolean("dev_translation_block_memory", true) else true
+        set(value) = settings.edit().putBoolean("dev_translation_block_memory", value).apply()
+
+    /** 变量名禁用翻译（默认开）：@global / @define 声明的变量名保持原文 */
+    var devTranslationBlockVariable: Boolean
+        get() = if (storageReady) settings.getBoolean("dev_translation_block_variable", true) else true
+        set(value) = settings.edit().putBoolean("dev_translation_block_variable", value).apply()
+
+    /** 翻译禁用默认值迁移版本：1 = 四类禁用默认开启（升级时清一次翻译缓存） */
+    var translationBlockDefaultsVersion: Int
+        get() = if (storageReady) settings.getInt("translation_block_defaults_version", 0) else 0
+        set(value) {
+            if (storageReady) settings.edit().putInt("translation_block_defaults_version", value).apply()
+        }
+
+
     /**
      * 编辑器内联预览（默认开）：在图片路径旁显示缩略图、颜色值旁显示色块、音频旁显示试听按钮、
      * 文本文件路径旁显示跳转按钮。方块边长 = 一个字高，随字号自动对齐。

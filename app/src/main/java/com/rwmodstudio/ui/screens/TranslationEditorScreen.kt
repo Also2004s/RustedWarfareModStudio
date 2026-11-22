@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import com.rwmodstudio.RwModApplication
 import com.rwmodstudio.core.RwmodPaths
 import com.rwmodstudio.core.SettingsManager
+import com.rwmodstudio.core.translation.DisabledWords
+import com.rwmodstudio.core.translation.TranslationCacheRefresher
 import com.rwmodstudio.core.translation.TranslationDedupChecker
 import com.rwmodstudio.core.translation.TranslationDict
 import com.rwmodstudio.core.translation.TranslationEngine
@@ -73,13 +75,18 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
     var showDedup by remember { mutableStateOf<List<TranslationDedupChecker.DuplicateInfo>?>(null) }
     var showLibDups by remember { mutableStateOf<LibraryDupGroups?>(null) }
     var dedupWords by remember { mutableStateOf(setOf<String>()) }
+    // 已禁用词（查重词一键禁用）：用于「已禁用」分类过滤与弹窗按钮状态
+    var disabledWords by remember { mutableStateOf(setOf<String>()) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var pendingDeleteEntry by remember { mutableStateOf<TranslationDict.TranslationEntry?>(null) }
 
-    // 加载查重词列表
+    // 加载查重词列表 + 已禁用词列表
     LaunchedEffect(loaded) {
-        if (loaded) dedupWords = loadDedupWords()
+        if (loaded) {
+            dedupWords = loadDedupWords()
+            disabledWords = DisabledWords.words()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -96,7 +103,7 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
     val dict = engine.getTranslationDict()
     val defaultPath = SettingsManager.defaultPath
 
-    val filtered = remember(entries, searchQuery, filterType, dedupWords) {
+    val filtered = remember(entries, searchQuery, filterType, dedupWords, disabledWords) {
         entries.filter { entry ->
             val (source, en, zh) = entry
             val q = searchQuery.isEmpty() || en.contains(searchQuery, ignoreCase = true) || zh.contains(searchQuery, ignoreCase = true)
@@ -104,6 +111,7 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
                 TranslationFilterType.SECTION -> en.startsWith("[")
                 TranslationFilterType.KEY -> !en.startsWith("[")
                 TranslationFilterType.DEDUP -> zh in dedupWords
+                TranslationFilterType.DISABLED -> zh in disabledWords
                 TranslationFilterType.NATIVE -> source == TranslationDict.TranslationSource.NATIVE
                 TranslationFilterType.EXTRA -> source == TranslationDict.TranslationSource.EXTRA
                 TranslationFilterType.USER -> source == TranslationDict.TranslationSource.USER
@@ -187,6 +195,28 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
         }
     }
 
+    // 查重词一键禁用/恢复：写入禁用表 → 后台注入规则并清缓存重建。
+    // 禁用后从查重词列表移除（两者语义互斥：已禁用就不再是待处理查重词）。
+    fun disableWords(words: Collection<String>) {
+        if (words.isEmpty()) return
+        DisabledWords.addAll(words)
+        disabledWords = DisabledWords.words()
+        val remaining = dedupWords - words.toSet()
+        if (remaining != dedupWords) {
+            dedupWords = remaining
+            saveDedupWords(remaining)
+        }
+        TranslationCacheRefresher.onSettingsChanged(context)
+        dedupResult = "已禁用 ${words.size} 个词，翻译缓存后台重建中……"
+    }
+
+    fun restoreWord(word: String) {
+        DisabledWords.remove(word)
+        disabledWords = DisabledWords.words()
+        TranslationCacheRefresher.onSettingsChanged(context)
+        dedupResult = "已恢复「$word」，翻译缓存后台重建中……"
+    }
+
     fun doDedup() {
         if (!engine.isLoaded) {
             dedupResult = "翻译引擎未加载，请等待加载完成"
@@ -258,6 +288,10 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
                     Spacer(Modifier.width(4.dp))
                     FilterChip(selected = filterType == TranslationFilterType.DEDUP, onClick = { filterType = TranslationFilterType.DEDUP }, label = { Text("查重(${dedupWords.size})", fontSize = 11.sp) }, modifier = Modifier.height(30.dp))
                 }
+                if (disabledWords.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    FilterChip(selected = filterType == TranslationFilterType.DISABLED, onClick = { filterType = TranslationFilterType.DISABLED }, label = { Text("已禁用(${disabledWords.size})", fontSize = 11.sp) }, modifier = Modifier.height(30.dp))
+                }
             }
         }
 
@@ -283,6 +317,17 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
                         Text(entry.value, fontSize = 12.sp, fontFamily = AppCodeFontFamily, color = RustedSecondary)
                     }
                     Text(sourceText, fontSize = 9.sp, color = sourceColor, modifier = Modifier.padding(horizontal = 6.dp))
+                    if (filterType == TranslationFilterType.DISABLED) {
+                        Text(
+                            "恢复",
+                            fontSize = 10.sp,
+                            color = RustedSecondary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { restoreWord(entry.value) }
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
                     IconButton(onClick = {
                         if (realIdx >= 0) {
                             editIndex = realIdx
@@ -431,6 +476,9 @@ fun TranslationEditorScreen(initialFilter: TranslationFilterType = TranslationFi
         DedupResultDialog(
             dups = dups,
             title = "查重结果: ${dups.size} 处 / ${dups.distinctBy { it.key }.size} 个词",
+            disabledWords = disabledWords,
+            onDisable = { word -> disableWords(listOf(word)) },
+            onDisableAll = { disableWords(dups.map { it.key }.toSet() - disabledWords) },
             onDismiss = { showDedup = null },
             onModify = { showDedup = null; filterType = TranslationFilterType.DEDUP }
         )
@@ -605,7 +653,7 @@ fun StatChip(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = color); Text(label, fontSize = 10.sp, color = RustedOnBackground.copy(alpha = 0.4f)) }
 }
 
-enum class TranslationFilterType { ALL, KEY, SECTION, NATIVE, EXTRA, USER, DEDUP }
+enum class TranslationFilterType { ALL, KEY, SECTION, NATIVE, EXTRA, USER, DEDUP, DISABLED }
 
 /** 全库双向查重结果 */
 private data class LibraryDupGroups(

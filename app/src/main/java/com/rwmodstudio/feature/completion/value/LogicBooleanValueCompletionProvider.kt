@@ -41,6 +41,14 @@ internal fun translateValueName(dict: TranslationDict?, name: String): String {
 }
 
 /**
+ * 资源名补全的显示/插入值：`资源名禁用翻译` 打开时一律用英文原名，
+ * 覆盖所有资源名补全位置（资源属性、自身资源. 链、自身有资源(...) 参数名等）。
+ */
+internal fun translateResourceName(dict: TranslationDict?, name: String): String =
+    if (com.rwmodstudio.core.SettingsManager.devTranslationBlockResource) name
+    else translateValueName(dict, name)
+
+/**
  * 是否为 LogicBoolean 类型：去空格后忽略大小写等于 "logicboolean"。
  * 覆盖 "LogicBoolean" 与 "logic boolean"（如 隐藏）。
  */
