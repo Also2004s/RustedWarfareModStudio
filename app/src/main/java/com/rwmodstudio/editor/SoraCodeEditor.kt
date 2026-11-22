@@ -1330,8 +1330,8 @@ fun SoraCodeEditor(
                 val padSize = (140 * density).toInt()
                 val arrowSize = (44 * density).toInt()
                 val edge = (8 * density).toInt()
-                // 圆形背景：80% 不透明（透出 20%）
-                val padBg = (barBg and 0x00FFFFFF) or (204 shl 24)
+                // 圆形背景：90% 不透明（透出 10%）
+                val padBg = (barBg and 0x00FFFFFF) or (230 shl 24)
                 val container = android.widget.FrameLayout(ctx).apply {
                     background = android.graphics.drawable.GradientDrawable().apply {
                         shape = android.graphics.drawable.GradientDrawable.OVAL
@@ -1346,6 +1346,8 @@ fun SoraCodeEditor(
                         setImageDrawable(ContextCompat.getDrawable(ctx, drawableId))
                         setColorFilter(barFg)
                         scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                        // 箭头不要任何背景/按压色
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
                         val p = (6 * density).toInt()
                         setPadding(p, p, p, p)
                         setOnClickListener {
@@ -1366,6 +1368,27 @@ fun SoraCodeEditor(
                 addArrow(R.drawable.ic_arrow_down, 0, 1, android.view.Gravity.BOTTOM or centerH, 0, 0, 0, edge)
                 addArrow(R.drawable.ic_arrow_left, -1, 0, android.view.Gravity.START or centerV, edge, 0, 0, 0)
                 addArrow(R.drawable.ic_arrow_right, 1, 0, android.view.Gravity.END or centerV, 0, 0, edge, 0)
+                // 中心：与光标按钮同款的 I 形光标图标，点一下左移并关闭
+                val centerIcon = android.widget.ImageView(ctx).apply {
+                    setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_cursor))
+                    setColorFilter(barFg)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    val p = (8 * density).toInt()
+                    setPadding(p, p, p, p)
+                    setOnClickListener {
+                        moveCursorBy(-1, 0)
+                        cursorPadRef.value?.dismiss()
+                    }
+                }
+                container.addView(
+                    centerIcon,
+                    android.widget.FrameLayout.LayoutParams(
+                        (32 * density).toInt(),
+                        (32 * density).toInt(),
+                        android.view.Gravity.CENTER
+                    )
+                )
                 val popup = android.widget.PopupWindow(container, padSize, padSize, false).apply {
                     isOutsideTouchable = true
                     setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
