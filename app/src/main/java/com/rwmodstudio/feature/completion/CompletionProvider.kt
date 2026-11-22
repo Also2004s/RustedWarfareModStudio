@@ -376,11 +376,14 @@ class CompletionProvider(
     ): List<CompletionItem> {
         val results = mutableListOf<CompletionItem>()
 
-        // 注释行（# / ; 开头）不参与任何补全：否则在注释里输入中文逗号等触发符时，
-        // rawPrefix 被切成空、行内又没有 ':'（keyPart 为空），会落进通用补全主源，
-        // 空前缀对自定义补全表是「全部命中」，直接弹出整张表。
-        val lineForCommentCheck = textBeforeCursor.substringAfterLast('\n').trimStart()
-        if (lineForCommentCheck.startsWith("#") || lineForCommentCheck.startsWith(";")) return emptyList()
+        // 整行上下文禁止补全（按上下文判断，而不是针对某个触发符打补丁）：
+        // 1) 注释行（# / ; 开头）：注释里没有键值，不该出任何候选；
+        // 2) 已闭合的节名行（行首 [ ... ]）：] 之后不是合法 ini 内容，不提供补全。
+        // 空前缀的通用兜底另有一道统一关口（见下方 wordPrefix 为空时早退），
+        // 两处合起来覆盖注释、节名行、以及任意空白/符号后误弹整张补全表的问题。
+        val lineSoFar = textBeforeCursor.substringAfterLast('\n').trimStart()
+        if (lineSoFar.startsWith("#") || lineSoFar.startsWith(";")) return emptyList()
+        if (lineSoFar.startsWith("[") && lineSoFar.contains("]")) return emptyList()
 
         // 手动「代码提示」：节内空内容行点击灯泡 → 只列该节必备且尚未出现的属性。
         // 一次性请求，无论是否命中都消费掉，避免污染后续补全。
@@ -467,12 +470,6 @@ class CompletionProvider(
                 return results.withDetail()
             }
         }
-
-        // 是否满足自动补全触发条件：有前缀、行首、前一个是空白，或前一个是触发符号
-        val isAutoCompleteTriggered = rawPrefix.isNotEmpty() ||
-                textBeforeCursor.isEmpty() ||
-                textBeforeCursor.last().isWhitespace() ||
-                textBeforeCursor.last() in AUTO_COMPLETE_TRIGGER_CHARS
 
         // 直接使用编辑器传入的实际节名（顶部节名显示已保证正确），不再内部解析
         val mappedSection = currentSectionName?.let { mapSectionName(it) }
@@ -662,9 +659,10 @@ class CompletionProvider(
             return body.withDetail()
         }
 
-        if (rawPrefix.isEmpty() && valueResults.isEmpty() && !isAutoCompleteTriggered) return emptyList()
-
+        // 空前缀：光标前是空白/触发符，且上面所有明确上下文（值补全、节内空行、[ 节名、@ 指令）
+        // 都没有命中 → 不再进入通用主源。补全表对空前缀是「全部命中」，继续走下去就会弹整张表。
         val wordPrefix = rawPrefix
+        if (wordPrefix.isEmpty()) return emptyList()
 
         // @ 补全
         if (wordPrefix.startsWith("@")) {

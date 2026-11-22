@@ -1297,14 +1297,22 @@ fun SoraCodeEditor(
             // 光标移动按钮：单击左移一格；长按弹出上/下/左/右十字轮盘（全部矢量图标）
             fun moveCursorBy(dx: Int, dy: Int) {
                 val ed = editorRef.value ?: return
+                if (dy != 0) {
+                    // 上下按「显示行」移动：走 sora 的 SelectionMovement，按布局行计算，
+                    // 软换行后同一逻辑行的多个显示行也是一步一行（自己按逻辑行加减会整行跳过）
+                    ed.moveSelection(
+                        if (dy > 0) io.github.rosemoe.sora.widget.SelectionMovement.DOWN
+                        else io.github.rosemoe.sora.widget.SelectionMovement.UP
+                    )
+                    ed.ensureSelectionVisible()
+                    ed.requestFocus()
+                    return
+                }
                 val line = ed.cursor.leftLine
                 val col = ed.cursor.leftColumn
                 var newLine = line
                 var newCol = col
-                if (dy != 0) {
-                    newLine = (line + dy).coerceIn(0, (ed.text.lineCount - 1).coerceAtLeast(0))
-                    newCol = col.coerceAtMost(ed.text.getColumnCount(newLine))
-                } else if (dx < 0) {
+                if (dx < 0) {
                     if (col > 0) {
                         newCol = col - 1
                     } else if (line > 0) {
