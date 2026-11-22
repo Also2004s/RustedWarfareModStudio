@@ -1325,6 +1325,20 @@ fun SoraCodeEditor(
                 ed.requestFocus()
             }
 
+            // 拖动方向 → 扇形中心角（0=右、90=下、180=左、270=上）
+            fun sectorAngleOf(dx: Double, dy: Double): Float {
+                val angle = Math.toDegrees(kotlin.math.atan2(dy, dx))
+                return when {
+                    angle >= -45 && angle < 45 -> 0f
+                    angle >= 45 && angle < 135 -> 90f
+                    angle >= 135 || angle < -135 -> 180f
+                    else -> 270f
+                }
+            }
+
+            // 轮盘扇形高亮（拖动时指示松手会触发的方向）
+            var padSector: CursorPadSectorView? = null
+
             fun showCursorPad(anchor: android.view.View) {
                 cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
                 // 轮盘直径 / 箭头格大小 / 距边缘间距：格子加大，留白收紧
@@ -1340,6 +1354,16 @@ fun SoraCodeEditor(
                     }
                     elevation = 10 * density
                 }
+                // 扇形蓝色高光（先加，位于箭头下方）
+                val sector = CursorPadSectorView(ctx)
+                container.addView(
+                    sector,
+                    android.widget.FrameLayout.LayoutParams(
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
+                padSector = sector
                 fun addArrow(drawableId: Int, dx: Int, dy: Int, gravity: Int, l: Int, t: Int, r: Int, b: Int) {
                     // 箭头只做方向指示：不可点击，只能靠长按后滑动触发
                     val icon = android.widget.ImageView(ctx).apply {
@@ -1410,7 +1434,18 @@ fun SoraCodeEditor(
                             padHoldActive = false
                             false
                         }
-                        android.view.MotionEvent.ACTION_MOVE -> false
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            if (padHoldActive) {
+                                val dx = (ev.rawX - padDownX).toDouble()
+                                val dy = (ev.rawY - padDownY).toDouble()
+                                if (kotlin.math.hypot(dx, dy) >= 12 * density) {
+                                    padSector?.highlight(sectorAngleOf(dx, dy))
+                                } else {
+                                    padSector?.highlight(null)
+                                }
+                            }
+                            false
+                        }
                         android.view.MotionEvent.ACTION_UP -> {
                             v.parent?.requestDisallowInterceptTouchEvent(false)
                             // 松手才判定：按手指最终所在的扇形方向触发，然后轮盘消失
@@ -1419,14 +1454,14 @@ fun SoraCodeEditor(
                                 val dy = (ev.rawY - padDownY).toDouble()
                                 val distance = kotlin.math.hypot(dx, dy)
                                 if (distance >= 12 * density) {
-                                    val angle = Math.toDegrees(kotlin.math.atan2(dy, dx))
-                                    when {
-                                        angle >= -45 && angle < 45 -> moveCursorBy(1, 0)    // 右扇形
-                                        angle >= 45 && angle < 135 -> moveCursorBy(0, 1)    // 下扇形
-                                        angle >= 135 || angle < -135 -> moveCursorBy(-1, 0) // 左扇形
-                                        else -> moveCursorBy(0, -1)                         // 上扇形
+                                    when (sectorAngleOf(dx, dy)) {
+                                        0f -> moveCursorBy(1, 0)    // 右扇形
+                                        90f -> moveCursorBy(0, 1)   // 下扇形
+                                        180f -> moveCursorBy(-1, 0) // 左扇形
+                                        else -> moveCursorBy(0, -1) // 上扇形
                                     }
                                 }
+                                padSector?.highlight(null)
                                 cursorPadRef.value?.dismiss()
                             }
                             padHoldActive = false
@@ -1434,7 +1469,10 @@ fun SoraCodeEditor(
                         }
                         android.view.MotionEvent.ACTION_CANCEL -> {
                             v.parent?.requestDisallowInterceptTouchEvent(false)
-                            if (padHoldActive) cursorPadRef.value?.dismiss()
+                            if (padHoldActive) {
+                                padSector?.highlight(null)
+                                cursorPadRef.value?.dismiss()
+                            }
                             padHoldActive = false
                             false
                         }
@@ -1858,3 +1896,29 @@ private class NoEnterCommitAutoCompletion(editor: CodeEditor) : EditorAutoComple
     }
 }
 
+
+/** 光标轮盘的扇形高亮：按中心角绘制 90° 扇形（蓝色半透明），null 表示不显示 */
+private class CursorPadSectorView(context: android.content.Context) : android.view.View(context) {
+
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x663D8BFF
+        style = android.graphics.Paint.Style.FILL
+    }
+    private val bounds = android.graphics.RectF()
+    private var centerAngleDeg: Float? = null
+
+    fun highlight(centerAngle: Float?) {
+        if (centerAngleDeg == centerAngle) return
+        centerAngleDeg = centerAngle
+        invalidate()
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val center = centerAngleDeg ?: return
+        val radius = minOf(width, height) / 2f
+        val cx = width / 2f
+        val cy = height / 2f
+        bounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
+        canvas.drawArc(bounds, center - 45f, 90f, true, paint)
+    }
+}
