@@ -22,12 +22,13 @@ object UpdateChecker {
 
     /**
      * GitHub 代理加速前缀：国内网络直连 github.com 常被墙，用镜像中转。
-     * 单个镜像会失效（gh-proxy.com 已出现 403），因此按顺序尝试多个。
+     * 镜像会失效/换域名，实测 2026-11 可用的是前三个（gh-proxy.com 已 403），保留它作最后兜底。
      */
     val GH_PROXY_PREFIXES = listOf(
         "https://ghproxy.net/",
-        "https://gh-proxy.com/",
-        "https://ghfast.top/"
+        "https://gh-proxy.org/",
+        "https://gh.dpik.top/",
+        "https://gh-proxy.com/"
     )
 
     /** 兼容旧调用：默认镜像 */
@@ -57,13 +58,16 @@ object UpdateChecker {
         /** APK 附件直链（无附件则为 null，跳详情页） */
         val apkUrl: String?,
         /** 走 GitHub API 的资产下载地址（Accept: application/octet-stream），作为兜底源 */
-        val apkApiUrl: String? = null
+        val apkApiUrl: String? = null,
+        /** 附件大小（字节），用于校验下载结果是否完整、未被镜像错误页替换 */
+        val apkSize: Long? = null
     )
 
     @Serializable
     private data class ReleaseAsset(
         val id: Long? = null,
         val name: String? = null,
+        val size: Long? = null,
         val browser_download_url: String? = null
     )
 
@@ -119,7 +123,8 @@ object UpdateChecker {
                 apkUrl = asset?.browser_download_url,
                 apkApiUrl = asset?.id?.let {
                     "https://api.github.com/repos/Also2004s/RustedWarfareModStudio/releases/assets/$it"
-                }
+                },
+                apkSize = asset?.size
             )
         } finally {
             conn.disconnect()

@@ -1,5 +1,7 @@
 package com.rwmodstudio.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -250,7 +252,20 @@ fun UpdateDialogHost(onVersionDismissed: (String) -> Unit = {}) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { onStateChange(null) }) { Text("确定") }
+                TextButton(onClick = {
+                    onStateChange(null)
+                    // 应用内所有下载源都不通时，兜底走系统浏览器打开 Release 页
+                    try {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.releasesPageUrl()))
+                        )
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "无法打开浏览器", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("用浏览器下载") }
+            },
+            dismissButton = {
+                TextButton(onClick = { onStateChange(null) }) { Text("取消") }
             }
         )
         null -> Unit

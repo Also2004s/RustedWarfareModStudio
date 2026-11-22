@@ -77,6 +77,7 @@ object UpdateStateManager {
                     UpdateDownloader.downloadApk(
                         url = url,
                         apiUrl = info.apkApiUrl,
+                        expectedSize = info.apkSize,
                         targetFile = target,
                         onProgress = { bytes, total ->
                             // IO 线程写 Compose 状态是快照安全的

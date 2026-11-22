@@ -73,12 +73,13 @@ object UpdateDownloader {
         url: String,
         targetFile: File,
         onProgress: ProgressListener,
-        apiUrl: String? = null
+        apiUrl: String? = null,
+        expectedSize: Long? = null
     ): File {
         var lastError: Exception? = null
         for (source in rankSources(url, apiUrl)) {
             try {
-                return downloadFrom(source, targetFile, onProgress)
+                return downloadFrom(source, targetFile, onProgress, expectedSize)
             } catch (e: Exception) {
                 lastError = e
             }
@@ -142,6 +143,10 @@ object UpdateDownloader {
             if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
                 throw IOException("探测失败，服务器返回 $code")
             }
+            // 失效的镜像常返回 200 + 网页（域名停放页/错误提示），必须剔除，否则会排在最快源里
+            if (conn.contentType?.contains("text/html", ignoreCase = true) == true) {
+                throw IOException("探测失败，返回网页而不是安装包")
+            }
             val read = conn.inputStream.use { input -> input.read(ByteArray(PROBE_BYTES)) }
             if (read <= 0) throw IOException("探测读取为空")
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
@@ -161,20 +166,48 @@ object UpdateDownloader {
     }
 
     /** 从某个源下载；支持分段则并行下载，并行失败自动退回单线程 */
-    private fun downloadFrom(source: ProbedSource, targetFile: File, onProgress: ProgressListener): File {
+    private fun downloadFrom(
+        source: ProbedSource,
+        targetFile: File,
+        onProgress: ProgressListener,
+        expectedSize: Long?
+    ): File {
         val total = source.total
-        if (targetFile.exists() && total > 0 && targetFile.length() == total) {
+        if (targetFile.exists() && total > 0 && targetFile.length() == total && isApkFile(targetFile, expectedSize)) {
             onProgress.onProgress(total, total)
             return targetFile
         }
-        if (source.supportsRange && total >= MIN_PARALLEL_BYTES) {
+        val result = if (source.supportsRange && total >= MIN_PARALLEL_BYTES) {
             try {
-                return parallelDownload(source, targetFile, onProgress)
+                parallelDownload(source, targetFile, onProgress)
             } catch (e: Exception) {
                 Log.w(TAG, "分段下载失败，退回单线程：${e.message}")
+                singleDownload(source.url, total, targetFile, onProgress)
             }
+        } else {
+            singleDownload(source.url, total, targetFile, onProgress)
         }
-        return singleDownload(source.url, total, targetFile, onProgress)
+        // 兜底校验：镜像返回网页/残缺文件时状态码也可能是 200，这里按 APK 特征与附件大小核对
+        if (!isApkFile(result, expectedSize)) {
+            result.delete()
+            throw IOException("下载内容不是有效的安装包")
+        }
+        return result
+    }
+
+    /** 是否为有效 APK：ZIP 魔数 PK\x03\x04；已知附件大小时必须完全一致 */
+    private fun isApkFile(file: File, expectedSize: Long?): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        if (expectedSize != null && expectedSize > 0 && file.length() != expectedSize) return false
+        val header = ByteArray(4)
+        val read = try {
+            file.inputStream().use { it.read(header) }
+        } catch (e: Exception) {
+            return false
+        }
+        return read == 4 &&
+            header[0] == 0x50.toByte() && header[1] == 0x4B.toByte() &&
+            header[2] == 0x03.toByte() && header[3] == 0x04.toByte()
     }
 
     /** 单线程流式下载 */
@@ -190,6 +223,9 @@ object UpdateDownloader {
             conn.connect()
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
                 throw IOException("下载失败，服务器返回 ${conn.responseCode}")
+            }
+            if (conn.contentType?.contains("text/html", ignoreCase = true) == true) {
+                throw IOException("下载源返回了网页")
             }
             val total = conn.contentLength.toLong().takeIf { it > 0 } ?: totalHint
             if (targetFile.exists() && total > 0 && targetFile.length() == total) {
