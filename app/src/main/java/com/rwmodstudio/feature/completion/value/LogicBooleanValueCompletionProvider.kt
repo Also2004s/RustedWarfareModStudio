@@ -375,8 +375,15 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
             prop != null && isLogicBooleanValueType(prop.type) -> LogicTarget.BOOLEAN
             else -> null
         }
-        // 传给分析器的表达式文本：从对应模式起点（`:`/`=`/`%{`）之后到光标，含函数前缀
+        // 传给分析器的表达式文本：从对应模式起点（`:`/`=`/`%{`）之后到光标，含函数前缀。
+        // @global/@define 冒号后的值：按「前面已经写了 if」处理——状态机直接从 if 后的操作数开始，
+        // 不会再弹 if/真/假 入口（与 需要条件:if | 光标处完全同口径）。
         val exprText = when {
+            request.forceBooleanExpression -> "if " + when {
+                rhsFragment != null -> rhsFragment
+                interpFragment != null -> interpFragment
+                else -> request.textBeforeCursor.substringAfter(':')
+            }
             rhsFragment != null -> rhsFragment
             interpFragment != null -> interpFragment
             else -> request.textBeforeCursor.substringAfter(':')
@@ -435,7 +442,9 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
         // 空入口判定用「整段表达式是否空白」而非 filterPrefix.isEmpty()：
         // filterPrefix 会把空格当分隔，输入 `自动触发:if `（if 后空格）时被切空而误判为空入口；
         // 用 exprText（光标前到 `:` 的整段）判断，`if ` 非空白 → 进入表达式状态机。
-        val isBooleanEntry = expectedTarget == LogicTarget.BOOLEAN && !request.isInsideParentheses() &&
+        // @global/@define 冒号后视为「已经处在 if 条件内部」：不再弹 if/真/假 入口（与 需要条件:if 后一致）
+        val isBooleanEntry = !request.forceBooleanExpression &&
+            expectedTarget == LogicTarget.BOOLEAN && !request.isInsideParentheses() &&
             exprText.isBlank() && interpFragment == null
         // 括号内布尔表达式起点（选择( 第1参 / 函数布尔参数 空前缀）：此为表达式起点，
         // and/or（中缀二元运算符）与 if 无左操作数不可用，真/假 是字面量也不应作为表达式"起点"直接给出，
