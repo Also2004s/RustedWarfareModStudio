@@ -49,16 +49,6 @@ class ValueCompletionAggregator(
 
     private val providers = mutableListOf<BaseValueCompletionProvider>()
 
-    /**
-     * @global / @define 变量定义冒号后使用的专用实例：该位置与「需要条件:if ...」同口径，
-     * 必须走完整的 if 语句状态机（入口 → 操作数 → 连接符/运算符），不能只取操作数集。
-     * 不受开发者补全开关影响（历史行为即如此）。
-     */
-    private val forcedBooleanProvider = LogicBooleanValueCompletionProvider()
-
-    /** 参数补全实例：强制布尔上下文里，函数括号内的命名参数也要能补（@global/@define 值位置） */
-    private val functionParamProvider = FunctionParameterCompletionProvider()
-
     init {
         // 注册序号/参数模板键集（builtFrom_{NUM}_name 等）：值补全侧要把实例化键
         // （builtFrom_1_name / 空位形态 builtFrom__name）还原成模板名才能查到类型。
@@ -83,7 +73,7 @@ class ValueCompletionAggregator(
             providers.add(VanillaUnitNameValueCompletionProvider())
         }
         if (options.unitRefEnabled) providers.add(UnitRefValueCompletionProvider())
-        if (options.functionParamEnabled) providers.add(functionParamProvider)
+        if (options.functionParamEnabled) providers.add(FunctionParameterCompletionProvider())
         if (options.projectRefEnabled) providers.add(ProjectRefValueCompletionProvider())
         if (options.copyFromSectionEnabled) providers.add(CopyFromSectionValueCompletionProvider())
         if (options.defineVariableEnabled) providers.add(DefineVariableValueCompletionProvider())
@@ -99,48 +89,6 @@ class ValueCompletionAggregator(
         val providerLabel: String,
         val items: List<CompletionProvider.CompletionItem>
     )
-
-    /**
-     * 按「布尔表达式 / if 语句」上下文补全（@global / @define 变量定义冒号后的值位置）。
-     * 只跑逻辑表达式 Provider，返回结果与 `需要条件:if ...` 完全同源：
-     * 空值给 真/假/if，if/and/or 后给操作数集 + not，操作数完成给 and/or，运算符后继续给操作数。
-     *
-     * @param valuePrefix 光标前可替换的当前片段（按空格/逗号/括号切分后的最后一段）
-     * @param textBeforeCursor 当前整行（用于状态机判断完整表达式上下文）
-     */
-    fun getBooleanExpressionCompletions(
-        context: Context,
-        valuePrefix: String,
-        rawValuePrefixLength: Int,
-        lineText: String,
-        textBeforeCursor: String,
-        textAfterCursor: String,
-        memoryNames: Set<String> = emptySet(),
-        memoryTypes: Map<String, String> = emptyMap()
-    ): List<CompletionProvider.CompletionItem> {
-        val request = ValueCompletionRequest(
-            context = context,
-            sectionProperties = sectionProperties,
-            propertyName = "@define",
-            sectionName = null,
-            valuePrefix = valuePrefix,
-            rawValuePrefixLength = rawValuePrefixLength,
-            lineText = lineText,
-            textBeforeCursor = textBeforeCursor,
-            textAfterCursor = textAfterCursor,
-            translationDict = translationDict,
-            memoryNames = memoryNames,
-            memoryTypes = memoryTypes,
-            forceBooleanExpression = true
-        )
-        // 括号内若是已知命名参数函数，参数补全优先且只返回参数（与 需要条件 同口径），
-        // 不再混入布尔操作数；纯位置参数函数（选择( 等）没有命名参数 → 回落到逻辑表达式。
-        if (request.isInsideParentheses() && options.functionParamEnabled) {
-            val paramItems = functionParamProvider.provideCompletionItems(request)
-            if (paramItems.isNotEmpty()) return paramItems
-        }
-        return forcedBooleanProvider.provideCompletionItems(request)
-    }
 
     /**
      * 获取值补全候选。
@@ -188,7 +136,9 @@ class ValueCompletionAggregator(
         soundFiles: Set<String> = emptySet(),
         chainSectionNames: Map<String, Set<String>> = emptyMap(),
         currentFileDir: String = "",
-        projectRoot: String = ""
+        projectRoot: String = "",
+        /** @global/@define 冒号后的值位置：按「前面已有 if」的布尔表达式上下文补全 */
+        forceBooleanExpression: Boolean = false
     ): List<CompletionProvider.CompletionItem> {
         return getValueCompletionsGrouped(
             context = context,
@@ -224,7 +174,8 @@ class ValueCompletionAggregator(
             soundFiles = soundFiles,
             chainSectionNames = chainSectionNames,
             currentFileDir = currentFileDir,
-            projectRoot = projectRoot
+            projectRoot = projectRoot,
+            forceBooleanExpression = forceBooleanExpression
         ).flatMap { it.items }
     }
 
@@ -266,7 +217,8 @@ class ValueCompletionAggregator(
         soundFiles: Set<String> = emptySet(),
         chainSectionNames: Map<String, Set<String>> = emptyMap(),
         currentFileDir: String = "",
-        projectRoot: String = ""
+        projectRoot: String = "",
+        forceBooleanExpression: Boolean = false
     ): List<ProviderResult> {
         val request = ValueCompletionRequest(
             context = context,
@@ -304,7 +256,8 @@ class ValueCompletionAggregator(
             soundFiles = soundFiles,
             chainSectionNames = chainSectionNames,
             currentFileDir = currentFileDir,
-            projectRoot = projectRoot
+            projectRoot = projectRoot,
+            forceBooleanExpression = forceBooleanExpression
         )
 
         val results = mutableListOf<ProviderResult>()

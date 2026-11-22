@@ -783,9 +783,8 @@ fun EditorScreen(
     }
     var customSymbols by remember {
         val saved = SettingsManager.customSymbolsJson
-        mutableStateOf(if (saved.isNotEmpty()) {
-            saved.split("||").map { pair -> val parts = pair.split("|"); if (parts.size == 2) parts[0] to parts[1] else "=" to "=" }
-        } else listOf("=" to "=", ":" to ":", ";" to ";", "#" to "#", "[" to "[", "]" to "]", "," to ",", "." to ".", "\"" to "\""))
+        val parsed = if (saved.isNotEmpty()) SettingsManager.parseCustomSymbols(saved) else emptyList()
+        mutableStateOf(parsed.ifEmpty { SettingsManager.defaultCustomSymbols() })
     }
     var showSymbolEditor by remember { mutableStateOf(false) }
     var editingSymbolLabel by remember { mutableStateOf("") }
@@ -2866,6 +2865,13 @@ fun EditorScreen(
                         }
                         saveSymbols(); editingSymbolLabel = ""; editingSymbolValue = TextFieldValue(""); editingSymbolIndex = -1
                     }
+                }
+                DialogActionButton("重置", color = RustedError) {
+                    customSymbols = SettingsManager.defaultCustomSymbols()
+                    saveSymbols()
+                    editingSymbolIndex = -1
+                    editingSymbolLabel = ""
+                    editingSymbolValue = TextFieldValue("")
                 }
                 DialogActionButton("关闭", color = RustedOnBackground) { showSymbolEditor = false }
             }

@@ -411,6 +411,10 @@ class CompletionProvider(
         // `@global `（命令后带空格）也会落入空前缀通用兜底、倾泻整张补全表。
         val directiveLine = textBeforeCursor.substringAfterLast('\n')
         val directiveMatch = directiveDefLineRegex.find(directiveLine)
+        // @global/@define 冒号后的值阶段不在这里补，而是落到下面的统一值补全流程：
+        // 用 forceBooleanValueLine 让逻辑 Provider 按「前面已有 if」工作，同时保留完整符号上下文
+        // （标签/资源/单位名/参数值），与 需要条件:if 完全同源。
+        var forceBooleanValueLine = false
         if (directiveMatch != null) {
             val directive = directiveMatch.groupValues[1].trim().lowercase()
             val after = directiveMatch.groupValues[2]
@@ -418,36 +422,18 @@ class CompletionProvider(
             // 避免与命名参数等带等号语法混淆造成误判。
             val sepIdx = after.indexOf(':')
             val namePrefix = if (sepIdx >= 0) after.substring(0, sepIdx).trim() else after.trim()
-            val valueRaw = if (sepIdx >= 0) after.substring(sepIdx + 1) else ""
-            // 可替换片段（最后一个空格/逗号/括号后的部分）与完整表达式分开：
-            // 状态机判断用完整表达式（textBeforeCursor），替换长度/前缀过滤用当前片段。
-            val replaceablePrefix = replaceableValuePrefix(valueRaw, splitOnSpace = true)
-            val valuePrefix = replaceablePrefix.trim()
+            val valuePrefix = if (sepIdx >= 0) after.substring(sepIdx + 1).trim() else ""
             if (sepIdx >= 0 && namePrefix.isNotEmpty()) {
-                // 值阶段：@memory name: → 提示类型；
-                // @define/@global name: → 与「需要条件:if ...」同口径的布尔表达式（if 语句）补全：
-                // 空值给 真/假/if，if/and/or 后给操作数集 + not，操作数完成给 and/or，运算符后继续给操作数。
+                // 值阶段：@memory name: → 提示类型；@define/@global 交给统一值补全流程（标记 forceBoolean）
                 if (directive == "memory") {
                     memoryTypes.forEach { type ->
                         if (completionMatchLevel(valuePrefix, type) > 0) {
                             results.add(CompletionItem(label = type, type = CompletionType.KEY, detail = "内存类型", insertText = type, category = listOf("指令")))
                         }
                     }
-                } else {
-                    val afterInLine = textAfterCursor.takeWhile { it != '\n' }
-                    results.addAll(
-                        valueAggregator.getBooleanExpressionCompletions(
-                            context = context,
-                            valuePrefix = valuePrefix,
-                            rawValuePrefixLength = replaceablePrefix.length,
-                            lineText = directiveLine + afterInLine,
-                            textBeforeCursor = directiveLine,
-                            textAfterCursor = afterInLine,
-                            memoryNames = fileSymbols?.memories ?: emptySet(),
-                            memoryTypes = fileSymbols?.memoryTypes ?: emptyMap()
-                        )
-                    )
+                    return results.withDetail()
                 }
+                forceBooleanValueLine = true
             } else {
                 // 变量名阶段：@memory → 常用内存变量名；@define → 当前节+继承链局部变量；@global → 项目全局变量
                 when (directive) {
@@ -472,8 +458,8 @@ class CompletionProvider(
                         }
                     }
                 }
+                return results.withDetail()
             }
-            return results.withDetail()
         }
 
         // 是否满足自动补全触发条件：有前缀、行首、前一个是空白，或前一个是触发符号
@@ -491,7 +477,7 @@ class CompletionProvider(
         var suppressLogicSyntax = false
         var includeOperators = true
         var afterCompleteValue = false
-        if (valueCompletionEnabled) {
+        if (valueCompletionEnabled || forceBooleanValueLine) {
             val currentLine = textBeforeCursor.substringAfterLast('\n')
             // 逻辑值入口抑制：当前值已出现 if/真/假 后，不再提示这三个
             suppressEntryTokens = logicValueHasEntryToken(currentLine)
@@ -604,11 +590,16 @@ class CompletionProvider(
                     soundFiles = soundFiles,
                     chainSectionNames = chainSectionNames,
                     currentFileDir = currentFileDir,
-                    projectRoot = projectRoot
+                    projectRoot = projectRoot,
+                    forceBooleanExpression = forceBooleanValueLine
                 )
                 // 同 label 去重：self.readUnitMemory() 与 readUnitMemory 翻译后同为 读取单位内存，
                 // 避免同一补全重复出现两行（同 label 即同插入文本）
                 valueResults.addAll(valueCandidates.distinctBy { it.label })
+                // @global/@define 值阶段：只显示值补全结果，不混入通用 KEY/翻译库兜底
+                if (forceBooleanValueLine) {
+                    return sortCompletions(valueResults).withDetail()
+                }
                 // ${ 变量引用：值片段含 ${（不管 $ 前面是什么，如 攻击范围=${攻）只显示变量补全，
                 // 不做通用 KEY/翻译库兜底，避免混入无关项；候选为空则空
                 if (valuePrefix.contains("\${")) {

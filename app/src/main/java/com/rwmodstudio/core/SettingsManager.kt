@@ -21,6 +21,23 @@ object SettingsManager {
 
     val FONT_FAMILIES = setOf("system", "system_mono", "jetbrains_mono", "lxgw_wenkai_regular")
 
+    /**
+     * 快捷符号栏默认配置（取自用户手机实测配置）：
+     * 条目用 `||` 分隔，显示名与输出值用 `|` 分隔，`≡` 表示插入后光标停在该位置。
+     */
+    const val DEFAULT_CUSTOM_SYMBOLS =
+        "[|[≡||=|=≡||:|:≡||.|.≡||(|(≡)||'|'≡||\"|\"≡\"||>|>≡||<|<≡||@|@≡||\$|\${≡}||%|%{≡}"
+
+    /** 解析符号栏配置串（`显示名|输出值`，条目间 `||`）；格式非法的条目丢弃 */
+    fun parseCustomSymbols(raw: String): List<Pair<String, String>> =
+        raw.split("||").mapNotNull { pair ->
+            val parts = pair.split("|")
+            if (parts.size == 2) parts[0] to parts[1] else null
+        }
+
+    /** 默认符号栏（显示名 to 输出值） */
+    fun defaultCustomSymbols(): List<Pair<String, String>> = parseCustomSymbols(DEFAULT_CUSTOM_SYMBOLS)
+
     private lateinit var settings: FileSettings
     private lateinit var appContext: Context
 
@@ -181,6 +198,15 @@ object SettingsManager {
 
     private fun migrateDefaults() {
         try {
+            // 快捷符号栏：旧版内置默认（= : ; # [ ] , . "）一次性覆盖为新默认（手机实测配置）。
+            // 用版本标记保证只覆盖一次，之后用户自己的修改不再被动。
+            if (settings.getInt("custom_symbols_defaults_version", 1) < 2) {
+                settings.edit()
+                    .putString("custom_symbols_json", DEFAULT_CUSTOM_SYMBOLS)
+                    .putInt("custom_symbols_defaults_version", 2)
+                    .apply()
+                Log.d(TAG, "Migrated custom_symbols_json to new default (one-time)")
+            }
             // 节名行高亮默认色改为含透明度的 #15F05E5A：一次性把"未自定义（无记录或空串）"的老用户迁移到新默认，
             // 已被用户手动改过的彩色值保留，不覆盖。
             if (!settings.contains("section_highlight_color_migration_v1")) {
