@@ -292,6 +292,8 @@ fun SoraCodeEditor(
     val symbolBarRef = remember { mutableStateOf<LinearLayout?>(null) }
     val toolbarRef = remember { mutableStateOf<LinearLayout?>(null) }
     val bottomBarRef = remember { mutableStateOf<LinearLayout?>(null) }
+    // 光标方向轮盘（长按光标按钮弹出），需要在页面销毁时主动关闭
+    val cursorPadRef = remember { mutableStateOf<android.widget.PopupWindow?>(null) }
     val litLines = remember { mutableStateOf(setOf<Int>()) }
     // 灯泡图标只需加载一次，避免每次 refreshLineStyles 都重新 createLightbulbDrawable
     val bulbDrawables = remember(context) {
@@ -1292,6 +1294,114 @@ fun SoraCodeEditor(
                 setOnClickListener { onToolbarAction?.invoke(EditorToolbarAction.COLOR_PICKER) }
             }
 
+            // 光标移动按钮：单击左移一格；长按弹出上/下/左/右十字轮盘（全部矢量图标）
+            fun moveCursorBy(dx: Int, dy: Int) {
+                val ed = editorRef.value ?: return
+                val line = ed.cursor.leftLine
+                val col = ed.cursor.leftColumn
+                var newLine = line
+                var newCol = col
+                if (dy != 0) {
+                    newLine = (line + dy).coerceIn(0, (ed.text.lineCount - 1).coerceAtLeast(0))
+                    newCol = col.coerceAtMost(ed.text.getColumnCount(newLine))
+                } else if (dx < 0) {
+                    if (col > 0) {
+                        newCol = col - 1
+                    } else if (line > 0) {
+                        newLine = line - 1
+                        newCol = ed.text.getColumnCount(newLine)
+                    }
+                } else if (dx > 0) {
+                    val lineLen = ed.text.getColumnCount(line)
+                    if (col < lineLen) {
+                        newCol = col + 1
+                    } else if (line < ed.text.lineCount - 1) {
+                        newLine = line + 1
+                        newCol = 0
+                    }
+                }
+                ed.setSelection(newLine, newCol)
+                ed.ensureSelectionVisible()
+                ed.requestFocus()
+            }
+
+            fun showCursorPad(anchor: android.view.View) {
+                cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
+                val padSize = (132 * density).toInt()
+                val cell = padSize / 3
+                val lineColor = (barFg and 0x00FFFFFF) or 0x40000000
+                val grid = android.widget.GridLayout(ctx).apply {
+                    rowCount = 3
+                    columnCount = 3
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = 14 * density
+                        setColor(barBg)
+                        setStroke((1 * density).toInt(), lineColor)
+                    }
+                    elevation = 10 * density
+                }
+                fun addArrow(drawableId: Int, dx: Int, dy: Int, row: Int, colIdx: Int) {
+                    val btn = android.widget.ImageButton(ctx).apply {
+                        setImageDrawable(ContextCompat.getDrawable(ctx, drawableId))
+                        setColorFilter(barFg)
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                        val p = (8 * density).toInt()
+                        setPadding(p, p, p, p)
+                        setOnClickListener { moveCursorBy(dx, dy) }
+                    }
+                    grid.addView(
+                        btn,
+                        android.widget.GridLayout.LayoutParams(
+                            android.widget.GridLayout.spec(row),
+                            android.widget.GridLayout.spec(colIdx)
+                        ).apply { width = cell; height = cell }
+                    )
+                }
+                addArrow(R.drawable.ic_arrow_up, 0, -1, 0, 1)
+                addArrow(R.drawable.ic_arrow_left, -1, 0, 1, 0)
+                addArrow(R.drawable.ic_arrow_right, 1, 0, 1, 2)
+                addArrow(R.drawable.ic_arrow_down, 0, 1, 2, 1)
+                // 轮盘中心圆点
+                grid.addView(
+                    android.view.View(ctx).apply {
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(lineColor)
+                        }
+                    },
+                    android.widget.GridLayout.LayoutParams(
+                        android.widget.GridLayout.spec(1),
+                        android.widget.GridLayout.spec(1)
+                    ).apply {
+                        width = (8 * density).toInt()
+                        height = (8 * density).toInt()
+                        setGravity(android.view.Gravity.CENTER)
+                    }
+                )
+                val popup = android.widget.PopupWindow(grid, padSize, padSize, false).apply {
+                    isOutsideTouchable = true
+                    setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+                    elevation = 10 * density
+                }
+                // 显示在按钮正上方，点轮盘外任意位置关闭
+                popup.showAsDropDown(anchor, (anchor.width - padSize) / 2, -(padSize + (8 * density).toInt()))
+                cursorPadRef.value = popup
+            }
+
+            val cursorPadButton = android.widget.ImageButton(ctx).apply {
+                tag = "cursor_pad"
+                setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_cursor))
+                setColorFilter(barFg)
+                resolveRipple(ctx)?.let { background = it }
+                scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+                setOnClickListener { moveCursorBy(-1, 0) }
+                setOnLongClickListener {
+                    showCursorPad(this)
+                    true
+                }
+            }
+
             val inner = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -1299,6 +1409,8 @@ fun SoraCodeEditor(
                 addView(pasteButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
                 // 调色盘快捷入口（位于粘贴按钮右侧 = 左侧第二格），不被 applySymbols 移除
                 addView(paletteQuickButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
+                // 光标移动按钮（调色盘右侧）：单击左移，长按弹方向轮盘
+                addView(cursorPadButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
                 // 自定义符号按钮由 applySymbols 在粘贴按钮与编辑按钮之间构建
                 addView(editButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
                 symbolBarRef.value = this
@@ -1364,6 +1476,7 @@ fun SoraCodeEditor(
                 (bar.parent as? android.widget.HorizontalScrollView)?.setBackgroundColor(barBg)
                 bar.findViewWithTag<ImageButton>("paste")?.setColorFilter(barFg)
                 bar.findViewWithTag<ImageButton>("palette_quick")?.setColorFilter(barFg)
+                bar.findViewWithTag<ImageButton>("cursor_pad")?.setColorFilter(barFg)
                 bar.findViewWithTag<ImageButton>(EditorToolbarAction.EDIT_SYMBOLS.name)?.setColorFilter(barFg)
             }
             toolbarRef.value?.let { toolbar ->
@@ -1378,6 +1491,7 @@ fun SoraCodeEditor(
             }
         },
         onRelease = { container ->
+            cursorPadRef.value?.dismiss()
             iconRefreshToken.runnable?.let { iconRefreshHandler.removeCallbacks(it) }
             iconRefreshToken.runnable = null
             probeToken.runnable?.let { probeHandler.removeCallbacks(it) }
