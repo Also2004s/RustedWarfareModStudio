@@ -1338,25 +1338,19 @@ fun SoraCodeEditor(
                         setColor(padBg)
                     }
                     elevation = 10 * density
-                    // 点圆内空白（非箭头）也关闭
-                    setOnClickListener { cursorPadRef.value?.dismiss() }
                 }
                 fun addArrow(drawableId: Int, dx: Int, dy: Int, gravity: Int, l: Int, t: Int, r: Int, b: Int) {
-                    val btn = android.widget.ImageButton(ctx).apply {
+                    // 箭头只做方向指示：不可点击，只能靠长按后滑动触发
+                    val icon = android.widget.ImageView(ctx).apply {
                         setImageDrawable(ContextCompat.getDrawable(ctx, drawableId))
                         setColorFilter(barFg)
                         scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                        // 箭头不要任何背景/按压色
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
                         val p = (6 * density).toInt()
                         setPadding(p, p, p, p)
-                        setOnClickListener {
-                            moveCursorBy(dx, dy)
-                            cursorPadRef.value?.dismiss()
-                        }
                     }
                     container.addView(
-                        btn,
+                        icon,
                         android.widget.FrameLayout.LayoutParams(arrowSize, arrowSize, gravity).apply {
                             leftMargin = l; topMargin = t; rightMargin = r; bottomMargin = b
                         }
@@ -1368,34 +1362,20 @@ fun SoraCodeEditor(
                 addArrow(R.drawable.ic_arrow_down, 0, 1, android.view.Gravity.BOTTOM or centerH, 0, 0, 0, edge)
                 addArrow(R.drawable.ic_arrow_left, -1, 0, android.view.Gravity.START or centerV, edge, 0, 0, 0)
                 addArrow(R.drawable.ic_arrow_right, 1, 0, android.view.Gravity.END or centerV, 0, 0, edge, 0)
-                // 中心：与光标按钮同款的 I 形光标图标，点一下左移并关闭
-                val centerIcon = android.widget.ImageView(ctx).apply {
-                    setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_cursor))
-                    setColorFilter(barFg)
-                    scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    val p = (8 * density).toInt()
-                    setPadding(p, p, p, p)
-                    setOnClickListener {
-                        moveCursorBy(-1, 0)
-                        cursorPadRef.value?.dismiss()
-                    }
-                }
-                container.addView(
-                    centerIcon,
-                    android.widget.FrameLayout.LayoutParams(
-                        (32 * density).toInt(),
-                        (32 * density).toInt(),
-                        android.view.Gravity.CENTER
-                    )
-                )
                 val popup = android.widget.PopupWindow(container, padSize, padSize, false).apply {
                     isOutsideTouchable = true
                     setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
                     elevation = 10 * density
                 }
-                // 显示在按钮正上方，点轮盘外任意位置关闭
-                popup.showAsDropDown(anchor, (anchor.width - padSize) / 2, -(padSize + (8 * density).toInt()))
+                // 轮盘中心对准符号栏上的光标按钮
+                val loc = IntArray(2)
+                anchor.getLocationInWindow(loc)
+                popup.showAtLocation(
+                    anchor,
+                    android.view.Gravity.NO_GRAVITY,
+                    loc[0] + anchor.width / 2 - padSize / 2,
+                    loc[1] + anchor.height / 2 - padSize / 2
+                )
                 cursorPadRef.value = popup
             }
 
@@ -1450,11 +1430,8 @@ fun SoraCodeEditor(
                         }
                         android.view.MotionEvent.ACTION_UP,
                         android.view.MotionEvent.ACTION_CANCEL -> {
-                            if (ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL &&
-                                padHoldActive && !padHoldTriggered
-                            ) {
-                                cursorPadRef.value?.dismiss()
-                            }
+                            // 手指离开屏幕：轮盘立即消失，不触发（只允许滑动触发）
+                            if (padHoldActive) cursorPadRef.value?.dismiss()
                             padHoldActive = false
                             padHoldTriggered = false
                             false
