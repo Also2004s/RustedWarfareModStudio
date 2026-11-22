@@ -134,7 +134,7 @@ internal fun lastTopLevelSegment(region: String): String {
         when (c) {
             '(', '{' -> depth++
             ')', '}' -> if (depth > 0) depth--
-            ',', '，' -> if (depth == 0) lastComma = i
+            ',' -> if (depth == 0) lastComma = i
         }
     }
     return region.substring(lastComma + 1)

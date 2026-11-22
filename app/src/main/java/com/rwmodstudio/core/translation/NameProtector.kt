@@ -241,7 +241,7 @@ internal object NameProtector {
                 when (text[i]) {
                     '(', '[', '{' -> depth++
                     ')', ']', '}' -> if (depth > 0) depth--
-                    ',', '，' -> if (depth == 0) {
+                    ',' -> if (depth == 0) {
                         flush(i)
                         out.append(text[i])
                         segStart = i + 1

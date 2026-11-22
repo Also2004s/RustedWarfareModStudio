@@ -29,7 +29,7 @@ internal fun countTopLevelValues(region: String): Int {
                 if (depth > 0) depth--
                 hasContent = true
             }
-            ',', '，' -> {
+            ',' -> {
                 if (depth == 0) {
                     if (hasContent) count++
                     hasContent = false

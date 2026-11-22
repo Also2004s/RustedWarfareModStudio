@@ -545,7 +545,7 @@ internal class LogicExpressionContextAnalyzer(
                     when (contextPart[k]) {
                         '(' -> depth++
                         ')' -> if (depth > 0) depth--
-                        ',', '，' -> if (depth == 0) commaCount++
+                        ',' -> if (depth == 0) commaCount++
                     }
                 }
                 // 有签名但当前下标已越过最后声明的参数（如 select 已填满 3 个参数后又加逗号）：

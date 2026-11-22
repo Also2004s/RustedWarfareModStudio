@@ -246,7 +246,7 @@ object ProjectTagScanner {
     fun parseDefineUnitMemory(value: String): List<String> {
         val commentIdx = value.indexOf('#')
         val clean = if (commentIdx >= 0) value.substring(0, commentIdx) else value
-        return clean.split(',', '，').mapNotNull { part ->
+        return clean.split(',').mapNotNull { part ->
             val trimmed = part.trim()
             if (trimmed.isBlank()) return@mapNotNull null
             trimmed.split(Regex("""\s+""")).lastOrNull()?.takeIf { it.isNotBlank() }
@@ -607,7 +607,7 @@ object ProjectTagScanner {
     fun parseDefineUnitMemoryTyped(value: String): Map<String, String> {
         val commentIdx = value.indexOf('#')
         val clean = if (commentIdx >= 0) value.substring(0, commentIdx) else value
-        return clean.split(',', '，').mapNotNull { part ->
+        return clean.split(',').mapNotNull { part ->
             val trimmed = part.trim()
             if (trimmed.isBlank()) return@mapNotNull null
             val tokens = trimmed.split(Regex("""\s+""")).filter { it.isNotBlank() }

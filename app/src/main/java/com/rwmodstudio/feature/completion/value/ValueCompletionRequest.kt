@@ -139,9 +139,10 @@ internal fun needsCommaSeparator(request: ValueCompletionRequest): Boolean {
     val lastChar = request.textBeforeCursor.lastOrNull()
     if (lastChar != ' ' && lastChar != '\t') return false
     val prevNonSpace = request.textBeforeCursor.trimEnd().lastOrNull()
+    // 中文标点不是 ini 语法的一部分，不能当成英文 , / : 看待（否则中文逗号后会被当成"已分隔"）
     return prevNonSpace != null &&
-        prevNonSpace != ',' && prevNonSpace != '，' &&
-        prevNonSpace != ':' && prevNonSpace != '：'
+        prevNonSpace != ',' &&
+        prevNonSpace != ':'
 }
 
 /**

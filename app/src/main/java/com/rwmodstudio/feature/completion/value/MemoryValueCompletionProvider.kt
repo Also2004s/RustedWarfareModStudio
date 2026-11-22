@@ -68,7 +68,7 @@ class MemoryValueCompletionProvider : BaseValueCompletionProvider() {
         // 打了空格进入变量名阶段后**一律不弹** —— 变量名由用户自己起，没有可补的词源，
         // 弹已声明内存变量只会干扰（老板决策：变量名不需要补，只要别在这个位置弹类型）。
         if (CompletionShared.isDefineUnitMemoryProperty(request.toEnglishName())) {
-            val seg = request.valuePrefix.substringAfterLast(',').substringAfterLast('，').trim()
+            val seg = request.valuePrefix.substringAfterLast(',').trim()
             if (isMemoryTypePosition(request.valuePrefix)) {
                 return memoryTypes
                     .rankedByMatch(seg)
@@ -255,7 +255,7 @@ internal fun memoryDetail(type: String?): String {
  * 例：`boolean nukeActive, `（, 后）→ true；`boolean nukeAc`（已含空格在输变量名）→ false。
  */
 internal fun isMemoryTypePosition(valuePrefix: String): Boolean {
-    val seg = valuePrefix.substringAfterLast(',').substringAfterLast('，').trim()
+    val seg = valuePrefix.substringAfterLast(',').trim()
     return seg.isBlank() || !seg.any { it == ' ' || it == '\t' }
 }
 

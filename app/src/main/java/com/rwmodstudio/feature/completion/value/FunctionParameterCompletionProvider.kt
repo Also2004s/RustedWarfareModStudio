@@ -185,7 +185,7 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         val openIdx = request.textBeforeCursor.lastIndexOf('(')
         if (openIdx < 0) return null
         val afterOpen = request.textBeforeCursor.substring(openIdx + 1)
-        if (afterOpen.contains(',') || afterOpen.contains('，')) return null
+        if (afterOpen.contains(',')) return null
         val seg = afterOpen.trim()
         val prefix = seg.removePrefix("'").removePrefix("\"")
         val projInfo = com.rwmodstudio.core.ProjectTagScanner.getCachedInfo()
@@ -450,7 +450,7 @@ internal fun resolveFunctionBaseKey(
     var start = openIdx - 1
     while (start > colonIdx) {
         val c = lineBeforeCursor[start]
-        if (c == ' ' || c == ',' || c == '，' || c == '(' || c == ':' || c == '=' ||
+        if (c == ' ' || c == ',' || c == '(' || c == ':' || c == '=' ||
             c == '<' || c == '>' || c == '!' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '{'
         ) break
         start--
@@ -481,7 +481,7 @@ internal fun currentParamKeyInParens(lineBeforeCursor: String): String? {
     val openIdx = lineBeforeCursor.lastIndexOf('(')
     if (openIdx <= colonIdx) return null
     val afterOpen = lineBeforeCursor.substring(openIdx + 1)
-    val lastSeg = afterOpen.substringAfterLast(',').substringAfterLast('，').trim()
+    val lastSeg = afterOpen.substringAfterLast(',').trim()
     val eqIdx = lastSeg.lastIndexOf('=')
     if (eqIdx < 0) return null
     val name = lastSeg.substring(0, eqIdx).trim()
@@ -499,7 +499,7 @@ internal fun paramValueAfterEq(lineBeforeCursor: String): String? {
     val openIdx = lineBeforeCursor.lastIndexOf('(')
     if (openIdx <= colonIdx) return null
     val afterOpen = lineBeforeCursor.substring(openIdx + 1)
-    val lastSeg = afterOpen.substringAfterLast(',').substringAfterLast('，')
+    val lastSeg = afterOpen.substringAfterLast(',')
     val eqIdx = lastSeg.lastIndexOf('=')
     if (eqIdx < 0) return null
     return lastSeg.substring(eqIdx + 1)

@@ -145,7 +145,7 @@ class CompletionProvider(
 ) {
 
     companion object {
-        internal val AUTO_COMPLETE_TRIGGER_CHARS = setOf('.', '(', '{', '[', '=', '+', ':', '*', '/', '-', '%', '<', '>', ',', '，', ')', ']')
+        internal val AUTO_COMPLETE_TRIGGER_CHARS = setOf('.', '(', '{', '[', '=', '+', ':', '*', '/', '-', '%', '<', '>', ',', ')', ']')
         /** 节补全去重：向前/向后扫描节边界时的最大行数上限，避免大文件全量遍历。 */
         private const val MAX_SECTION_SCAN_LINES = 512
     }
@@ -506,7 +506,7 @@ class CompletionProvider(
             val rawValuePrefix = stripTripleQuotes(rawValuePrefixRaw)
             if (keyPart.isNotEmpty()) {
                 // 值补全只替换当前正在输入的"片段"，而非从 ':' 到光标的全部内容。
-                // 以 ','、'，'、'(' 或空白作为分隔，找到最后一个分隔符后的可替换前缀。
+                // 以 ','、'(' 或空白作为分隔（只认英文符号），找到最后一个分隔符后的可替换前缀。
                 // 例如 "防御建筑模版(偏移量x=10," 只需替换空串（光标紧跟在 ',' 后），
                 // "防御建筑模版(偏移量x=10,偏移量y" 只需替换 "偏移量y"。
                 // 例外：`定义单位内存` 的段内空格是「类型 变量名」的合法分隔，不按空格切。
@@ -1217,7 +1217,7 @@ private fun mergeSectionDefines(
 private fun splitValues(raw: String): List<String> {
     val commentIdx = raw.indexOf('#')
     val value = if (commentIdx >= 0) raw.substring(0, commentIdx) else raw
-    return value.split(',', '，').map { it.trim() }
+    return value.split(',').map { it.trim() }
         .filter { it.isNotBlank() && !it.startsWith("$") && !it.startsWith("@") }
 }
 
@@ -1357,7 +1357,8 @@ internal fun multilineValueOwnerKey(textBeforeCursor: String): String? {
  * 那里的空格是「类型」与「变量名」之间的分隔，不能当成"换下一段"。
  */
 internal fun replaceableValuePrefix(rawValuePrefix: String, splitOnSpace: Boolean = true): String {
-    val delimiters = if (splitOnSpace) charArrayOf(',', '，', ' ', '\t', '(') else charArrayOf(',', '，', '(')
+    // 分隔符只认英文符号：中文逗号/括号不是 ini 语法的一部分，不能当成英文符号切分值片段
+    val delimiters = if (splitOnSpace) charArrayOf(',', ' ', '\t', '(') else charArrayOf(',', '(')
     val lastDelimIdx = rawValuePrefix.lastIndexOfAny(delimiters)
     return if (lastDelimIdx >= 0) rawValuePrefix.substring(lastDelimIdx + 1) else rawValuePrefix
 }
@@ -1523,7 +1524,9 @@ internal fun hasCompleteValueBeforeCursor(lineBeforeCursor: String): Boolean {
     if (lastToken.isEmpty()) return false
     if (lastToken.lowercase() in LOGIC_SYNTAX_ITEMS) return false
     val last = lastToken.last()
-    if (last == '.' || last == '(' || last == ',' || last == '，' || last == '=' ||
+    // 中文标点不是 ini 语法的一部分：既不当成英文分隔符，也不当作"已完成的值"
+    if (last == '，' || last == '：' || last == '（' || last == '）' || last == '；') return false
+    if (last == '.' || last == '(' || last == ',' || last == '=' ||
         last == '+' || last == '-' || last == '*' || last == '/' || last == '<' || last == '>' || last == '%') {
         return false
     }
