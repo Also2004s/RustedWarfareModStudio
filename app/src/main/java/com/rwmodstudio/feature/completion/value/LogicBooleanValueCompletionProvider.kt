@@ -263,6 +263,8 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
     private var signatureCache: Map<String, List<LogicTarget>>? = null
 
     override fun canProvide(request: ValueCompletionRequest): Boolean {
+        // @global / @define 冒号后的值位置：固定按布尔表达式（if 语句）上下文补全
+        if (request.forceBooleanExpression) return true
         // 括号内：命名参数函数（self.自身有标签(需标签=) 等）由 FunctionParameterCompletionProvider 处理，此处抑制；
         // 纯位置参数函数（选择(/rnd(/int( 等，如 选择(布尔条件, 单位参考, 任意逻辑表达式)）不在参数表，
         // 由本 Provider 按参数位置类型补逻辑表达式（选择( 第1参→布尔）。
@@ -361,6 +363,8 @@ class LogicBooleanValueCompletionProvider : BaseValueCompletionProvider() {
             else LogicTarget.UNKNOWN
         } else null
         val propertyTarget = when {
+            // @global / @define 冒号后的值：固定按布尔表达式（if 语句）上下文
+            request.forceBooleanExpression -> LogicTarget.BOOLEAN
             // %{...} 插值内：无条件按「布尔值表达式」弹补全（布尔/数值/文本/任意/单位标记全集），
             // 不依赖外层属性类型或上下文推断——插值本质是逻辑表达式，无需额外条件。
             interpFragment != null -> LogicTarget.BOOLEAN

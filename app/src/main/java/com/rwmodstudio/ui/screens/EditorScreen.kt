@@ -14,6 +14,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
@@ -2845,6 +2846,11 @@ fun EditorScreen(
 
     // Symbol editor
     if (showSymbolEditor) {
+        // 拖拽排序：长按条目后上下拖动，松手时按位移换算目标位置再整表移动并落盘。
+        // 拖动过程只平移被拖的那一条（其它条目不动），避免边拖边换位把进行中的手势绑到别的行。
+        var draggingSymbol by remember { mutableStateOf(-1) }
+        var dragOffsetY by remember { mutableStateOf(0f) }
+        var symbolRowHeight by remember { mutableStateOf(1f) }
         AppDialog(
             onDismissRequest = { showSymbolEditor = false },
             title = "编辑快捷符号",
@@ -2852,8 +2858,11 @@ fun EditorScreen(
                 DialogActionButton("保存") {
                     val symValue = editingSymbolValue.text
                     if (editingSymbolLabel.isNotEmpty() && symValue.isNotEmpty()) {
-                        if (editingSymbolIndex >= 0) customSymbols = customSymbols.toMutableList().also { it[editingSymbolIndex] = editingSymbolLabel to symValue }
-                        else customSymbols = customSymbols + (editingSymbolLabel to symValue)
+                        if (editingSymbolIndex in customSymbols.indices) {
+                            customSymbols = customSymbols.toMutableList().also { it[editingSymbolIndex] = editingSymbolLabel to symValue }
+                        } else {
+                            customSymbols = customSymbols + (editingSymbolLabel to symValue)
+                        }
                         saveSymbols(); editingSymbolLabel = ""; editingSymbolValue = TextFieldValue(""); editingSymbolIndex = -1
                     }
                 }
@@ -2863,14 +2872,83 @@ fun EditorScreen(
             Column(Modifier.heightIn(max = 400.dp)) {
                 LazyColumn(Modifier.weight(1f)) { items(customSymbols.size) { idx ->
                     val (l, v) = customSymbols[idx]
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { editingSymbolIndex = idx; editingSymbolLabel = l; editingSymbolValue = TextFieldValue(v, TextRange(v.length)) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val selected = editingSymbolIndex == idx
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 1.dp)
+                            .graphicsLayer { translationY = if (draggingSymbol == idx) dragOffsetY else 0f }
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) RustedPrimary.copy(alpha = 0.14f) else Color.Transparent)
+                            .onSizeChanged { if (it.height > 0) symbolRowHeight = it.height.toFloat() }
+                            .pointerInput(idx, customSymbols.size) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        draggingSymbol = idx
+                                        dragOffsetY = 0f
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        if (draggingSymbol == idx) dragOffsetY += dragAmount.y
+                                    },
+                                    onDragEnd = {
+                                        if (draggingSymbol == idx) {
+                                            val steps = (dragOffsetY / symbolRowHeight).roundToInt()
+                                            val target = (idx + steps).coerceIn(0, customSymbols.lastIndex)
+                                            if (target != idx) {
+                                                customSymbols = customSymbols.toMutableList().also { list ->
+                                                    val moved = list.removeAt(idx)
+                                                    list.add(target, moved)
+                                                }
+                                                // 选中中的条目跟随移动，保存时仍覆盖同一条
+                                                if (editingSymbolIndex == idx) editingSymbolIndex = target
+                                                else if (editingSymbolIndex in (idx + 1)..target) editingSymbolIndex--
+                                                else if (editingSymbolIndex in target..(idx - 1)) editingSymbolIndex++
+                                                saveSymbols()
+                                            }
+                                        }
+                                        draggingSymbol = -1
+                                        dragOffsetY = 0f
+                                    },
+                                    onDragCancel = {
+                                        draggingSymbol = -1
+                                        dragOffsetY = 0f
+                                    }
+                                )
+                            }
+                            .clickable {
+                                if (editingSymbolIndex == idx) {
+                                    // 再次点击已选中条目：取消高光（输入内容保留），保存时即新建条目
+                                    editingSymbolIndex = -1
+                                } else {
+                                    editingSymbolIndex = idx
+                                    editingSymbolLabel = l
+                                    editingSymbolValue = TextFieldValue(v, TextRange(v.length))
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("≡", fontSize = 14.sp, color = RustedOnBackground.copy(alpha = 0.3f), modifier = Modifier.width(18.dp))
                         Text(l, fontSize = 16.sp, fontFamily = AppCodeFontFamily, color = RustedPrimary, modifier = Modifier.width(40.dp))
                         Text("→", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.3f), modifier = Modifier.width(24.dp))
                         Text(v, fontSize = 13.sp, fontFamily = AppCodeFontFamily, color = RustedOnBackground, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { customSymbols = customSymbols.toMutableList().also { it.removeAt(idx) }; saveSymbols() }, Modifier.size(24.dp)) { Icon(Icons.Default.Delete, null, Modifier.size(14.dp), tint = RustedError.copy(alpha = 0.6f)) }
+                        IconButton(onClick = {
+                            customSymbols = customSymbols.toMutableList().also { it.removeAt(idx) }
+                            if (editingSymbolIndex == idx) {
+                                // 删的正是选中项：取消选中并清空输入，避免保存时误覆盖别的条目
+                                editingSymbolIndex = -1
+                                editingSymbolLabel = ""
+                                editingSymbolValue = TextFieldValue("")
+                            } else if (editingSymbolIndex > idx) {
+                                editingSymbolIndex--
+                            }
+                            saveSymbols()
+                        }, Modifier.size(24.dp)) { Icon(Icons.Default.Delete, null, Modifier.size(14.dp), tint = RustedError.copy(alpha = 0.6f)) }
                     }
                 } }
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                Text("点击条目可选中（高亮）并覆盖保存；再次点击取消高光，保存即新建。长按条目上下拖动可调整符号排序", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                 Text("在输出值中放一个 $CURSOR_MARKER 标记，插入后光标会停在此处；不放则停在末尾", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(editingSymbolLabel, { editingSymbolLabel = it }, label = { Text("显示") }, singleLine = true, modifier = Modifier.weight(1f), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp))

@@ -418,11 +418,15 @@ class CompletionProvider(
             // 避免与命名参数等带等号语法混淆造成误判。
             val sepIdx = after.indexOf(':')
             val namePrefix = if (sepIdx >= 0) after.substring(0, sepIdx).trim() else after.trim()
-            val valuePrefix = if (sepIdx >= 0) after.substring(sepIdx + 1).trim() else ""
+            val valueRaw = if (sepIdx >= 0) after.substring(sepIdx + 1) else ""
+            // 可替换片段（最后一个空格/逗号/括号后的部分）与完整表达式分开：
+            // 状态机判断用完整表达式（textBeforeCursor），替换长度/前缀过滤用当前片段。
+            val replaceablePrefix = replaceableValuePrefix(valueRaw, splitOnSpace = true)
+            val valuePrefix = replaceablePrefix.trim()
             if (sepIdx >= 0 && namePrefix.isNotEmpty()) {
                 // 值阶段：@memory name: → 提示类型；
-                // @define/@global name: → 逻辑布尔表达式操作数集（布尔+数值+文本+单位标记函数），
-                // 不含 真/假/if/and/or/not/运算符 等入口语法项（LOGIC_SYNTAX_ITEMS）。
+                // @define/@global name: → 与「需要条件:if ...」同口径的布尔表达式（if 语句）补全：
+                // 空值给 真/假/if，if/and/or 后给操作数集 + not，操作数完成给 and/or，运算符后继续给操作数。
                 if (directive == "memory") {
                     memoryTypes.forEach { type ->
                         if (completionMatchLevel(valuePrefix, type) > 0) {
@@ -430,15 +434,17 @@ class CompletionProvider(
                         }
                     }
                 } else {
+                    val afterInLine = textAfterCursor.takeWhile { it != '\n' }
                     results.addAll(
-                        booleanLogicValueItems(
-                            translationDict,
-                            context,
-                            prefix = valuePrefix,
-                            prefixLength = valuePrefix.length,
+                        valueAggregator.getBooleanExpressionCompletions(
+                            context = context,
+                            valuePrefix = valuePrefix,
+                            rawValuePrefixLength = replaceablePrefix.length,
+                            lineText = directiveLine + afterInLine,
+                            textBeforeCursor = directiveLine,
+                            textAfterCursor = afterInLine,
                             memoryNames = fileSymbols?.memories ?: emptySet(),
-                            memoryTypes = fileSymbols?.memoryTypes ?: emptyMap(),
-                            excludeTokens = LOGIC_SYNTAX_ITEMS
+                            memoryTypes = fileSymbols?.memoryTypes ?: emptyMap()
                         )
                     )
                 }
