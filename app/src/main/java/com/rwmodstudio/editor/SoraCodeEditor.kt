@@ -1341,10 +1341,10 @@ fun SoraCodeEditor(
 
             fun showCursorPad(anchor: android.view.View) {
                 cursorPadRef.value?.let { if (it.isShowing) it.dismiss() }
-                // 轮盘直径 / 箭头格大小 / 距边缘间距：格子加大，留白收紧
+                // 轮盘直径 / 箭头格大小 / 距边缘间距：箭头图形铺满格子，贴近圆边
                 val padSize = (124 * density).toInt()
                 val arrowSize = (48 * density).toInt()
-                val edge = (4 * density).toInt()
+                val edge = (3 * density).toInt()
                 // 圆形背景：90% 不透明（透出 10%）
                 val padBg = (barBg and 0x00FFFFFF) or (230 shl 24)
                 val container = android.widget.FrameLayout(ctx).apply {
@@ -1371,8 +1371,6 @@ fun SoraCodeEditor(
                         setColorFilter(barFg)
                         scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        val p = (4 * density).toInt()
-                        setPadding(p, p, p, p)
                     }
                     container.addView(
                         icon,
