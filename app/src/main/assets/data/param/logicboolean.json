@@ -1062,6 +1062,16 @@
       ]
     },
     {
+      "key": "self.resource",
+      "params": [
+        {
+          "key": "type",
+          "zh": "类型",
+          "type": "resource"
+        }
+      ]
+    },
+    {
       "key": "isResourceLargerThan",
       "params": [
         {
