@@ -1066,7 +1066,7 @@
       "params": [
         {
           "key": "type",
-          "zh": "类型",
+          "zh": "type",
           "type": "resource"
         }
       ]
