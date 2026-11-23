@@ -28,7 +28,11 @@ object ParamDataLoader {
         val valueFile: String = "",
         // 数值型参数是否接受逻辑表达式（坐标/角度参数如 创建标记 的 x/y/height/dir、
         // 获取相对/绝对偏移 的 x/y/height/角度偏移）；纯数值参数（范围内/超过/少于/等于/几秒内/几秒后）缺省 false。
-        val expression: Boolean = false
+        val expression: Boolean = false,
+        // 该参数的值是否用单引号包裹。同一参数类型在不同函数里写法不同：
+        // self.resource 的 type 值是资源名（type='gold'），isResourceLargerThan 的 source/compareTarget
+        // 则写裸名（source=oil），故由数据逐条声明，不能按 type 类型一刀切。
+        val quote: Boolean = false
     )
 
     @Serializable

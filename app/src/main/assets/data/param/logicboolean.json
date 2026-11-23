@@ -1067,7 +1067,23 @@
         {
           "key": "type",
           "zh": "type",
-          "type": "resource"
+          "type": "resource",
+          "quote": true
+        },
+        {
+          "key": "greaterThan",
+          "zh": "超过",
+          "type": "number"
+        },
+        {
+          "key": "lessThan",
+          "zh": "少于",
+          "type": "number"
+        },
+        {
+          "key": "equalTo",
+          "zh": "等于",
+          "type": "number"
         }
       ]
     },

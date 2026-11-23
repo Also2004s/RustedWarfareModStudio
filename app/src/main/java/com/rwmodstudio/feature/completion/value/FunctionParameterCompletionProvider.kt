@@ -277,7 +277,9 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         // enum/type/relation 值经翻译库翻译：字典命中才显示中文（如 move→移动、own→己方），未命中保持英文原样；
         // 不改翻译引擎、不新增字典条目，保存反译依赖字典既有 zhToEn 映射。
         // 该值为单引号包裹的参数类型，故把「是否带引号」一并交给场景闸（引号保护开关生效时须用英文）。
-        val quoted = param.type in quotedValueParamTypes
+        // 该参数的值是否带单引号：类型默认集合 + 数据条目声明的 quote（如 self.resource 的 type='gold'）。
+        val quoteTypes = if (param.quote) quotedValueParamTypes + param.type else quotedValueParamTypes
+        val quoted = param.type in quoteTypes
         val translated = translateDictValues(
             values, request.translationDict,
             param.type in setOf("enum", "type", "relation"), quoted
@@ -299,6 +301,7 @@ class FunctionParameterCompletionProvider : BaseValueCompletionProvider() {
         } else emptyMap()
         return buildParamValueSuggestions(
             param.type, translated, afterEq,
+            quoteTypes = quoteTypes,
             prefixLength = rawAfterEq.length,
             details = valueDetails
         ).map { suggestion ->
@@ -611,6 +614,7 @@ internal fun isMutuallyExclusiveParam(key: String): Boolean =
  * 值会被单引号包裹的参数类型（唯一来源：[buildParamValueSuggestions] 与场景闸共用）。
  * 引号内会被屏蔽词开关「引号内的词不翻译」整段保护 → 该开关打开时这些位置的补全值必须用英文。
  * 代码表写法：需标签='fish'、队列项目取消(withActionTag="actionFire")、读取单位内存('攻击目标', type='unit')。
+ * 同一类型的个别参数写法不同时，由参数条目 `quote=true` 单独补充（如 self.resource 的 type='gold'）。
  */
 internal val quotedValueParamTypes: Set<String> =
     setOf("tag", "globalTag", "messageTag", "actionTag", "type", "relation", "enum", "attachmentSlot", "memoryName")

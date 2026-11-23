@@ -571,4 +571,30 @@ class FunctionParameterCompletionTest {
         assertEquals(listOf("'移动'", "'loadInto'"), items.map { it.insertText }, "enum 值单引号包裹、未命中保持英文")
     }
 
+    // ===== self.resource 参数表：type（带引号） + 超过/少于/等于 =====
+
+    @Test
+    fun selfResourceParamTable() {
+        val data = loadParamFile("logicboolean")
+        val fn = data.functions.first { it.key == "self.resource" }
+        assertEquals(
+            listOf("type", "greaterThan", "lessThan", "equalTo"),
+            fn.params.map { it.key },
+            "self.resource 参数不能只剩 type，比较参数须随之保留"
+        )
+        assertEquals(listOf("type", "超过", "少于", "等于"), fn.params.map { it.zh })
+        assertTrue(fn.params.first { it.key == "type" }.quote, "type 值需带单引号（type='gold'）")
+        assertFalse(fn.params.first { it.key == "greaterThan" }.quote, "比较参数是数值，不加引号")
+    }
+
+    @Test
+    fun selfResourceTypeValueQuoted() {
+        // 参数条目 quote=true 时，资源名候选插入单引号
+        val items = buildParamValueSuggestions(
+            "resource", listOf("gold"), "",
+            quoteTypes = quotedValueParamTypes + "resource"
+        )
+        assertEquals("'gold'", items.single().insertText)
+    }
+
 }
