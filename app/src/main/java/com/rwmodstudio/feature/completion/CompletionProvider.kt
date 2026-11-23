@@ -246,7 +246,15 @@ class CompletionProvider(
         /**
          * 模板键留空位时的光标偏移（相对插入文本中键名起点）。-1 = 不定位（光标落插入末尾）。
          */
-        val cursorOffset: Int = -1
+        val cursorOffset: Int = -1,
+        /**
+         * 自定义补全表的格式分类（属性/空值属性/values/特定值）。
+         * 值上下文过滤按它区分「值形态」（values/特定值）与「键形态」（属性/空值属性），
+         * 不能只看 [category]——后者是补全分类（节名），会把「产生单位」这类 values 别名
+         * 混进真实节属性里（如「增加资源」既是 action 属性又是产生单位参数）。
+         * 非自定义补全来源保持空串。
+         */
+        val formatCategory: String = ""
     )
 
     enum class CompletionType { SECTION, KEY, VALUE, TEMPLATE }
@@ -1456,16 +1464,23 @@ internal fun orderByValueCollision(
 }
 
 /**
- * 值上下文（行内已有 键:）过滤：保留 VALUE、values/特定值，以及翻译库兜底项
- * （翻译库无条件参与，不再受输入前缀限制）。
+ * 值上下文（行内已有 键:）过滤：只保留值形态的补全项——VALUE、formatCategory=values/特定值、
+ * 翻译库兜底。属性/空值属性一类的键形态一律剔除。
+ *
+ * 不能按 [CompletionItem.category] 判断：category 是补全分类（节名），会混入 values 这个
+ * 「非真实节」别名——「增加资源」既是 [action] 的属性（空值属性，插 `增加资源:`），又出现在
+ * 产生单位 values 分类里，按 category 判断会让它在 `用逻辑设置资源:资源` 这种值位置冒出来。
+ * 产生单位括号内的 `增加资源=` 由 UnitSpawnCompletionProvider 按 spawnUnits 数据提供，
+ * 与这条同名属性是两回事，不靠这里保留。
  */
 internal fun filterValueContextItems(
     items: List<CompletionProvider.CompletionItem>
 ): List<CompletionProvider.CompletionItem> {
     return items.filter { item ->
         item.type == CompletionProvider.CompletionType.VALUE ||
-                item.category.any { it == "values" || it == "特定值" } ||
-                item.category.any { it == "翻译库" }
+                item.category.any { it == "翻译库" } ||
+                item.formatCategory == "values" ||
+                item.formatCategory == "特定值"
     }.map { item ->
         // 值上下文：被保留的 KEY 项此时用作「值」，插入文本不应再带「键:」冒号。
         // 例如 生命值(maxHp) 同时属于核心节（category=核心，formatCategory=空值属性→insertText=「生命值:」）

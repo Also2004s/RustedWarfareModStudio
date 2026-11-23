@@ -434,8 +434,14 @@ private class SectionCompletionItem(
         }
         val startColumn = column - this.prefixLength
         text.replace(line, startColumn, line, endColumn, commitText)
-        // 光标停在 ] 前面，方便继续输入节名后缀（如 _1）
-        editor.setSelection(line, startColumn + commitText.length - 1)
+        // 光标位置：带下划线后缀的节（如 [核心_]）停在下划线后，方便继续输入后缀编号；
+        // 其余节（核心/图像/ai/攻击/运动）停在 ] 后
+        val caret = if (commitText.endsWith("_]")) {
+            startColumn + commitText.length - 1
+        } else {
+            startColumn + commitText.length
+        }
+        editor.setSelection(line, caret)
     }
 }
 

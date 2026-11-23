@@ -51,8 +51,13 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
 
     override fun provideItems(request: ValueCompletionRequest): List<CompletionProvider.CompletionItem> {
         val prefix = request.valuePrefix
-        // 裸关键字（自身资源/资源/self.resource/resource，未带点）保持旧行为：不提示，由用户输入 . 触发
-        if (isBareResourceKeyword(prefix)) return emptyList()
+        val prop = request.findProperty()
+        val isResourceNameType = prop != null && isResourceNameValueType(prop.type)
+        val isResourceNameLhs = isResourceNameType && currentSegmentRhs(request.textBeforeCursor) == null
+        // 裸关键字（自身资源/资源/self.resource/resource）不做「关键字.」成员续写，由用户输入 . 触发；
+        // 但在「资源名=值」的 LHS 位置它就是普通前缀，必须能按前缀匹配 资源1 这类资源名，
+        // 否则前缀恰好等于「资源」时整个补全被吞掉（要输完整 资源1 才出候选）。
+        if (isBareResourceKeyword(prefix) && !isResourceNameLhs) return emptyList()
         // 链式前缀：保留 <链>资源.，只替换点后片段（与内存补全一致）
         resourceChainRegex.find(prefix)?.let { m ->
             val fragment = m.groupValues[2]
@@ -78,14 +83,11 @@ class ResourceValueCompletionProvider : BaseValueCompletionProvider() {
         }
         // 「资源名=值」形态（增加资源/价格/流式造价/提取资源/用逻辑设置资源 等）：
         // 值与值之间用逗号分隔，空格不是合法分隔符 —— 打空格时只弹「,」（与 dynamic resources 原有行为统一）。
-        val prop = request.findProperty()
-        val isResourceNameType = prop != null && isResourceNameValueType(prop.type)
         // LHS（`=` 之前，如 `价格: 500 `）与 RHS（`资源名=值` 之后，如 `增加资源: ammo=1 `）打空格都只弹「,」；
         // 已用逗号分隔完（`资金=5, `）时 needsCommaSeparator 为 false，不拦截（转为补下一个资源名）。
         if (isResourceNameType && needsCommaSeparator(request)) {
             return listOf(commaSeparatorItem("资源分隔符（值与值之间用逗号分隔）"))
         }
-        val isResourceNameLhs = isResourceNameType && currentSegmentRhs(request.textBeforeCursor) == null
         // 「资源名=值」型在 `=` 之后（RHS）的值是数值/逻辑表达式，不补资源名——
         // 否则空前缀会把整份资源名倒出（历史：`增加资源: ammo=1 ` 后倒出全部资源名，且不带 `=`）。
         if (isResourceNameType && !isResourceNameLhs) return emptyList()

@@ -873,7 +873,8 @@ fun customCompletionsToProviderItems(items: List<CustomCompletion>): List<com.rw
             insertText = insertText,
             category = item.category,
             name = item.name,
-            nameEn = item.nameEn
+            nameEn = item.nameEn,
+            formatCategory = item.formatCategory
         )
     }
 }

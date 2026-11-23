@@ -1,6 +1,7 @@
 package com.rwmodstudio.editor
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Matrix
 import android.util.Log
 import android.view.KeyEvent
@@ -332,6 +333,8 @@ fun SoraCodeEditor(
     val currentInlineDecorEnabled by rememberUpdatedState(inlineDecorEnabled)
     val inlineControllerRef = remember { mutableStateOf<com.rwmodstudio.editor.inline.InlineDecorController?>(null) }
     var isApplyingExternalText by remember { mutableStateOf(false) }
+    // 程序化插入（符号栏/@引用）进行中：配对兜底不改写光标
+    var programmaticInsertion by remember { mutableStateOf(false) }
     // 整篇替换的稳定化代次：每次 resetTextRequest 递增，旧的 postDelayed 稳定化回调据此判定失效。
     // 关键：避免「上一个文件的恢复/居中回调在本文件上误触发」——单视图跨文件切换时，
     // 旧文件调度到 2~3 秒后的回调会在已切换到新文件后仍执行，把视角/光标掰回旧位置，造成反复跳动。
@@ -827,12 +830,19 @@ fun SoraCodeEditor(
         if (insertTextTick > 0 && insertTextRequest.isNotEmpty()) {
             val s = insertTextRequest
             val marker = s.indexOf(CURSOR_MARKER)
-            if (marker >= 0) {
-                // 移除光标标记后插入；insertText(text, offset) 的 offset 即「从插入起点往后」的光标位置，直接传 marker 即可
-                editorRef.value?.insertText(s.replace(CURSOR_MARKER.toString(), ""), marker)
-            } else {
-                // 默认把光标停在插入内容的末尾
-                editorRef.value?.insertText(s, s.length)
+            // 程序化插入（符号栏等）期间不让配对兜底改写光标：
+            // sora 的 insertText 会在插入后按「插入前光标」计算落点，中途改光标会把落点算错。
+            programmaticInsertion = true
+            try {
+                if (marker >= 0) {
+                    // 移除光标标记后插入；insertText(text, offset) 的 offset 即「从插入起点往后」的光标位置，直接传 marker 即可
+                    editorRef.value?.insertText(s.replace(CURSOR_MARKER.toString(), ""), marker)
+                } else {
+                    // 默认把光标停在插入内容的末尾
+                    editorRef.value?.insertText(s, s.length)
+                }
+            } finally {
+                programmaticInsertion = false
             }
         }
     }
@@ -885,6 +895,160 @@ fun SoraCodeEditor(
 
             // 重写 onCreateInputConnection 以配置 IME 文本编辑面板支持
             val editor = object : SmartWrapCodeEditor(ctx, smartWrap) {
+                /** 括号配对优化：待填充区域状态（开关见开发者模式「括号配对优化」，默认开） */
+                val pairHighlight = PairHighlightState()
+
+                /** 文本变化后维护配对高亮：手打自动补充后登记；区间失效或光标离开则清除 */
+                fun syncPairHighlightAfterEdit() {
+                    if (!SettingsManager.devPairOptimize) {
+                        if (pairHighlight.isActive) pairHighlight.clear()
+                        return
+                    }
+                    // 程序化插入（符号栏/@引用）不参与配对纠偏，光标落点由 sora 自己决定
+                    if (programmaticInsertion) return
+                    if (isApplyingExternalText) {
+                        pairHighlight.clear()
+                        invalidate()
+                        return
+                    }
+                    if (!pairHighlight.isActive) {
+                        val around = pairAroundCursor(this) ?: return
+                        pairHighlight.set(around)
+                        invalidate()
+                        return
+                    }
+                    if (!pairHighlight.validate(this.text)) {
+                        invalidate()
+                        return
+                    }
+                    val cur = cursor
+                    if (cur.isSelected || !pairHighlight.containsCursor(cur.leftLine, cur.leftColumn)) {
+                        pairHighlight.clear()
+                    }
+                    invalidate()
+                }
+
+                /** 光标移动：离开配对区域即清除高亮；未登记时检测光标是否刚落在配对中间 */
+                fun syncPairHighlightOnSelection() {
+                    if (!SettingsManager.devPairOptimize) return
+                    if (!pairHighlight.isActive) {
+                        val around = pairAroundCursor(this) ?: return
+                        pairHighlight.set(around)
+                        invalidate()
+                        return
+                    }
+                    val cur = cursor
+                    if (cur.isSelected || !pairHighlight.containsCursor(cur.leftLine, cur.leftColumn)) {
+                        pairHighlight.clear()
+                        invalidate()
+                    }
+                }
+
+                /** 高亮区间存在时，换行改为跳到右括号后并清除高亮 */
+                private fun consumeNewlineInsidePair(): Boolean {
+                    if (!SettingsManager.devPairOptimize) return false
+                    val cur = cursor
+                    if (cur.isSelected) return false
+                    // 1) 已登记的配对区域
+                    if (pairHighlight.isActive &&
+                        pairHighlight.containsCursor(cur.leftLine, cur.leftColumn)
+                    ) {
+                        val targetLine = pairHighlight.rightLine
+                        val targetColumn = pairHighlight.rightColumn + 1
+                        pairHighlight.clear()
+                        setSelection(targetLine, targetColumn)
+                        invalidate()
+                        return true
+                    }
+                    // 2) 现场判定：光标正好夹在配对符之间（空括号时高亮可能还没登记）
+                    val line = cur.leftLine
+                    val column = cur.leftColumn
+                    val content = this.text
+                    if (column <= 0 || column >= content.getColumnCount(line)) return false
+                    val left = content.charAt(line, column - 1)
+                    val right = content.charAt(line, column)
+                    if (PAIR_TABLE.none { it.first == left && it.second == right }) return false
+                    pairHighlight.clear()
+                    setSelection(line, column + 1)
+                    invalidate()
+                    return true
+                }
+
+                /** 输入法一次提交成对括号：整对插入后把光标放回中间（全角/中文配对同一路径） */
+                var pastingText = false
+
+                override fun pasteText(text: CharSequence?) {
+                    pastingText = true
+                    try {
+                        super.pasteText(text)
+                    } finally {
+                        pastingText = false
+                    }
+                }
+
+                /**
+                 * 文本变化兜底：输入法可能经 setComposingText 等路径提交成对括号（不走 commitText），
+                 * 这里在「一次插入恰好一对配对符、光标在末尾」时把光标移到中间并登记高亮。
+                 * 粘贴不处理（pastingText 标记）。
+                 */
+                fun maybeCenterJustCommittedPair(event: ContentChangeEvent) {
+                    if (!SettingsManager.devPairOptimize || pastingText || isApplyingExternalText) return
+                    // 程序化插入（符号栏的 (≡) 等）光标由 insertText 自己定位，不能中途改写
+                    if (programmaticInsertion) return
+                    if (event.action != ContentChangeEvent.ACTION_INSERT) return
+                    val pair = matchCompletePair(event.changedText.toString()) ?: return
+                    val cur = cursor
+                    if (cur.isSelected) return
+                    val startLine = event.changeStart.line
+                    val startColumn = event.changeStart.column
+                    if (cur.leftLine != startLine || cur.leftColumn != startColumn + 2) return
+                    pairHighlight.set(
+                        PendingPair(startLine, startColumn, startLine, startColumn + 1, pair.first, pair.second)
+                    )
+                    setSelection(startLine, startColumn + 1)
+                    invalidate()
+                }
+
+                override fun commitText(text: CharSequence, applyAutoIndent: Boolean, applySymbolCompletion: Boolean) {
+                    if (!SettingsManager.devPairOptimize) {
+                        super.commitText(text, applyAutoIndent, applySymbolCompletion)
+                        return
+                    }
+                    val raw = text.toString()
+                    if ((raw == "\n" || raw == "\r\n") && consumeNewlineInsidePair()) return
+                    val pair = matchCompletePair(raw)
+                    if (pair != null && !cursor.isSelected) {
+                        // 输入法一次提交成对括号：整对插入后把光标放回中间（全角/中文配对同一路径）
+                        val startLine = cursor.leftLine
+                        val startColumn = cursor.leftColumn
+                        super.commitText(text, applyAutoIndent, applySymbolCompletion)
+                        val midColumn = startColumn + 1
+                        if (startLine < this.text.lineCount && midColumn < this.text.getColumnCount(startLine)) {
+                            pairHighlight.set(
+                                PendingPair(startLine, startColumn, startLine, midColumn, pair.first, pair.second)
+                            )
+                            setSelection(startLine, midColumn)
+                            invalidate()
+                        }
+                        return
+                    }
+                    super.commitText(text, applyAutoIndent, applySymbolCompletion)
+                }
+
+                override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+                    if (keyCode == KeyEvent.KEYCODE_ENTER && consumeNewlineInsidePair()) return true
+                    return super.onKeyDown(keyCode, event)
+                }
+
+                override fun onDraw(canvas: Canvas) {
+                    super.onDraw(canvas)
+                    if (!SettingsManager.devPairOptimize) {
+                        if (pairHighlight.isActive) pairHighlight.clear()
+                        return
+                    }
+                    drawPairHighlight(this, canvas, pairHighlight)
+                }
+
                 override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
                     val self = this  // CodeEditor 自身引用，供内层匿名类使用
                     val ic = super.onCreateInputConnection(outAttrs)
@@ -1011,6 +1175,42 @@ fun SoraCodeEditor(
                     }
                 }
                 subscribeEvent(ContentChangeEvent::class.java) { event, _ ->
+                    if (SettingsManager.devPairOptimize) {
+                        // 兜底：个别输入法换行绕过 commitText/按键拦截，直接在文本里插入换行。
+                        // 此时撤销这次换行，把光标放到右括号后，再清掉高亮。
+                        if (event.action == ContentChangeEvent.ACTION_INSERT &&
+                            !pastingText && !isApplyingExternalText &&
+                            event.changedText.any { it == '\n' || it == '\r' } &&
+                            pairHighlight.isActive &&
+                            event.changeStart.line == pairHighlight.leftLine &&
+                            event.changeStart.column in
+                            (pairHighlight.leftColumn + 1)..pairHighlight.rightColumn
+                        ) {
+                            val targetLine = pairHighlight.rightLine
+                            val targetColumn = pairHighlight.rightColumn + 1
+                            val delStart = event.changeStart.index
+                            val delEnd = delStart + event.changedText.length
+                            pairHighlight.clear()
+                            val ed = this
+                            post {
+                                try {
+                                    ed.text.delete(delStart, delEnd)
+                                } catch (_: Exception) {
+                                }
+                                ed.setSelection(targetLine, targetColumn)
+                                ed.invalidate()
+                            }
+                        }
+                        when (event.action) {
+                            ContentChangeEvent.ACTION_INSERT ->
+                                pairHighlight.applyInsert(event.changeStart.line, event.changeStart.column, event.changedText)
+                            ContentChangeEvent.ACTION_DELETE ->
+                                pairHighlight.applyDelete(event.changeStart.line, event.changeStart.column, event.changedText)
+                            else -> pairHighlight.clear()
+                        }
+                        // 输入法整对提交的兜底纠正（不走 commitText 的路径）
+                        maybeCenterJustCommittedPair(event)
+                    }
                     // 程序 setText 触发的事件只刷新按钮状态，不同步 text，避免宿主 isModified 被误标
                     if (!isApplyingExternalText) {
                         // 增量更新 cachedText，避免每次按键 O(n) 全量 toString()
@@ -1082,9 +1282,13 @@ fun SoraCodeEditor(
                     scheduleLineStyleRefresh(event.editor)
                     // 文本变化后重算内联装饰（内部 300ms 防抖，与行样式刷新同节奏）
                     inlineControllerRef.value?.onContentChanged()
+                    // 括号配对优化：维护待填充区域高亮
+                    syncPairHighlightAfterEdit()
                 }
 
                 subscribeEvent(SelectionChangeEvent::class.java) { event, _ ->
+                    // 括号配对优化：光标离开配对区域即清除高亮
+                    syncPairHighlightOnSelection()
                     onCursorChange?.invoke(event.editor.cursor.left)
                     reportViewState(event.editor)
                     val editor = event.editor

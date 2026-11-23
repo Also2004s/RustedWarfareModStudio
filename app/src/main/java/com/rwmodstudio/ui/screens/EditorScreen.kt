@@ -792,7 +792,8 @@ fun EditorScreen(
     var editingSymbolValue by remember { mutableStateOf(TextFieldValue("")) }
     var editingSymbolIndex by remember { mutableIntStateOf(-1) }
     var completionFilter by remember { mutableStateOf<Map<String, Set<String>>>(SettingsManager.loadAllSectionFilters()) }
-    var showCompletionFilter by remember { mutableStateOf(false) }
+    // 补全筛选入口已移到开发者模式：每次进入编辑器重新读取，保证外部改动立即生效
+    LaunchedEffect(Unit) { completionFilter = SettingsManager.loadAllSectionFilters() }
     var autoSave by remember { mutableStateOf(SettingsManager.autoSave) }
     var autoSpace by remember { mutableStateOf(SettingsManager.autoSpace) }
     var showBackConfirm by remember { mutableStateOf(false) }
@@ -1879,7 +1880,6 @@ fun EditorScreen(
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                             PlainMenuItem(icon = Icons.Default.CheckCircle, title = "自动保存", subtitle = if (autoSave) "已开启" else "已关闭", tint = if (autoSave) RustedSecondary else RustedOnBackground, onClick = { autoSave = !autoSave; SettingsManager.autoSave = autoSave })
                             PlainMenuSlider(icon = Icons.Default.FormatSize, title = "字体大小", value = fontSizeState, valueRange = 10f..24f, valueLabel = "${fontSizeState.toInt()}sp", onValueChange = { fontSizeState = roundFontSize(it); SettingsManager.fontSize = fontSizeState })
-                            PlainMenuItem(icon = Icons.Default.FilterList, title = "补全筛选", onClick = { showMore = false; showCompletionFilter = true })
                             HorizontalDivider(color = RustedOnBackground.copy(alpha = 0.08f))
                             PlainMenuItem(icon = Icons.Default.Settings, title = "设置", onClick = {
                                 showMore = false
@@ -2236,13 +2236,6 @@ fun EditorScreen(
                                                 icon = Icons.Default.AccountTree, iconTint = RustedSecondary,
                                                 onLabel = { fabExpanded = false; openInheritance() },
                                                 onIcon = { fabExpanded = false; openInheritance() }
-                                            )
-                                        },
-                                        true to {
-                                            EditorFabMenuRow(
-                                                title = "补全筛选", icon = Icons.Default.FilterList,
-                                                onLabel = { fabExpanded = false; showCompletionFilter = true },
-                                                onIcon = { fabExpanded = false; showCompletionFilter = true }
                                             )
                                         },
                                         true to {
@@ -2999,104 +2992,6 @@ fun EditorScreen(
                     fontSize = 13.sp,
                     color = RustedOnBackground
                 )
-            }
-        }
-    }
-
-    // 补全筛选 - 第一层选节，第二层选分类
-    if (showCompletionFilter) {
-        var selectedSection by remember { mutableStateOf<String?>(null) }
-        // 节从当前文件实际解析出的节名归一化得到；分类只来自自定义补全表（native + user）
-        val allCategories = remember(nativeCustomCompletions, rawUserCompletions) {
-            (nativeCustomCompletions.flatMap { it.category } + rawUserCompletions.flatMap { it.category })
-                .filter { it.isNotBlank() }
-                .distinct()
-                .sorted()
-        }
-        val sections = remember(allSections) {
-            allSections.map { mapSectionName(it.first) }.filter { it.isNotBlank() }.distinct().sorted()
-        }
-
-        if (selectedSection == null) {
-            // 第一层：选节
-            AppDialog(
-                onDismissRequest = { showCompletionFilter = false },
-                title = "补全筛选",
-                actions = {
-                    DialogActionButton("重置默认", color = RustedError) {
-                        val ok = SettingsManager.resetSectionFilters()
-                        completionFilter = SettingsManager.loadAllSectionFilters()
-                        if (!ok) {
-                            Toast.makeText(ctx, "重置分类筛选失败", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    DialogActionButton("确定", color = RustedOnBackground) { showCompletionFilter = false }
-                }
-            ) {
-                Column {
-                    Text("选择节后配置分类", fontSize = 12.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                    Spacer(Modifier.height(8.dp))
-                    if (sections.isEmpty()) {
-                        Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
-                            Text("未检测到节", fontSize = 13.sp, color = RustedOnBackground.copy(alpha = 0.4f))
-                        }
-                    } else {
-                        LazyColumn(Modifier.heightIn(max = 420.dp)) { items(sections) { section ->
-                            val filter = completionFilter[section]
-                            val count = filter?.size ?: 0
-                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { selectedSection = section }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(section, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                                if (filter != null) Text("${count}项已启用", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.5f))
-                                else Text("默认启用", fontSize = 11.sp, color = RustedOnBackground.copy(alpha = 0.3f))
-                                Icon(Icons.Default.ChevronRight, null, Modifier.size(18.dp), tint = RustedOnBackground.copy(alpha = 0.3f))
-                            }
-                        } }
-                    }
-                }
-            }
-        } else {
-            // 第二层：选分类
-            val sectionKey = selectedSection ?: ""
-            val currentFilter = completionFilter[sectionKey]
-            // 首次打开时优先使用 SettingsManager 中的默认配置，否则启用所有可用分类
-            val defaultForSection = SettingsManager.DEFAULT_SECTION_FILTERS[sectionKey]?.filter { it in allCategories }?.toSet()
-            val initialEnabled = currentFilter ?: defaultForSection ?: allCategories.toSet()
-            LaunchedEffect(sectionKey) {
-                if (sectionKey.isNotEmpty() && currentFilter == null) {
-                    val toSave = defaultForSection ?: allCategories.toSet()
-                    completionFilter = completionFilter + (sectionKey to toSave)
-                    SettingsManager.saveSectionFilter(sectionKey, toSave)
-                }
-            }
-            var enabledCats by remember { mutableStateOf(initialEnabled) }
-
-            AppDialog(
-                onDismissRequest = { showCompletionFilter = false },
-                title = "[$sectionKey] 节 - 分类筛选",
-                actions = {
-                    DialogActionButton("确定", color = RustedOnBackground) { selectedSection = null; showCompletionFilter = false }
-                }
-            ) {
-                Column(Modifier.heightIn(max = 400.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { enabledCats = allCategories.toSet(); completionFilter = completionFilter + (sectionKey to enabledCats); SettingsManager.saveSectionFilter(sectionKey, enabledCats) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("全选", fontSize = 11.sp) }
-                        TextButton(onClick = { enabledCats = emptySet(); completionFilter = completionFilter + (sectionKey to enabledCats); SettingsManager.saveSectionFilter(sectionKey, enabledCats) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("取消全选", fontSize = 11.sp) }
-                    }
-                    LazyColumn(Modifier.weight(1f)) { items(allCategories) { cat ->
-                        val isEnabled = cat in enabledCats
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable {
-                            val newSet = enabledCats.toMutableSet()
-                            if (isEnabled) newSet.remove(cat) else newSet.add(cat)
-                            enabledCats = newSet
-                            completionFilter = completionFilter + (sectionKey to newSet)
-                            SettingsManager.saveSectionFilter(sectionKey, newSet)
-                        }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = isEnabled, onCheckedChange = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(cat, fontSize = 14.sp)
-                        }
-                    } }
-                }
             }
         }
     }

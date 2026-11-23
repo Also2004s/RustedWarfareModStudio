@@ -106,15 +106,28 @@ class ValueDedupTest {
     @Test
     fun valueContextFilterKeepsTranslationLibraryUnconditionally() {
         val tlib = item("自身资源", CompletionProvider.CompletionType.KEY).copy(detail = "翻译库", category = listOf("翻译库"))
-        val plain = item("自身资源类型", CompletionProvider.CompletionType.KEY).copy(category = listOf("values"))
+        val plain = item("自身资源类型", CompletionProvider.CompletionType.KEY).copy(category = listOf("values"), formatCategory = "values")
         assertEquals(listOf(tlib, plain), filterValueContextItems(listOf(tlib, plain)), "翻译库项在值上下文无条件保留")
+    }
+
+    @Test
+    fun valueContextFilterDropsKeyFormItems() {
+        // 值位置（含括号内）：空值属性格式的键（如 [action] 的「增加资源」）不能混进来；
+        // 产生单位括号里的 `增加资源=` 由 UnitSpawnCompletionProvider 按 spawnUnits 数据提供，与这条无关。
+        // 值形态（values/特定值）与翻译库照旧保留
+        val keyForm = item("增加资源", CompletionProvider.CompletionType.KEY).copy(category = listOf("行动", "values"), formatCategory = "空值属性")
+        val valueForm = item("增加资源", CompletionProvider.CompletionType.KEY).copy(category = listOf("values"), formatCategory = "values")
+        val kept = filterValueContextItems(listOf(keyForm, valueForm))
+        assertEquals(listOf("增加资源"), kept.map { it.label })
+        assertEquals("values", kept.single().formatCategory, "只保留值形态的那条")
+        assertTrue(filterValueContextItems(listOf(keyForm)).isEmpty(), "键形态在值位置一律剔除")
     }
 
     @Test
     fun fullMergePrefersTranslationLibraryOverValue() {
         val value = item("自身资源", CompletionProvider.CompletionType.VALUE).copy(detail = "LogicBoolean")
         val tlib = item("自身资源", CompletionProvider.CompletionType.KEY).copy(detail = "翻译库", category = listOf("翻译库"))
-        val others = item("自身资源类型", CompletionProvider.CompletionType.KEY).copy(category = listOf("values"))
+        val others = item("自身资源类型", CompletionProvider.CompletionType.KEY).copy(category = listOf("values"), formatCategory = "values")
         // 模拟 finalResults = valueResults + filterValueContextItems(results)
         val valueResults = listOf(value)
         val filtered = filterValueContextItems(listOf(tlib, others))

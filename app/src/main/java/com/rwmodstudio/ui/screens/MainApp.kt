@@ -105,7 +105,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "MainApp"
 
-enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COMPLETION_BLOCKLIST, SECTION_COMPLETION, TRANSLATION_BLOCK, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
+enum class Screen { HOME, BROWSER, EDITOR, AUDIO, CODE_REF, SETTINGS, TRANSLATION, CUSTOM, DEVELOPER, COMPLETION_TYPES, COMPLETION_BLOCKLIST, COMPLETION_FILTER, SECTION_COMPLETION, TRANSLATION_BLOCK, COORD_VISUAL, SIM_ANIM, VERSION_COMPARE, PROJECT_MANAGER, TODO_LIST, MOD_INFO, HIGHLIGHT_RULES, SORT_CUSTOM, RECYCLE_BIN, TEXT_VIEWER }
 
 private val screenSaver: Saver<Screen, String> = Saver(
     save = { it.name },
@@ -908,6 +908,7 @@ fun MainApp() {
                     Screen.DEVELOPER -> "开发者模式"
                     Screen.COMPLETION_TYPES -> "补全类型分类"
                     Screen.COMPLETION_BLOCKLIST -> "补全隐藏列表"
+                    Screen.COMPLETION_FILTER -> "补全筛选"
                     Screen.SECTION_COMPLETION -> "节补全管理"
                     Screen.COORD_VISUAL -> "坐标可视化"
                     Screen.SIM_ANIM -> "仿真动画"
@@ -1740,6 +1741,9 @@ fun MainApp() {
                         onOpenCompletionBlocklist = {
                             pushScreen(Screen.COMPLETION_BLOCKLIST)
                         },
+                        onOpenCompletionFilter = {
+                            pushScreen(Screen.COMPLETION_FILTER)
+                        },
                         onOpenSectionCompletion = {
                             pushScreen(Screen.SECTION_COMPLETION)
                         },
@@ -1757,6 +1761,7 @@ fun MainApp() {
                         }
                     )
                     Screen.HIGHLIGHT_RULES -> HighlightRulesScreen()
+                    Screen.COMPLETION_FILTER -> CompletionFilterScreen()
                     Screen.SORT_CUSTOM -> SortCustomizationScreen()
                     Screen.TRANSLATION_BLOCK -> TranslationBlockScreen(
                         projectRoot = projectRoot,

@@ -1007,6 +1007,14 @@ object SettingsManager {
     var devHsvPicker: Boolean
         get() = settings.getBoolean("dev_hsv_picker", true)
         set(value) = settings.edit().putBoolean("dev_hsv_picker", value).apply()
+    /**
+     * 括号配对优化（默认开启）：输入法一次提交成对括号时把光标放到中间，
+     * 并在配对区域内显示主题色高亮；高亮内按换行改为跳到右括号后。
+     * 关闭后完全走 sora 原生输入路径，不加任何额外处理。
+     */
+    var devPairOptimize: Boolean
+        get() = settings.getBoolean("dev_pair_optimize", true)
+        set(value) = settings.edit().putBoolean("dev_pair_optimize", value).apply()
     /** 继承链查看（编辑器更多菜单，默认开启）。仅控制「查看」入口；继承链缓存预热不受此开关影响，始终执行。 */
     var devInheritanceView: Boolean
         get() = settings.getBoolean("dev_inheritance_view", true)

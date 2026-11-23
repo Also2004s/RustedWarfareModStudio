@@ -41,7 +41,8 @@ fun DeveloperModeScreen(
     onOpenHighlightRules: () -> Unit = {},
     onOpenSortCustomization: () -> Unit = {},
     onOpenTranslationBlock: () -> Unit = {},
-    onOpenSimAnim: () -> Unit = {}
+    onOpenSimAnim: () -> Unit = {},
+    onOpenCompletionFilter: () -> Unit = {}
 ) {
     // ===== 平板横屏：左目录 + 右内容（与设置页同一套做法）=====
     // 分栏只看「平板模式」开关，跟横竖屏无关：开着就左栏+右内容，关掉就是原来的单列
@@ -82,6 +83,7 @@ fun DeveloperModeScreen(
             var valueCompletion by remember { mutableStateOf(SettingsManager.devValueCompletion) }
             var valueCompletionExpanded by rememberSaveable { mutableStateOf(false) }
             var nonValueLimited by remember { mutableStateOf(SettingsManager.nonValueCompletionLimited) }
+            var pairOptimize by remember { mutableStateOf(SettingsManager.devPairOptimize) }
 
             DevSwitchCompact(
                 icon = Icons.Default.Extension,
@@ -157,7 +159,14 @@ fun DeveloperModeScreen(
                 icon = Icons.Default.FilterAlt,
                 title = "非值限制补全",
                 checked = nonValueLimited,
-                onCheckedChange = { nonValueLimited = it; SettingsManager.nonValueCompletionLimited = it },
+                onCheckedChange = { nonValueLimited = it; SettingsManager.nonValueCompletionLimited = it }
+            )
+            DevDivider()
+            DevSwitchCompact(
+                icon = Icons.Default.Code,
+                title = "括号配对优化",
+                checked = pairOptimize,
+                onCheckedChange = { pairOptimize = it; SettingsManager.devPairOptimize = it },
                 isLast = true
             )
         }
@@ -178,6 +187,13 @@ fun DeveloperModeScreen(
                 title = "补全类型分类",
                 subtitle = "按实际补全代码归类各属性，可改分类",
                 onClick = onOpenCompletionTypes
+            )
+            DevDivider()
+            DevActionRow(
+                icon = Icons.Default.FilterList,
+                title = "补全筛选",
+                subtitle = "按节选择补全项分类，决定每个节里能弹出哪些补全",
+                onClick = onOpenCompletionFilter
             )
             DevDivider()
             DevActionRow(
